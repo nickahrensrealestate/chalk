@@ -151,6 +151,21 @@ input,select{font:inherit;color:inherit}
 select.sel{width:100%;min-height:48px;padding:0 40px 0 14px;border-radius:12px;border:1px solid var(--line);background:var(--sur2);-webkit-appearance:none;appearance:none;font-weight:600;font-size:17px;
  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center}
 
+/* muscle map */
+.figs{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:4px 40px 0}
+.fig{width:100%;height:auto;display:block}
+.fig .bd{fill:var(--sur2);stroke:var(--line);stroke-width:1}
+.fig .mm{stroke:var(--line);stroke-width:.8}
+.fig .m0{fill:var(--sur2)}
+.fig .m1{fill:var(--acc);fill-opacity:.35}
+.fig .m2{fill:var(--acc);fill-opacity:.65}
+.fig .m3{fill:var(--acc);fill-opacity:1;stroke:var(--acc)}
+.legend{display:flex;justify-content:center;gap:14px;padding:8px 14px 0;font-size:12px;color:var(--mut);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:12px;height:12px;border-radius:3px;border:1px solid var(--line);display:inline-block}
+.legend .m0{background:var(--sur2)}.legend .m1{background:var(--acc);opacity:.35}.legend .m2{background:var(--acc);opacity:.65}.legend .m3{background:var(--acc)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+
 /* settings */
 .srow{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;border-top:1px solid var(--line)}
 .srow:first-child{border-top:0}
@@ -220,65 +235,65 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added)
    inc: weight jump when you beat the rep range.  rest: seconds.  guess: starting weight shown the first time. */
 const LIB = {
-  squat:{n:"Back Squat",m:"Quads",t:"bb",inc:5,rest:150,guess:135},
-  front_squat:{n:"Front Squat",m:"Quads",t:"bb",inc:5,rest:150,guess:95},
-  hack_squat:{n:"Hack Squat",m:"Quads",t:"mc",inc:10,rest:120,guess:90},
-  leg_press:{n:"Leg Press",m:"Quads",t:"mc",inc:10,rest:120,guess:180},
-  smith_squat:{n:"Smith Machine Squat",m:"Quads",t:"bb",inc:5,rest:120,guess:95},
-  goblet_squat:{n:"Goblet Squat",m:"Quads",t:"db",inc:5,rest:90,guess:40},
-  split_squat:{n:"Bulgarian Split Squat",m:"Quads",t:"db",inc:5,rest:90,guess:25},
-  leg_ext:{n:"Leg Extension",m:"Quads",t:"mc",inc:5,rest:75,guess:70},
-  deadlift:{n:"Deadlift",m:"Hamstrings",t:"bb",inc:10,rest:180,guess:185},
-  trap_dl:{n:"Trap Bar Deadlift",m:"Hamstrings",t:"bb",inc:10,rest:150,guess:185},
-  rdl:{n:"Romanian Deadlift",m:"Hamstrings",t:"bb",inc:5,rest:120,guess:135},
-  db_rdl:{n:"Dumbbell Romanian Deadlift",m:"Hamstrings",t:"db",inc:5,rest:90,guess:45},
-  leg_curl:{n:"Seated Leg Curl",m:"Hamstrings",t:"mc",inc:5,rest:75,guess:80},
-  lying_curl:{n:"Lying Leg Curl",m:"Hamstrings",t:"mc",inc:5,rest:75,guess:70},
-  hip_thrust:{n:"Barbell Hip Thrust",m:"Hamstrings",t:"bb",inc:10,rest:120,guess:135},
-  bench:{n:"Bench Press",m:"Chest",t:"bb",inc:5,rest:150,guess:135},
-  inc_bench:{n:"Incline Bench Press",m:"Chest",t:"bb",inc:5,rest:150,guess:95},
-  db_bench:{n:"Dumbbell Bench Press",m:"Chest",t:"db",inc:5,rest:120,guess:45},
-  inc_db_press:{n:"Incline Dumbbell Press",m:"Chest",t:"db",inc:5,rest:120,guess:40},
-  chest_press:{n:"Chest Press Machine",m:"Chest",t:"mc",inc:10,rest:90,guess:90},
-  cable_fly:{n:"Cable Fly",m:"Chest",t:"cb",inc:5,rest:75,guess:25},
-  pec_deck:{n:"Pec Deck",m:"Chest",t:"mc",inc:5,rest:75,guess:80},
-  dips:{n:"Dips",m:"Chest",t:"bw",inc:5,rest:120,guess:0},
-  pushup:{n:"Push-Up",m:"Chest",t:"bw",inc:5,rest:60,guess:0},
-  cable_row:{n:"Seated Cable Row",m:"Back",t:"cb",inc:10,rest:90,guess:100},
-  lat_pulldown:{n:"Lat Pulldown",m:"Back",t:"cb",inc:10,rest:90,guess:100},
-  pullup:{n:"Pull-Up",m:"Back",t:"bw",inc:5,rest:120,guess:0},
-  assist_pullup:{n:"Assisted Pull-Up",m:"Back",t:"mc",inc:5,rest:90,guess:50},
-  cs_row:{n:"Chest-Supported Row",m:"Back",t:"mc",inc:10,rest:90,guess:90},
-  bb_row:{n:"Barbell Row",m:"Back",t:"bb",inc:5,rest:120,guess:95},
-  db_row:{n:"One-Arm Dumbbell Row",m:"Back",t:"db",inc:5,rest:75,guess:50},
-  tbar_row:{n:"T-Bar Row",m:"Back",t:"mc",inc:10,rest:90,guess:70},
-  sa_pulldown:{n:"Straight-Arm Pulldown",m:"Back",t:"cb",inc:5,rest:60,guess:40},
-  ohp:{n:"Overhead Press",m:"Shoulders",t:"bb",inc:5,rest:120,guess:75},
-  db_ohp:{n:"Dumbbell Shoulder Press",m:"Shoulders",t:"db",inc:5,rest:90,guess:35},
-  mc_ohp:{n:"Machine Shoulder Press",m:"Shoulders",t:"mc",inc:10,rest:90,guess:70},
-  arnold:{n:"Arnold Press",m:"Shoulders",t:"db",inc:5,rest:90,guess:30},
-  lat_raise:{n:"Dumbbell Lateral Raise",m:"Shoulders",t:"db",inc:5,rest:60,guess:15},
-  cable_lat_raise:{n:"Cable Lateral Raise",m:"Shoulders",t:"cb",inc:5,rest:60,guess:10},
-  face_pull:{n:"Face Pull",m:"Shoulders",t:"cb",inc:5,rest:60,guess:40},
-  rear_delt:{n:"Rear Delt Fly Machine",m:"Shoulders",t:"mc",inc:5,rest:60,guess:60},
-  pushdown:{n:"Triceps Pushdown",m:"Triceps",t:"cb",inc:5,rest:60,guess:50},
-  oh_ext:{n:"Overhead Cable Extension",m:"Triceps",t:"cb",inc:5,rest:60,guess:40},
-  skull:{n:"Skull Crusher",m:"Triceps",t:"bb",inc:5,rest:75,guess:50},
-  cg_bench:{n:"Close-Grip Bench Press",m:"Triceps",t:"bb",inc:5,rest:120,guess:95},
-  db_oh_ext:{n:"Dumbbell Overhead Extension",m:"Triceps",t:"db",inc:5,rest:60,guess:40},
-  ez_curl:{n:"EZ-Bar Curl",m:"Biceps",t:"bb",inc:5,rest:60,guess:50},
-  db_curl:{n:"Dumbbell Curl",m:"Biceps",t:"db",inc:5,rest:60,guess:25},
-  hammer:{n:"Hammer Curl",m:"Biceps",t:"db",inc:5,rest:60,guess:25},
-  cable_curl:{n:"Cable Curl",m:"Biceps",t:"cb",inc:5,rest:60,guess:50},
-  preacher:{n:"Preacher Curl Machine",m:"Biceps",t:"mc",inc:5,rest:60,guess:50},
-  inc_curl:{n:"Incline Dumbbell Curl",m:"Biceps",t:"db",inc:5,rest:60,guess:20},
-  cable_crunch:{n:"Cable Crunch",m:"Core",t:"cb",inc:5,rest:60,guess:60},
-  hanging_knee:{n:"Hanging Knee Raise",m:"Core",t:"bw",inc:5,rest:60,guess:0},
-  ab_wheel:{n:"Ab Wheel Rollout",m:"Core",t:"bw",inc:5,rest:60,guess:0},
-  decline_situp:{n:"Decline Sit-Up",m:"Core",t:"bw",inc:5,rest:60,guess:0},
-  mc_crunch:{n:"Machine Crunch",m:"Core",t:"mc",inc:5,rest:60,guess:60},
-  calf_stand:{n:"Standing Calf Raise",m:"Calves",t:"mc",inc:10,rest:60,guess:100},
-  calf_seat:{n:"Seated Calf Raise",m:"Calves",t:"mc",inc:10,rest:60,guess:70},
+  squat:{n:"Back Squat",m:"Quads",t:"bb",inc:5,rest:150,guess:135,k:1.0,s:["Hamstrings","Core"]},
+  front_squat:{n:"Front Squat",m:"Quads",t:"bb",inc:5,rest:150,guess:95,k:0.8,s:["Core"]},
+  hack_squat:{n:"Hack Squat",m:"Quads",t:"mc",inc:10,rest:120,guess:90,k:0.8,s:[]},
+  leg_press:{n:"Leg Press",m:"Quads",t:"mc",inc:10,rest:120,guess:180,k:1.5,s:["Hamstrings"]},
+  smith_squat:{n:"Smith Machine Squat",m:"Quads",t:"bb",inc:5,rest:120,guess:95,k:0.9,s:["Hamstrings"]},
+  goblet_squat:{n:"Goblet Squat",m:"Quads",t:"db",inc:5,rest:90,guess:40,k:0.3,s:["Core"]},
+  split_squat:{n:"Bulgarian Split Squat",m:"Quads",t:"db",inc:5,rest:90,guess:25,k:0.2,s:["Hamstrings"]},
+  leg_ext:{n:"Leg Extension",m:"Quads",t:"mc",inc:5,rest:75,guess:70,k:0.5,s:[]},
+  deadlift:{n:"Deadlift",m:"Hamstrings",t:"bb",inc:10,rest:180,guess:185,k:1.0,s:["Back","Core"]},
+  trap_dl:{n:"Trap Bar Deadlift",m:"Hamstrings",t:"bb",inc:10,rest:150,guess:185,k:1.0,s:["Quads","Back"]},
+  rdl:{n:"Romanian Deadlift",m:"Hamstrings",t:"bb",inc:5,rest:120,guess:135,k:0.75,s:["Back"]},
+  db_rdl:{n:"Dumbbell Romanian Deadlift",m:"Hamstrings",t:"db",inc:5,rest:90,guess:45,k:0.3,s:["Back"]},
+  leg_curl:{n:"Seated Leg Curl",m:"Hamstrings",t:"mc",inc:5,rest:75,guess:80,k:0.4,s:[]},
+  lying_curl:{n:"Lying Leg Curl",m:"Hamstrings",t:"mc",inc:5,rest:75,guess:70,k:0.35,s:[]},
+  hip_thrust:{n:"Barbell Hip Thrust",m:"Hamstrings",t:"bb",inc:10,rest:120,guess:135,k:1.0,s:[]},
+  bench:{n:"Bench Press",m:"Chest",t:"bb",inc:5,rest:150,guess:135,k:1.0,s:["Triceps","Shoulders"]},
+  inc_bench:{n:"Incline Bench Press",m:"Chest",t:"bb",inc:5,rest:150,guess:95,k:0.8,s:["Shoulders","Triceps"]},
+  db_bench:{n:"Dumbbell Bench Press",m:"Chest",t:"db",inc:5,rest:120,guess:45,k:0.38,s:["Triceps","Shoulders"]},
+  inc_db_press:{n:"Incline Dumbbell Press",m:"Chest",t:"db",inc:5,rest:120,guess:40,k:0.33,s:["Shoulders","Triceps"]},
+  chest_press:{n:"Chest Press Machine",m:"Chest",t:"mc",inc:10,rest:90,guess:90,k:0.9,s:["Triceps"]},
+  cable_fly:{n:"Cable Fly",m:"Chest",t:"cb",inc:5,rest:75,guess:25,k:0.25,s:[]},
+  pec_deck:{n:"Pec Deck",m:"Chest",t:"mc",inc:5,rest:75,guess:80,k:0.7,s:[]},
+  dips:{n:"Dips",m:"Chest",t:"bw",inc:5,rest:120,guess:0,k:0,s:["Triceps"]},
+  pushup:{n:"Push-Up",m:"Chest",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Triceps"]},
+  cable_row:{n:"Seated Cable Row",m:"Back",t:"cb",inc:10,rest:90,guess:100,k:1.0,s:["Biceps"]},
+  lat_pulldown:{n:"Lat Pulldown",m:"Back",t:"cb",inc:10,rest:90,guess:100,k:1.0,s:["Biceps"]},
+  pullup:{n:"Pull-Up",m:"Back",t:"bw",inc:5,rest:120,guess:0,k:0,s:["Biceps"]},
+  assist_pullup:{n:"Assisted Pull-Up",m:"Back",t:"mc",inc:5,rest:90,guess:50,k:null,s:["Biceps"]},
+  cs_row:{n:"Chest-Supported Row",m:"Back",t:"mc",inc:10,rest:90,guess:90,k:0.9,s:["Biceps"]},
+  bb_row:{n:"Barbell Row",m:"Back",t:"bb",inc:5,rest:120,guess:95,k:1.0,s:["Biceps","Hamstrings"]},
+  db_row:{n:"One-Arm Dumbbell Row",m:"Back",t:"db",inc:5,rest:75,guess:50,k:0.5,s:["Biceps"]},
+  tbar_row:{n:"T-Bar Row",m:"Back",t:"mc",inc:10,rest:90,guess:70,k:0.8,s:["Biceps"]},
+  sa_pulldown:{n:"Straight-Arm Pulldown",m:"Back",t:"cb",inc:5,rest:60,guess:40,k:0.4,s:[]},
+  ohp:{n:"Overhead Press",m:"Shoulders",t:"bb",inc:5,rest:120,guess:75,k:1.0,s:["Triceps","Core"]},
+  db_ohp:{n:"Dumbbell Shoulder Press",m:"Shoulders",t:"db",inc:5,rest:90,guess:35,k:0.45,s:["Triceps"]},
+  mc_ohp:{n:"Machine Shoulder Press",m:"Shoulders",t:"mc",inc:10,rest:90,guess:70,k:1.0,s:["Triceps"]},
+  arnold:{n:"Arnold Press",m:"Shoulders",t:"db",inc:5,rest:90,guess:30,k:0.4,s:["Triceps"]},
+  lat_raise:{n:"Dumbbell Lateral Raise",m:"Shoulders",t:"db",inc:5,rest:60,guess:15,k:0.2,s:[]},
+  cable_lat_raise:{n:"Cable Lateral Raise",m:"Shoulders",t:"cb",inc:5,rest:60,guess:10,k:0.15,s:[]},
+  face_pull:{n:"Face Pull",m:"Shoulders",t:"cb",inc:5,rest:60,guess:40,k:0.5,s:["Back"]},
+  rear_delt:{n:"Rear Delt Fly Machine",m:"Shoulders",t:"mc",inc:5,rest:60,guess:60,k:0.8,s:["Back"]},
+  pushdown:{n:"Triceps Pushdown",m:"Triceps",t:"cb",inc:5,rest:60,guess:50,k:1.0,s:[]},
+  oh_ext:{n:"Overhead Cable Extension",m:"Triceps",t:"cb",inc:5,rest:60,guess:40,k:0.8,s:[]},
+  skull:{n:"Skull Crusher",m:"Triceps",t:"bb",inc:5,rest:75,guess:50,k:0.9,s:[]},
+  cg_bench:{n:"Close-Grip Bench Press",m:"Triceps",t:"bb",inc:5,rest:120,guess:95,k:2.2,s:["Chest"]},
+  db_oh_ext:{n:"Dumbbell Overhead Extension",m:"Triceps",t:"db",inc:5,rest:60,guess:40,k:1.0,s:[]},
+  ez_curl:{n:"EZ-Bar Curl",m:"Biceps",t:"bb",inc:5,rest:60,guess:50,k:1.0,s:[]},
+  db_curl:{n:"Dumbbell Curl",m:"Biceps",t:"db",inc:5,rest:60,guess:25,k:0.5,s:[]},
+  hammer:{n:"Hammer Curl",m:"Biceps",t:"db",inc:5,rest:60,guess:25,k:0.5,s:[]},
+  cable_curl:{n:"Cable Curl",m:"Biceps",t:"cb",inc:5,rest:60,guess:50,k:1.0,s:[]},
+  preacher:{n:"Preacher Curl Machine",m:"Biceps",t:"mc",inc:5,rest:60,guess:50,k:0.9,s:[]},
+  inc_curl:{n:"Incline Dumbbell Curl",m:"Biceps",t:"db",inc:5,rest:60,guess:20,k:0.4,s:[]},
+  cable_crunch:{n:"Cable Crunch",m:"Core",t:"cb",inc:5,rest:60,guess:60,k:1.0,s:[]},
+  hanging_knee:{n:"Hanging Knee Raise",m:"Core",t:"bw",inc:5,rest:60,guess:0,k:0,s:[]},
+  ab_wheel:{n:"Ab Wheel Rollout",m:"Core",t:"bw",inc:5,rest:60,guess:0,k:0,s:[]},
+  decline_situp:{n:"Decline Sit-Up",m:"Core",t:"bw",inc:5,rest:60,guess:0,k:0,s:[]},
+  mc_crunch:{n:"Machine Crunch",m:"Core",t:"mc",inc:5,rest:60,guess:60,k:1.0,s:[]},
+  calf_stand:{n:"Standing Calf Raise",m:"Calves",t:"mc",inc:10,rest:60,guess:100,k:1.0,s:[]},
+  calf_seat:{n:"Seated Calf Raise",m:"Calves",t:"mc",inc:10,rest:60,guess:70,k:0.7,s:[]},
 };
 const MUSCLES = ["Quads","Hamstrings","Chest","Back","Shoulders","Triceps","Biceps","Core","Calves"];
 const TYPE_LABEL = {bb:"total on bar",db:"each hand",mc:"stack",cb:"stack",bw:"added weight"};
@@ -476,9 +491,101 @@ function viewToday(){
     <div class="bd"><button class="btn primary block" data-a="start" data-wid="${wid}">Start ${esc(W.name)}</button>
     ${last?`<p class="hint">Last workout: ${esc(last.name)} · ${fmtDate(last.start)}</p>`:`<p class="hint">First time on an exercise? Type the weight you use. Chalk takes it from there.</p>`}</div></div>`;
   h+=`<div class="stats"><div class="stat"><div class="v num">${streak}</div><div class="k">This week</div></div><div class="stat"><div class="v num">${S.log.length}</div><div class="k">Total</div></div><div class="stat"><div class="v num">${prCount()}</div><div class="k">PRs</div></div></div>`;
+  h+=muscleMap();
   return h;
 }
-function weekCount(){ const d=new Date(); const day=(d.getDay()+6)%7; const mon=new Date(d.getFullYear(),d.getMonth(),d.getDate()-day).getTime(); return S.log.filter(r=>r.start>=mon).length; }
+function weekStart(){ const d=new Date(); const day=(d.getDay()+6)%7; return new Date(d.getFullYear(),d.getMonth(),d.getDate()-day).getTime(); }
+function weekCount(){ const mon=weekStart(); return S.log.filter(r=>r.start>=mon).length; }
+
+/* ================= MUSCLE MAP =================
+   Sets per muscle group this week. Primary muscle counts 1 per set, secondary counts 0.5. */
+function weekMuscleSets(){
+  const out={}; MUSCLES.forEach(m=>out[m]=0);
+  const add=(id,n)=>{ const L=getEx(id); if(out[L.m]!=null) out[L.m]+=n; (L.s||[]).forEach(m=>{ if(out[m]!=null) out[m]+=n*0.5; }); };
+  const mon=weekStart();
+  S.log.filter(r=>r.start>=mon).forEach(r=>Object.keys(r.sets).forEach(id=>add(id,r.sets[id].length)));
+  if(S.active) S.active.slots.forEach(sl=>{ if(sl.done.length) add(sl.ex,sl.done.length); });
+  return out;
+}
+const heat=n=>n<=0?"m0":n<6?"m1":n<12?"m2":"m3";
+function figureSVG(back,W){
+  const c=m=>`class="mm ${heat(W[m])}" data-m="${m}"`;
+  const body=`<circle class="bd" cx="50" cy="16" r="11"/><rect class="bd" x="45" y="26" width="10" height="9"/>
+    <polygon class="bd" points="30,34 70,34 66,100 34,100"/><polygon class="bd" points="34,100 66,100 64,120 36,120"/>
+    <polygon class="bd" points="30,34 20,38 15,76 26,78"/><polygon class="bd" points="70,34 80,38 85,76 74,78"/>
+    <polygon class="bd" points="15,76 26,78 24,112 13,110"/><polygon class="bd" points="85,76 74,78 76,112 87,110"/>
+    <polygon class="bd" points="36,120 49,120 48,172 36,170"/><polygon class="bd" points="51,120 64,120 64,170 52,172"/>
+    <polygon class="bd" points="36,170 48,172 46,228 37,228"/><polygon class="bd" points="52,172 64,170 63,228 54,228"/>`;
+  let m="";
+  if(!back){
+    m+=`<ellipse ${c("Shoulders")} cx="30" cy="41" rx="9" ry="7"/><ellipse ${c("Shoulders")} cx="70" cy="41" rx="9" ry="7"/>
+      <polygon ${c("Chest")} points="37,39 50,41 50,59 36,57"/><polygon ${c("Chest")} points="50,41 63,39 64,57 50,59"/>
+      <ellipse ${c("Biceps")} cx="22" cy="58" rx="5" ry="13"/><ellipse ${c("Biceps")} cx="78" cy="58" rx="5" ry="13"/>
+      <rect ${c("Core")} x="42" y="61" width="16" height="38" rx="4"/><polygon ${c("Core")} points="35,64 42,64 42,98 37,96"/><polygon ${c("Core")} points="58,64 65,64 63,96 58,98"/>
+      <polygon ${c("Quads")} points="37,122 48,122 47,168 37,166"/><polygon ${c("Quads")} points="52,122 63,122 63,166 53,168"/>
+      <polygon ${c("Calves")} points="39,178 45,178 44,214 40,214"/><polygon ${c("Calves")} points="55,178 61,178 60,214 56,214"/>`;
+  } else {
+    m+=`<ellipse ${c("Shoulders")} cx="30" cy="41" rx="9" ry="7"/><ellipse ${c("Shoulders")} cx="70" cy="41" rx="9" ry="7"/>
+      <polygon ${c("Back")} points="38,35 62,35 50,62"/><polygon ${c("Back")} points="33,44 48,50 46,84 37,90"/><polygon ${c("Back")} points="52,50 67,44 63,90 54,84"/><rect ${c("Back")} x="44" y="84" width="12" height="15" rx="3"/>
+      <ellipse ${c("Triceps")} cx="22" cy="58" rx="5" ry="13"/><ellipse ${c("Triceps")} cx="78" cy="58" rx="5" ry="13"/>
+      <ellipse ${c("Hamstrings")} cx="43" cy="110" rx="8" ry="9"/><ellipse ${c("Hamstrings")} cx="57" cy="110" rx="8" ry="9"/>
+      <polygon ${c("Hamstrings")} points="37,122 48,122 47,168 37,166"/><polygon ${c("Hamstrings")} points="52,122 63,122 63,166 53,168"/>
+      <ellipse ${c("Calves")} cx="42" cy="194" rx="5.5" ry="17"/><ellipse ${c("Calves")} cx="58" cy="194" rx="5.5" ry="17"/>`;
+  }
+  return `<svg class="fig" viewBox="8 0 84 232" role="img" aria-label="${back?"Back":"Front"} view">${body}${m}</svg>`;
+}
+function muscleMap(){
+  const W=weekMuscleSets();
+  const cold=MUSCLES.filter(m=>W[m]<=0), hot=MUSCLES.filter(m=>W[m]>0).sort((a,b)=>W[b]-W[a]);
+  const chips=hot.map(m=>`<span class="tag ${heat(W[m])==="m3"?"acc":""}">${m} ${Math.round(W[m]*2)/2}</span>`).join(" ");
+  return `<div class="card"><div class="hd"><div><div class="up mut">This week</div><h3>Muscle map</h3></div><span class="small mut">sets per muscle</span></div>
+    <div class="figs">${figureSVG(false,W)}${figureSVG(true,W)}</div>
+    <div class="legend"><span><i class="m0"></i>cold</span><span><i class="m1"></i>1–5</span><span><i class="m2"></i>6–11</span><span><i class="m3"></i>12+</span></div>
+    <div class="bd">${hot.length?`<div class="chips">${chips}</div>`:""}
+    <p class="hint">${cold.length===MUSCLES.length?"Nothing logged yet this week.":cold.length?`Cold this week: <b>${cold.join(", ")}</b>`:"Every muscle group hit this week."}</p></div></div>`;
+}
+
+/* ================= MACHINE'S TAKEN (substitutes) =================
+   Same muscle group, weight converted through each exercise's load factor k. Your own logged weight wins over the formula. */
+function convertWeight(fromId,w,toId){
+  const A=getEx(fromId), B=getEx(toId);
+  if(B.t==="bw") return {w:0,how:"bw"};
+  if(A.k==null||B.k==null||!A.k||w==null) return {w:null,how:"unknown"};
+  return {w:roundTo(w/A.k*B.k,B.inc),how:"est"};
+}
+function subsFor(exId, excludeIds, curW){
+  const L=getEx(exId);
+  const ids=Object.keys(LIB).concat(Object.keys(S.custom)).filter(id=>id!==exId && !excludeIds.includes(id) && getEx(id).m===L.m);
+  return ids.map(id=>{
+    const B=getEx(id), E=S.ex[id]; let w=null, how="unknown";
+    if(E&&E.w!=null){ w=E.w; how="yours"; }
+    else if(curW!=null){ const c=convertWeight(exId,curW,id); w=c.w; how=c.how; }
+    else if(B.t==="bw"){ w=0; how="bw"; }
+    const score=(how==="yours"?100:0)+(B.t!==L.t?10:0)+(how==="unknown"?-50:0);
+    return {id,w,how,score};
+  }).sort((a,b)=>b.score-a.score);
+}
+function openTaken(i){
+  const A=S.active, sl=A.slots[i], L=getEx(sl.ex);
+  const inToday=A.slots.map(s=>s.ex);
+  const E=S.ex[sl.ex];
+  const curW = sl.done.length ? sl.done[sl.done.length-1].w : (E&&E.w!=null ? E.w : (sl.draft&&sl.draft.w!=null ? Number(sl.draft.w) : null));
+  const subs=subsFor(sl.ex,inToday,curW);
+  const rows=subs.map(x=>{ const B=getEx(x.id);
+    const wl = x.how==="bw"?"bodyweight":(x.w==null?"set your weight":`${fmtW(x.w)} lb${B.t==="db"?" each":""}`);
+    const tag = x.how==="yours"?`<span class="tag ok">your number</span>`:(x.how==="est"?`<span class="tag">est.</span>`:"");
+    return `<button class="opt" data-a="taken-do" data-i="${i}" data-ex="${x.id}" data-w="${x.w==null?"":x.w}"><span>${esc(B.n)} ${tag}</span><span class="m">${wl}</span></button>`; }).join("");
+  openSheet("Instead of "+L.n,`<p class="hint">Same muscles, weight converted${curW!=null?` from ${fmtW(curW)} lb on ${esc(L.n)}`:""}. ${sl.done.length?"Sets you already logged stay.":"Today only — your program doesn't change."}</p>${rows}`);
+}
+function takenDo(i,id,w){
+  const A=S.active, sl=A.slots[i];
+  const draft={w:w==null?getEx(id).guess:w, r:sl.lo};
+  if(sl.done.length){
+    const left=Math.max(1,sl.sets-sl.done.length); sl.sets=sl.done.length;
+    A.slots.splice(i+1,0,{ex:id,sets:left,lo:sl.lo,hi:sl.hi,done:[],skipped:false,draft});
+  } else { sl.ex=id; sl.done=[]; sl.skipped=false; sl.draft=draft; }
+  save(); closeSheet(); render();
+}
 function prCount(){ return S.log.reduce((n,r)=>n+(r.results||[]).filter(x=>x.pr).length,0); }
 
 function viewWorkout(){
@@ -589,7 +696,8 @@ function exerciseList(action, extra, curId){
 }
 function openSlotMenu(i){
   const sl=S.active.slots[i], L=getEx(sl.ex);
-  openSheet(L.n,`<button class="opt" data-a="swap-menu" data-i="${i}"><span>Swap exercise</span><span class="m">${L.m}</span></button>
+  openSheet(L.n,`<button class="opt" data-a="taken" data-i="${i}"><span><b>Machine's taken</b></span><span class="m">swap now, weight converted</span></button>
+    <button class="opt" data-a="swap-menu" data-i="${i}"><span>Swap exercise</span><span class="m">${L.m}</span></button>
     <button class="opt" data-a="skip" data-i="${i}"><span>Skip today</span></button>
     <button class="opt" data-a="add-slot"><span>Add an exercise to today</span></button>`);
 }
@@ -640,6 +748,8 @@ document.addEventListener("click",e=>{
     case "log": logSet(i); break;
     case "rm-set": removeSet(i,+b.dataset.j); break;
     case "slot-menu": openSlotMenu(i); break;
+    case "taken": openTaken(i); break;
+    case "taken-do": takenDo(i,b.dataset.ex,b.dataset.w===""?null:Number(b.dataset.w)); break;
     case "skip": A.slots[i].skipped=true; save(); closeSheet(); render(); break;
     case "unskip": A.slots[i].skipped=false; save(); render(); break;
     case "swap-menu": openSheet("Swap "+getEx(A.slots[i].ex).n, exerciseList("swap",`data-i="${i}"`,A.slots[i].ex)); break;
