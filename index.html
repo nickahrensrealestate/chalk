@@ -477,14 +477,17 @@ const POOLS={
   deepCore:["pallof","dead_bug","bird_dog","plank","side_plank","hollow_hold","suitcase_carry","ab_wheel","mb_twist"]
 };
 const PRESETS={
-  nick:{name:"Nick",desc:"Weights only. Pull · Push · Legs, abs every other workout. Flip to HIIT-based any time.",mix:{style:"weights",ball:1,balance:0,box:1},goal:"muscle"},
-  kat:{name:"Katerina",desc:"HIIT-based: 35% weights, 65% HIIT. One main lift, then med ball, Bosu and box blocks. Flip to weights only any time.",mix:{style:"hiit",ball:3,balance:3,box:2},goal:"functional"}
+  nick:{name:"Nick",desc:"Weights. Pull · Push · Legs, straight sets, abs every other workout. Flip to Functional or HIIT any time.",mix:{ball:1,balance:0,box:1},goal:"weights"},
+  kat:{name:"Katerina",desc:"Functional, her style. Legs + Glutes · Upper · Full body. Heavy main lift, supersets in rounds, carries, deep core, conditioning. Flip to Weights or HIIT any time.",mix:{ball:3,balance:3,box:2},goal:"functional"}
 };
-const STYLES=[["weights","Weights only","100% lifting. Pull · Push · Legs, abs every other workout."],["mixed","Weights + finisher","65% weights · 35% HIIT. Four lifts, then a 16-minute block."],["hiit","HIIT-based","35% weights · 65% HIIT. One main lift + one accessory, then two HIIT blocks."]];
-const STYLE_LABEL={weights:"Weights only",mixed:"65 / 35",hiit:"HIIT 35 / 65"};
+const MODES=[
+  ["weights","Weights","Muscle gains. Pull · Push · Legs, straight sets, abs every other workout. 100% lifting."],
+  ["functional","Functional","Functional strength — her style. Legs + Glutes · Upper · Full body. Heavy main lift, supersets in rounds, carries, deep core every day, conditioning on full-body day."],
+  ["hiit","HIIT","HIIT focus. 35% weights · 65% HIIT. One main lift + one accessory, then two HIIT blocks with med ball, box and bodyweight."]];
+const MODE_LABEL={weights:"Weights",functional:"Functional",hiit:"HIIT"};
 const MIXROWS=[["ball","Med ball","slams, throws, wall balls"],["balance","Balance","Bosu, single-leg work"],["box","Box / plyo","box jumps, step-ups, hops"]];
 const LVL=["None","Less","Normal","More"];
-const GOAL_LABEL={muscle:"Muscle gains",functional:"Functional strength"};
+const GOAL_LABEL={weights:"Muscle gains",functional:"Functional strength",hiit:"HIIT focus"};
 const pick=(pool,i)=>pool[((i%pool.length)+pool.length)%pool.length];
 function slot(pool,sets,lo,hi,o){ o=o||{}; return Object.assign({t:"lift",pool,off:o.off||0,rot:!o.main,main:!!o.main,sets,lo,hi,ex:o.ex||pool[0]},o); }
 function block(name,mode,work,rest,rounds,pool,n){ return {t:"block",name,mode,work,rest,rounds,rot:true,pool,n,moves:pool.slice(0,n).map(ex=>({ex}))}; }
@@ -500,9 +503,9 @@ function hiitPool(mix,kind){
 }
 function hiitDayItems(mix,cyc){ const used=new Set(); return [block("Power","timer",40,20,4,hiitPool(mix,"power"),4),block("Sweat","timer",40,20,4,hiitPool(mix,"sweat"),4),block("Core","timer",30,15,3,hiitPool(mix,"core"),4)].map(b=>{ b.id=uid(); b.moves=pickMoves(b,cyc||0,used); return b; }); }
 function liftDayItems(){ const mk=(ex,s,lo,hi)=>({t:"lift",id:uid(),ex,sets:s,lo,hi}); return [mk("squat",3,6,10),mk("bench",3,6,10),mk("cable_row",3,8,12),mk("db_ohp",3,8,12),mk("rdl",3,8,12),mk("cable_crunch",3,10,15)]; }
-function buildProgram(goal,mix,blk){
-  const F=goal==="functional"; blk=blk||0; const style=mix.style||"weights";
-  const P={ver:4,gen:true,goal,style,rev:0,order:["PULL","PUSH","LEGS"],absEvery:style==="hiit"?0:2,abs:"ABS",workouts:{}};
+function buildProgram(mode,mix,blk){
+  mode=MODE_LABEL[mode]?mode:"weights"; blk=blk||0; const F=mode==="functional"; const style=mode;
+  const P={ver:5,gen:true,goal:mode,mode,rev:0,order:["PULL","PUSH","LEGS"],absEvery:mode==="weights"?2:0,abs:"ABS",workouts:{}};
   const main=pool=>slot(pool,F?5:4,F?4:6,F?6:10,{main:true,ex:pick(pool,blk)});
   const acc=(pool,off,sets,lo,hi)=>slot(pool,sets||3,lo||(F?6:8),hi||(F?10:12),{off:off||0});
   const iso=(pool,off)=>slot(pool,3,F?8:10,F?12:15,{off:off||0});
@@ -517,16 +520,11 @@ function buildProgram(goal,mix,blk){
     let lower=[main(POOLS.legMainF),SS("Superset A",POOLS.hamF,POOLS.gluteF),SS("Superset B",POOLS.unilateral,POOLS.calfBal,1),core()];
     let upper=[main(POOLS.pushMainF),slot(POOLS.pullMainU,4,5,8,{main:true,ex:pick(POOLS.pullMainU,blk)}),SS("Superset A",POOLS.chest2,POOLS.backH),SS("Superset B",POOLS.delts,POOLS.arms,1),core()];
     let full=[slot(POOLS.hinge,4,5,8,{main:true,ex:pick(POOLS.hinge,blk)}),SS("Superset A",POOLS.fullA,POOLS.fullB),SS("Superset B",POOLS.fullC,POOLS.fullD,1),slot(POOLS.carry,3,30,45),core()];
-    if(style==="mixed"){ lower.push(B("Conditioning",40,20,4,"power")); upper.push(B("Conditioning",40,20,4,"sweat")); full.push(B("Conditioning",40,20,4,mix.balance>0?"balance":"power")); }
-    if(style==="hiit"){
-      lower=[lower[0],lower[1],B("Conditioning",40,20,4,"power"),core(),B("Sweat",30,15,4,"sweat")];
-      upper=[upper[0],upper[2],B("Conditioning",40,20,4,"sweat"),core(),B(balOrCore[0],30,15,4,balOrCore[1])];
-      full=[full[0],full[1],B("Conditioning",40,20,4,"power"),core(),B("Sweat",30,15,4,"sweat")];
-    }
+    /* conditioning lives on the full-body day (her Wednesday), the other two stay strength + deep core */
+    full.push(B("Conditioning",30,15,4,mix.balance>0?"balance":"power"));
     P.workouts.LOWER={name:"Legs + Glutes",sub:"Foundational lower"+tail,focus:["Quads","Hamstrings","Glutes"],items:lower};
     P.workouts.UPPER={name:"Upper body",sub:"Back · Chest · Shoulders"+tail,focus:["Chest","Back","Shoulders"],items:upper};
     P.workouts.FULL={name:"Full body + deep core",sub:"Hinge · circuits · carries"+tail,focus:["Hamstrings","Core"],items:full};
-    if(style!=="weights") P.order.forEach(k=>{ const W=P.workouts[k]; const c=coverage(W.items); W.focus=W.focus.filter(m=>c[m]); });
     return withIds(P);
   }
   let pull,push,legs;
@@ -537,9 +535,6 @@ function buildProgram(goal,mix,blk){
     pull.push(acc(POOLS.backH,2)); push.push(acc(POOLS.chest2,2)); legs.push(acc(POOLS.unilateral,1,3,8,12));
     if(mix.balance>=2) legs.splice(3,0,acc(POOLS.bal,0,2,8,12));
     if(mix.ball>=2) push.push(slot(["mb_slam","mb_chest_pass","mb_rot_throw"],3,8,12));
-  } else if(style==="mixed"){
-    pull=pull.slice(0,4); push=push.slice(0,4); legs=legs.slice(0,4);
-    pull.push(B("Finisher",40,20,4,"sweat")); push.push(B("Finisher",40,20,4,balOrCore[1])); legs.push(B("Finisher",40,20,4,"power"));
   } else {
     pull=pull.slice(0,2); push=push.slice(0,2); legs=legs.slice(0,2);
     pull.push(B("Power",40,20,4,"power"),B("Core",30,15,4,"core"));
@@ -566,7 +561,7 @@ function pickMoves(b,c,used){
   if(b.pools) return b.pools.map(pl=>{ let k=c+(b.off||0), ex=pick(pl,k), tries=0; while(used.has(ex)&&tries<pl.length){ k++; ex=pick(pl,k); tries++; } used.add(ex); return {ex}; });
   if(!b.pool||!b.pool.length) return b.moves||[]; const n=Math.min(b.n||4,b.pool.length), o=(c*2)%b.pool.length; const out=[]; for(let k=0;k<b.pool.length&&out.length<n;k++){ const ex=pick(b.pool,o+k); if(used.has(ex)) continue; used.add(ex); out.push({ex}); } return out.length?out:b.pool.slice(0,n).map(ex=>({ex})); }
 function rotateAll(){ Object.keys(S.program.workouts).forEach(rotateDay); }
-function regen(){ S.mix=S.mix||cp(PRESETS.nick.mix); S.goal=S.goal||{mode:"muscle",setAt:null}; S.cyc=S.cyc||{}; S.mix.style=S.mix.style||"weights"; S.program=buildProgram(S.goal.mode,S.mix,S.block||0); rotateAll(); S.next=S.program.order.includes(S.next)?S.next:S.program.order[0]; S.plan=null; if(S.absNext==null) S.absNext=true; }
+function regen(){ S.mix=S.mix||cp(PRESETS.nick.mix); S.goal=S.goal||{mode:"weights",setAt:null}; S.cyc=S.cyc||{}; S.program=buildProgram(S.goal.mode,S.mix,S.block||0); rotateAll(); S.next=S.program.order.includes(S.next)?S.next:S.program.order[0]; S.plan=null; if(S.absNext==null) S.absNext=true; }
 function goalDaysLeft(){ if(!S.goal||!S.goal.setAt) return 0; return 45-Math.floor((Date.now()-S.goal.setAt)/86400000); }
 function checkinDue(){ return !S.goal||!S.goal.setAt||goalDaysLeft()<=0; }
 function withIds(P){ Object.values(P.workouts).forEach(W=>W.items.forEach(it=>{ if(!it.id) it.id=uid(); })); return P; }
@@ -591,15 +586,18 @@ function upgrade(S){
     regen();
     S.flash="Chalk now builds your program. Every 45 days it asks: muscle gains or functional strength? Dial HIIT, med ball, balance and box up or down. Exercises rotate every session. Your weights and history carried over.";
   }
-  if(S.mix && !S.mix.style){ const pr=PRESETS[S.profile]||PRESETS.nick; S.mix.style=pr.mix.style; delete S.mix.weights; delete S.mix.hiit; }
-  if(S.profile && S.program && S.program.ver===3){ regen(); S.flash="New: choose Weights only, 65 / 35, or HIIT-based (35% weights, 65% HIIT). The toggle sits on Today and in the check-in. Both of you can flip it any time."; }
+  /* older saves: two dials or a separate style → one mode */
+  if(S.mix && (S.mix.weights!=null || S.mix.hiit!=null)){ S.goal=S.goal||{}; S.goal.mode=(!S.mix.weights||(S.mix.hiit>=3&&S.mix.weights<=1))?"hiit":(S.goal.mode==="functional"?"functional":"weights"); delete S.mix.weights; delete S.mix.hiit; }
+  if(S.mix && S.mix.style){ S.goal=S.goal||{}; S.goal.mode=S.mix.style==="hiit"?"hiit":(S.goal.mode==="functional"?"functional":"weights"); delete S.mix.style; }
+  if(S.goal && S.goal.mode==="muscle") S.goal.mode="weights";
+  if(S.profile && S.program && (S.program.ver||0)<5){ regen(); S.flash="Three ways to train, one toggle: Weights, Functional (her style — supersets, carries, deep core) or HIIT. It's on Today and in the 45-day check-in. Weights and history carried over."; }
   if(S.absNext==null) S.absNext=true;
 }
 
 /* ================= STATE ================= */
 const KEY = "chalk.v1";
 const cp = o => JSON.parse(JSON.stringify(o));
-function fresh(){ return {v:1,updatedAt:Date.now(),settings:{restC:120,restA:75,sound:true,wake:true,theme:"system"},program:buildProgram("muscle",PRESETS.nick.mix,0),mix:cp(PRESETS.nick.mix),goal:{mode:"muscle",setAt:null},block:0,cyc:{},ex:{},log:[],next:"PULL",active:null,custom:{},absNext:true,plan:null}; }
+function fresh(){ return {v:1,updatedAt:Date.now(),settings:{restC:120,restA:75,sound:true,wake:true,theme:"system"},program:buildProgram("weights",PRESETS.nick.mix,0),mix:cp(PRESETS.nick.mix),goal:{mode:"weights",setAt:null},block:0,cyc:{},ex:{},log:[],next:"PULL",active:null,custom:{},absNext:true,plan:null}; }
 function load(){ try{ const s=JSON.parse(localStorage.getItem(KEY)); if(s&&s.v===1) return s; }catch(e){} return null; }
 let S = load() || fresh();
 upgrade(S);
@@ -1138,7 +1136,7 @@ function viewToday(){
   const goalTag=S.goal&&S.goal.setAt?`<button class="tag acc" data-a="checkin" style="margin-top:6px">${GOAL_LABEL[S.goal.mode]||"Goal"} · ${Math.max(0,goalDaysLeft())} days left</button>`:"";
   h+=`<div class="card">
     <div class="hd"><div><div class="up mut">Up next</div><h3>${esc(P.name||W.name)}</h3><div class="small mut">${P.kind?(P.kind==="hiit"?"Instead of "+esc(W.name):"Weights instead of "+esc(W.name)):esc(W.sub||"")}${absOn()&&wid!==absId()&&!P.kind?` · ${P.abs?"abs today":"no abs today"}`:""}</div>${goalTag}</div><button class="icon" data-a="pick-workout" aria-label="Choose a different workout">⇄</button></div>
-    <div class="seg" style="display:flex;margin:6px 14px 2px">${STYLES.map(([k])=>`<button data-a="style" data-v="${k}" class="${(S.mix||{}).style===k?"on":""}" style="flex:1;min-width:0;padding:9px 4px;font-size:12px">${STYLE_LABEL[k]}</button>`).join("")}</div>
+    <div class="seg" style="display:flex;margin:6px 14px 2px">${MODES.map(([k])=>`<button data-a="style" data-v="${k}" class="${(S.goal||{}).mode===k?"on":""}" style="flex:1;min-width:0;padding:9px 4px;font-size:13px">${MODE_LABEL[k]}</button>`).join("")}</div>
     ${focus.length?`<div class="figs">${bodySVG(false,cls)}${bodySVG(true,cls)}</div>
     <div class="chips" style="padding:8px 14px 0">${focus.map(m=>`<span class="chip ${cov[m]?"ok":"gap"}">${m}</span>`).join("")}</div>
     ${gaps.length?`<p class="hint" style="padding:0 14px">Not covered today: <b>${gaps.join(", ")}</b>. Add an exercise below.</p>`:""}`:""}
@@ -1270,15 +1268,12 @@ function openPlanMenu(i){
     <button class="opt" data-a="plan-rm" data-i="${i}"><span style="color:var(--warn)">Remove for today</span></button>`);
 }
 function openCheckin(){
-  const g=S.goal&&S.goal.mode||"muscle"; S.mix=S.mix||cp(PRESETS.nick.mix);
+  const g=S.goal&&S.goal.mode||"weights"; S.mix=S.mix||cp(PRESETS.nick.mix);
   const goalBtn=(k,lbl,sub)=>`<button class="opt ${g===k?"cur":""}" data-a="ci-goal" data-v="${k}"><span><b>${lbl}</b><br><span class="small mut">${sub}</span></span><span class="m" style="font-size:20px">${g===k?"✓":""}</span></button>`;
   const rows=MIXROWS.map(([k,l,sub])=>`<div class="srow" style="padding:10px 0"><div><div class="l">${l}</div><div class="s">${sub}</div></div><div class="seg">${LVL.map((n,i)=>`<button data-a="ci-mix" data-k="${k}" data-v="${i}" class="${(S.mix[k]||0)===i?"on":""}" style="min-width:0;padding:8px 8px;font-size:12px">${n}</button>`).join("")}</div></div>`).join("");
   const started=!!(S.goal&&S.goal.setAt);
-  const st=S.mix.style||"weights";
-  const styleBtn=([k,lbl,sub])=>`<button class="opt ${st===k?"cur":""}" data-a="ci-style" data-v="${k}"><span><b>${lbl}</b><br><span class="small mut">${sub}</span></span><span class="m" style="font-size:20px">${st===k?"✓":""}</span></button>`;
-  openSheet("45-day check-in",`<p class="hint">Pick your style and what the next 45 days are for, then say what you want more or less of. Chalk rebuilds your days from that. Your weights and history stay.</p>
-    <div class="opt-grp foc">Style</div>${STYLES.map(styleBtn).join("")}
-    <div class="opt-grp foc">Goal</div>${goalBtn("muscle","Muscle gains","8–12 reps, isolation work, machines welcome")}${goalBtn("functional","Functional strength","heavy compounds, one-leg work, carries, med-ball power, balance")}
+  openSheet("45-day check-in",`<p class="hint">What do you want more of for the next 45 days? Pick one, then say how much med ball, balance and box you want. Chalk rebuilds your days from that. Your weights and history stay.</p>
+    <div class="opt-grp foc">Next 45 days</div>${MODES.map(([k,lbl,sub])=>goalBtn(k,lbl+" · "+GOAL_LABEL[k],sub)).join("")}
     <div class="opt-grp foc">More or less of</div>${rows}
     <button class="btn primary block" data-a="ci-build" style="margin-top:12px">${started?"Start the next 45 days":"Build my program"}</button>
     ${started?`<button class="btn block ghost" data-a="ci-apply" style="margin-top:8px">Rebuild, keep my 45-day clock</button>`:""}`);
@@ -1382,7 +1377,7 @@ function viewSettings(){
     <div class="srow"><div><div class="l">Keep screen on during workouts</div></div>${tog("wake")}</div>
     <div class="srow"><div><div class="l">Look</div></div>${segs("theme",["system","light","dark"])}</div></div>`;
   h+=`<h2 class="sec">Program</h2>`;
-  h+=`<div class="card"><div class="srow"><div><div class="l">${STYLE_LABEL[(S.mix||{}).style]||"Weights only"} · ${GOAL_LABEL[(S.goal||{}).mode]||"Goal"} · ${Math.max(0,goalDaysLeft())} days left</div><div class="s">${MIXROWS.map(([k,l])=>l+": "+LVL[(S.mix||{})[k]||0]).join(" · ")}</div></div><button class="btn" data-a="checkin">Change</button></div>
+  h+=`<div class="card"><div class="srow"><div><div class="l">${MODE_LABEL[(S.goal||{}).mode]||"Weights"} · ${GOAL_LABEL[(S.goal||{}).mode]||""} · ${Math.max(0,goalDaysLeft())} days left</div><div class="s">${MIXROWS.map(([k,l])=>l+": "+LVL[(S.mix||{})[k]||0]).join(" · ")}</div></div><button class="btn" data-a="checkin">Change</button></div>
     <div class="srow"><div><div class="l">Exercises rotate</div><div class="s">Accessories change every session, main lifts every 45 days. Swap "from now on" pins one in place.</div></div><button class="btn" data-a="reset-prog">Rebuild</button></div></div>`;
   const hasAbs=!!S.program.workouts[absId()];
   if(hasAbs) h+=`<div class="card"><div class="srow"><div><div class="l">Abs every other workout</div><div class="s">${absOn()?(S.absNext!==false?"Next workout: abs on":"Next workout: abs off"):"Off"}</div></div><button class="toggle ${absOn()?"on":""}" data-a="abs-tog" role="switch" aria-checked="${absOn()}"><i></i></button></div></div>`;
@@ -1530,8 +1525,7 @@ document.addEventListener("click",e=>{
     case "checkin": openCheckin(); break;
     case "ci-goal": S.goal=S.goal||{}; S.goal.mode=b.dataset.v; openCheckin(); break;
     case "ci-mix": S.mix[b.dataset.k]=+b.dataset.v; openCheckin(); break;
-    case "ci-style": S.mix.style=b.dataset.v; openCheckin(); break;
-    case "style": { if((S.mix||{}).style===b.dataset.v) break; S.mix=S.mix||cp(PRESETS.nick.mix); S.mix.style=b.dataset.v; regen(); bumpProg(); save(); render(); toast(STYLE_LABEL[b.dataset.v]+" — days rebuilt"); break; }
+    case "style": { if((S.goal||{}).mode===b.dataset.v) break; S.goal=S.goal||{mode:"weights",setAt:Date.now()}; S.goal.mode=b.dataset.v; regen(); bumpProg(); save(); render(); toast(MODE_LABEL[b.dataset.v]+" — days rebuilt"); break; }
     case "ci-build": { if(S.goal&&S.goal.setAt) S.block=(S.block||0)+1; S.goal.setAt=Date.now(); regen(); bumpProg(); save(); closeSheet(); tab="today"; render(); toast("Next 45 days built"); break; }
     case "ci-apply": regen(); bumpProg(); save(); closeSheet(); tab="today"; render(); toast("Program rebuilt"); break;
     case "plan-kind": { const wid=nextWorkoutId(), W=S.program.workouts[wid], P=planFor(wid);
