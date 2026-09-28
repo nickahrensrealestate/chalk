@@ -638,11 +638,11 @@ function applyProgress(slot, done){
   if(!real.length) return null;
   const wmax=Math.max(...real.map(s=>s.w));
   const top=real.filter(s=>s.w===wmax), reps=top.map(s=>s.r);
-  const allHi=top.length>=slot.sets && reps.every(r=>r>=slot.hi);
+  const allHi=top.length>=(slot.planned||slot.sets) && reps.every(r=>r>=slot.hi);
   const allLo=reps.every(r=>r>=slot.lo);
   let next=wmax, note="Hold", kind="hold", range=null;
-  if(L.t==="bw" && wmax===0){
-    if(allHi && slot.hi<25){ range={lo:slot.lo+2,hi:slot.hi+2}; note="+2 reps"; kind="up"; }
+  if(NOLOAD(L.t) && wmax===0){
+    if(allHi && slot.hi<25){ range={lo:slot.lo+2,hi:slot.hi+2}; E.range=range; note="+2 reps"; kind="up"; }
     else if(allHi){ note="Add weight next time"; kind="up"; }
     else if(!allLo){ note="Retry"; kind="retry"; }
     E.miss=0;
@@ -650,10 +650,10 @@ function applyProgress(slot, done){
     const big=reps.every(r=>r>=slot.hi+3);
     next=roundTo(wmax+L.inc*(big?2:1),Math.min(L.inc,5)); note="Up"; kind="up"; E.miss=0;
   } else if(allLo){ E.miss=0; }
-  else { E.miss=(E.miss||0)+1; if(E.miss>=2){ next=roundTo(wmax*0.9,Math.min(L.inc,5)); note="Deload"; kind="down"; E.miss=0; } else { note="Retry"; kind="retry"; } }
-  E.w=next;
-  const e1=Math.max(...real.map(s=>e1rm(s.w,s.r)));
-  const pr=wmax>0 && e1>(E.best||0)+0.01 && E.hist.length>0;
+  else { E.miss=(E.miss||0)+1; if(E.miss>=2){ next=Math.max(0,Math.min(roundTo(wmax*0.9,Math.min(L.inc,5)),wmax-Math.min(L.inc,5))); note="Deload"; kind="down"; E.miss=0; } else { note="Retry"; kind="retry"; } }
+  E.w=next; if(wmax>0) delete E.range;
+  const e1=L.u==="s"?0:Math.max(...real.map(s=>e1rm(s.w,s.r)));
+  const pr=wmax>0 && (E.best||0)>0 && e1>E.best+0.01;
   if(wmax>0 && e1>(E.best||0)) E.best=e1;
   E.hist.push({d:Date.now(),w:wmax,r:reps,e1:Math.round(e1)});
   if(E.hist.length>300) E.hist=E.hist.slice(-300);
@@ -901,11 +901,14 @@ function planFor(wid){
   if(!S.plan||S.plan.wid!==wid||S.plan.rev!==rev||!S.plan.items){
     const items=cp(W.items);
     if(wid!==absId() && absDue()) cp(S.program.workouts[absId()].items).forEach(it=>{ it.abs=true; items.push(it); });
+    items.forEach(applyRange);
     S.plan={wid,rev,items,abs:wid!==absId()&&absDue()};
     try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){}
   }
   return S.plan;
 }
+/* a bodyweight exercise whose rep range has grown carries that range with it, whatever slot it lands in */
+function applyRange(it){ if(!it||it.t==="block"||it.fixed) return; const E=S.ex[it.ex]; if(E&&E.range){ it.lo=E.range.lo; it.hi=E.range.hi; } }
 function progItemFor(wid,it){ const W=it.abs?S.program.workouts[absId()]:S.program.workouts[wid]; return W?W.items.find(p=>p.id===it.id):null; }
 /* coverage: which muscles today's exercises hit directly (primary). A secondary hit doesn't count toward the day's focus. */
 function coverage(items){ const c={}; (items||[]).forEach(it=>{ if(it.t==="block") it.moves.forEach(m=>{ c[getEx(m.ex).m]=(c[getEx(m.ex).m]||0)+1; }); else { const L=getEx(it.ex); c[L.m]=(c[L.m]||0)+1; } }); return c; }
@@ -918,6 +921,7 @@ function startWorkout(wid){
   S.active={id:uid(),wid,name:P.name||W.name,kind:P.kind||null,start:Date.now(),items:P.items.map(it=> it.t==="block"
     ? ({...cp(it),moves:it.moves.map(m=>({ex:m.ex,reps:moveR(m.ex,m),w:moveW(m.ex,m)})),done:0,status:"idle",skipped:false})
     : ({...cp(it),done:[],skipped:false,draft:null}))};
+  S.active.items.forEach(applyRange);
   visOpen.clear();
   save(); wakeOn(); render();
 }
@@ -942,7 +946,9 @@ function logSet(i){
   const remaining = sl.sets - sl.done.length;
   save(); render();
   const nx=nextOpenSlot(i);
-  if(remaining>0) startRest(rest, L.n, `Next: set ${sl.done.length+1} of ${sl.sets}`, `${L.n} · ${L.t==="bw"&&w===0?"BW":fmtW(w)+" lb"} × ${sl.lo}–${sl.hi}`);
+  const clock=!!CT;
+  if(clock){ /* block clock is running — leave it on screen */ }
+  else if(remaining>0) startRest(rest, L.n, `Next: set ${sl.done.length+1} of ${sl.sets}`, `${L.n} · ${NOLOAD(L.t)&&w===0?"BW":fmtW(w)+" lb"} × ${sl.lo}–${sl.hi}`);
   else if(nx!=null){ const N=getEx(S.active.items[nx].ex); startRest(rest, L.n, `Next: ${N.n}`, `${L.n} done · ${sl.done.length} sets`); }
 }
 function nextOpenSlot(from){ const s=S.active.items; for(let k=0;k<s.length;k++){ if(k===from||s[k].t==="block") continue; if(!s[k].skipped && s[k].done.length<s[k].sets) return k; } return null; }
@@ -955,7 +961,7 @@ function finishWorkout(){
       const b=it; if(!b.done) return;
       b.moves.forEach(m=>{ const L=getEx(m.ex); const arr=[]; for(let i=0;i<b.done;i++) arr.push(b.mode==="timer"?{w:m.w,r:b.work,sec:true}:{w:m.w,r:m.reps,sec:L.u==="s"});
         sets[m.ex]=(sets[m.ex]||[]).concat(arr); nsets+=arr.length; if(b.mode==="reps"&&L.u!=="s") volume+=m.w*m.reps*b.done;
-        const E=exState(m.ex); E.w=m.w; E.last={w:m.w,r:arr.map(x=>x.r)}; E.hist.push({d:now,w:m.w,r:arr.map(x=>x.r),e1:0}); if(E.hist.length>300) E.hist=E.hist.slice(-300); });
+        const E=exState(m.ex); E.w=m.w; if(b.mode==="reps") E.last={w:m.w,r:arr.map(x=>x.r)}; E.hist.push({d:now,w:m.w,r:arr.map(x=>x.r),e1:0}); if(E.hist.length>300) E.hist=E.hist.slice(-300); });
       const P=progItemFor(A.wid,b);
       const full=b.done>=b.rounds; let note=full?"Done":"Hold", kind="hold", chg=`${b.done}/${b.rounds} rounds`;
       if(P){
@@ -963,24 +969,24 @@ function finishWorkout(){
         if(full){
           note="Up"; kind="up";
           if(b.mode==="timer"){ if(P.rounds<5){P.rounds++; chg=`${P.rounds} rounds`;} else if(P.rest>10){P.rest-=5; chg=`${P.rest}s rest`;} else {P.work=Math.min(60,P.work+5); chg=`${P.work}s work`;} }
-          else { if(P.rounds<4){P.rounds++; chg=`${P.rounds} rounds`;} else { P.rounds=3; P.moves.forEach(m=>{ const L=getEx(m.ex); if(L.t==="db"||L.t==="mb") m.w=roundTo((m.w||0)+L.inc,L.inc); else m.reps=(m.reps||L.r||12)+2; }); chg="heavier · 3 rounds"; } }
+          else { if(P.rounds<4){P.rounds++; chg=`${P.rounds} rounds`;} else { P.rounds=3; P.moves.forEach(m=>{ const L=getEx(m.ex); if(!NOLOAD(L.t)){ m.w=roundTo((m.w||0)+L.inc,L.inc); exState(m.ex).w=m.w; } else { m.reps=(m.reps||L.r||12)+2; exState(m.ex).reps=m.reps; } }); chg="heavier · 3 rounds"; } }
         }
       }
       blocks.push({name:b.name,mode:b.mode,done:b.done,rounds:b.rounds,work:b.work,rest:b.rest,moves:b.moves});
       results.push({ex:null,block:b.name,kind,note,chg,pr:false});
     } else {
       const sl=it; if(!sl.done.length) return;
-      sets[sl.ex]=(sets[sl.ex]||[]).concat(sl.done); sl.done.forEach(x=>{volume+=x.w*x.r; nsets++;});
+      const secs=getEx(sl.ex).u==="s"; const dn=secs?sl.done.map(x=>({...x,sec:true})):sl.done; sets[sl.ex]=(sets[sl.ex]||[]).concat(dn); dn.forEach(x=>{ if(!secs) volume+=x.w*x.r; nsets++; });
       const res=applyProgress(sl,sl.done);
       if(res){
         results.push({ex:sl.ex,...res});
-        if(res.range){ const P=progItemFor(A.wid,sl); if(P){P.lo=res.range.lo;P.hi=res.range.hi;} }
+        if(res.range){ const P=progItemFor(A.wid,sl); if(P&&!P.rot){P.lo=res.range.lo;P.hi=res.range.hi;} }
       }
     }
   });
   if(!nsets){ toast("Nothing logged"); return; }
   const didAbs=A.items.some(it=>it.abs && it.t!=="block" && it.done.length>0);
-  const rec={id:A.id,wid:A.wid,name:A.name,start:A.start,end:now,sets,volume,nsets,blocks,abs:didAbs,results:results.map(r=>({ex:r.ex,block:r.block,from:r.from,to:r.to,kind:r.kind,chg:r.chg,pr:r.pr}))};
+  const rec={id:A.id,wid:A.wid,name:A.name,start:A.start,end:now,sets,volume,nsets,blocks,abs:didAbs,results:results.map(r=>({ex:r.ex,block:r.block,from:r.from,to:r.to,kind:r.kind,chg:r.chg,pr:r.pr,range:r.range||null}))};
   S.log.unshift(rec); if(S.log.length>1000) S.log.length=1000;
   if(absOn()) S.absNext=!didAbs;
   S.cyc=S.cyc||{}; if(A.kind==="hiit"){ S.cyc.HIIT=(S.cyc.HIIT||0)+1; } else { S.cyc[A.wid]=(S.cyc[A.wid]||0)+1; rotateDay(A.wid); }
@@ -1029,7 +1035,7 @@ document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==
 /* ================= CIRCUIT MODE (HIIT + balance) =================
    A workout is blocks. A block runs on the clock (work/rest × rounds) or for reps (rounds × reps). Switch per block, any time before it starts. */
 function moveW(ex,m){ if(m&&m.w!=null) return m.w; const E=S.ex[ex]; if(E&&E.w!=null) return E.w; return getEx(ex).guess; }
-function moveR(ex,m){ if(m&&m.reps!=null) return m.reps; return getEx(ex).r||12; }
+function moveR(ex,m){ if(m&&m.reps!=null) return m.reps; const E=S.ex[ex]; if(E&&E.reps!=null) return E.reps; return getEx(ex).r||12; }
 function newMove(ex){ return {ex,reps:moveR(ex,null),w:moveW(ex,null)}; }
 let CT=null, ctTick=null;
 function fmtClock(ms){ const s=Math.ceil(ms/1000); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
@@ -1126,7 +1132,7 @@ let lastTab=null;
 function elapsed(start){ const m=Math.floor((Date.now()-start)/60000); return m<60?m+" min":Math.floor(m/60)+"h "+(m%60)+"m"; }
 setInterval(()=>{ if(tab==="today"&&S.active) document.getElementById("subtitle").textContent=elapsed(S.active.start); },30000);
 
-function wText(id){ const L=getEx(id), E=S.ex[id]; if(L.t==="band") return "band"; if(E&&E.w!=null) return L.t==="bw"&&E.w===0?"BW":`${fmtW(E.w)} lb${L.t==="db"?" ea":""}`; return L.t==="bw"?"BW":"set weight"; }
+function wText(id){ const L=getEx(id), E=S.ex[id]; if(L.t==="band") return "band"; if(E&&E.w!=null) return NOLOAD(L.t)&&E.w===0?"BW":`${fmtW(E.w)} lb${L.t==="db"?" ea":""}`; return NOLOAD(L.t)?"BW":"set weight"; }
 function planRow(it,i,items){
   const divider = it.abs && (i===0 || !items[i-1].abs) ? `<div class="ex-div">Abs · every other workout</div>` : "";
   if(it.t==="block") return divider+`<div class="ex-row"><div class="ex-main"><div class="n">${esc(it.name)} <span class="tag">${it.mode==="timer"?"clock":"reps"}</span></div><div class="t">${it.moves.map(m=>esc(getEx(m.ex).n)).join(" · ")}</div><div class="t">${blockSummary(it)}</div></div><button class="icon" data-a="plan-menu" data-i="${i}" aria-label="Options">⋯</button></div>`;
@@ -1232,7 +1238,7 @@ function openReplace(c){
   let h=scopeSeg(c.where)+`<p class="hint">Same muscle first, weight converted${curW!=null?` from ${fmtW(curW)} lb`:""}.${c.where==="active"&&it.done&&it.done.length?" Sets you already logged stay.":""}</p>`;
   h+=`<div class="opt-grp foc">${L.m} · same muscle</div>`+(subs.length?subs.map(x=>rowFor(x.id,x.w,x.how)).join(""):`<p class="hint">Nothing else for ${L.m} yet — add a custom one below.</p>`);
   const ids=Object.keys(LIB).concat(Object.keys(S.custom)).filter(id=>id!==exId&&!inDay.includes(id)&&getEx(id).m!==L.m);
-  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp">${m}</div>`+list.map(id=>{ const E2=S.ex[id]; return rowFor(id,E2&&E2.w!=null?E2.w:null,E2&&E2.w!=null?"yours":(getEx(id).t==="bw"?"bw":"unknown")); }).join(""); };
+  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp">${m}</div>`+list.map(id=>{ const E2=S.ex[id]; return rowFor(id,E2&&E2.w!=null?E2.w:null,E2&&E2.w!=null?"yours":(NOLOAD(getEx(id).t)?"bw":"unknown")); }).join(""); };
   const focus=(ctxFocus(c)||[]).filter(m=>m!==L.m);
   if(focus.length) h+=focus.map(grp).join("");
   const rest=MUSCLES.concat(["Other"]).filter(m=>m!==L.m&&!focus.includes(m));
@@ -1251,7 +1257,7 @@ function replaceDo(c,id,w){
     const A=S.active, sl=A.items[c.i];
     const draft={w:w==null?(S.ex[id]&&S.ex[id].w!=null?S.ex[id].w:B.guess):w, r:sl.lo};
     if(sc==="always") persisted=progReplace(A.wid,sl,id);
-    if(sl.done.length){ const left=Math.max(1,sl.sets-sl.done.length); sl.sets=sl.done.length; A.items.splice(c.i+1,0,{t:"lift",id:uid(),ex:id,sets:left,lo:sl.lo,hi:sl.hi,done:[],skipped:false,draft,abs:sl.abs}); }
+    if(sl.done.length){ const left=Math.max(1,sl.sets-sl.done.length); sl.planned=sl.planned||sl.sets; sl.sets=sl.done.length; A.items.splice(c.i+1,0,{t:"lift",id:uid(),ex:id,sets:left,lo:sl.lo,hi:sl.hi,done:[],skipped:false,draft,abs:sl.abs}); }
     else { sl.ex=id; sl.done=[]; sl.skipped=false; sl.draft=draft; }
   } else if(c.where==="plan"){ const it=S.plan.items[c.i]; if(sc==="always") persisted=progReplace(S.plan.wid,it,id); it.ex=id; }
   else { const it=ctxItem(c); it.ex=id; if(c.mi==null){ it.pool=[id]; it.rot=false; } bumpProg(); }
@@ -1266,14 +1272,15 @@ function setsSave(c){
   const g=id=>Math.max(1,Math.round(+document.getElementById(id).value||1));
   const sets=g("ssS"), lo=g("ssL"), hi=Math.max(lo,g("ssH"));
   const sc=c.where==="prog"?"always":scope; const it=ctxItem(c);
-  it.sets=sets; it.lo=lo; it.hi=hi;
+  it.sets=sets; it.lo=lo; it.hi=hi; if(it.draft) it.draft.r=Math.min(hi,Math.max(lo,it.draft.r));
+  if(c.where!=="prog"){ it.fixed=true; const E=S.ex[it.ex]; if(sc==="always"&&E&&E.range) E.range={lo,hi}; }
   if(sc==="always"){ if(c.where==="prog") bumpProg(); else { const P=progItemFor(ctxWid(c),it); if(P){ P.sets=sets; P.lo=lo; P.hi=hi; bumpProg(); keepPlan(); } } }
   save(); closeSheet(); render();
 }
 function openAdd(c){ const inDay=c.where==="prog"&&c.i!=null?[]:ctxList(c).flatMap(x=>x.t==="block"?x.moves.map(v=>v.ex):[x.ex]); openSheet("Add exercise",(c.where==="prog"?"":scopeSeg(c.where))+exerciseList("add-do",ctxAttr(c),null,ctxFocus(c),inDay)); }
 function addDo(c,id){
   const mk=()=>({t:"lift",id:uid(),ex:id,sets:3,lo:isCompound(id)?6:8,hi:isCompound(id)?10:12});
-  if(c.where==="active"){ const A=S.active; const m=mk(); const at=insertBeforeAbs(A.items,{...m,done:[],skipped:false,draft:null}); if(scope==="always"){ insertBeforeAbs(S.program.workouts[A.wid].items,cp(m)); bumpProg(); } save(); closeSheet(); render(); setTimeout(()=>{ const el=document.getElementById("slot"+at); el&&el.scrollIntoView({behavior:"smooth",block:"start"}); },50); }
+  if(c.where==="active"){ const A=S.active; const m=mk(); const at=insertBeforeAbs(A.items,{...m,done:[],skipped:false,draft:null}); const PW=S.program.workouts[A.wid]; if(scope==="always"&&PW){ insertBeforeAbs(PW.items,cp(m)); bumpProg(); } else if(scope==="always") toast("Added for today (this day isn't in your program)"); save(); closeSheet(); render(); setTimeout(()=>{ const el=document.getElementById("slot"+at); el&&el.scrollIntoView({behavior:"smooth",block:"start"}); },50); }
   else if(c.where==="plan"){ const m=mk(); insertBeforeAbs(S.plan.items,m); if(scope==="always"){ S.program.workouts[S.plan.wid].items.push(cp(m)); bumpProg(); keepPlan(); } save(); closeSheet(); render(); }
   else { const W=S.program.workouts[c.wid]; if(c.i!=null) W.items[c.i].moves.push({ex:id}); else W.items.push(mk()); bumpProg(); save(); closeSheet(); render(); }
 }
@@ -1337,7 +1344,7 @@ function viewWorkout(){
     if(it.abs && (i===0||!A.items[i-1].abs)) h+=`<h2 class="sec" style="color:var(--mus)">Abs</h2>`;
     if(it.t==="block"){ h+=blockCard(it,i); return; }
     const sl=it;
-    const L=getEx(sl.ex), E=S.ex[sl.ex]||{}; const first=E.w==null && !sl.done.length;
+    const L=getEx(sl.ex), E=S.ex[sl.ex]||{}; const first=E.w==null && !sl.done.length && !NOLOAD(L.t);
     const complete=sl.done.length>=sl.sets; const d=slotDraft(sl);
     const showVis=(i===cur && !sl.skipped) || visOpen.has(sl.id);
     let warm="";
@@ -1350,7 +1357,7 @@ function viewWorkout(){
       ${warm}
       <div class="bd">
         <div class="dots">${Array.from({length:Math.max(sl.sets,sl.done.length)},(_,j)=>`<i class="${j<sl.done.length?"on":""}"></i>`).join("")}</div>
-        ${sl.done.length?`<div class="sets">${sl.done.map((s,j)=>`<div class="set"><span class="k">SET ${j+1}</span><span class="v num">${L.t==="bw"&&s.w===0?"BW":fmtW(s.w)+"<small>lb</small>"} × ${s.r}<small>${L.u==="s"?"sec":"reps"}</small>${s.r>=sl.hi?` <span class="tag ok">top</span>`:(s.r<sl.lo?` <span class="tag warn">low</span>`:"")}</span><button class="edit" data-a="rm-set" data-i="${i}" data-j="${j}">undo</button></div>`).join("")}</div>`:""}
+        ${sl.done.length?`<div class="sets">${sl.done.map((s,j)=>`<div class="set"><span class="k">SET ${j+1}</span><span class="v num">${NOLOAD(L.t)&&s.w===0?"BW":fmtW(s.w)+"<small>lb</small>"} × ${s.r}<small>${L.u==="s"?"sec":"reps"}</small>${s.r>=sl.hi?` <span class="tag ok">top</span>`:(s.r<sl.lo?` <span class="tag warn">low</span>`:"")}</span><button class="edit" data-a="rm-set" data-i="${i}" data-j="${j}">undo</button></div>`).join("")}</div>`:""}
         ${sl.skipped?`<p class="hint">Skipped today. <button data-a="unskip" data-i="${i}" style="color:var(--acc);font-weight:600">Undo</button></p>`:
         `<div class="entry">
           <div><span class="lbl">${L.t==="db"?"lb each":"lb"}</span><div class="stepper"><button data-a="w-" data-i="${i}" aria-label="Less weight">−</button><input type="number" inputmode="decimal" step="any" data-f="w" data-i="${i}" value="${fmtW(d.w)}"><button data-a="w+" data-i="${i}" aria-label="More weight">+</button></div></div>
@@ -1375,8 +1382,8 @@ function viewHistory(){
     let det="";
     if(open){
       const inBlocks=new Set((r.blocks||[]).flatMap(b=>b.moves.map(m=>m.ex)));
-      const liftRows=Object.keys(r.sets).filter(id=>!inBlocks.has(id)).map(id=>{ const L=getEx(id); const res=(r.results||[]).find(x=>x.ex===id); return `<div class="r"><span>${esc(L.n)}${res&&res.pr?` <span class="tag ok">PR</span>`:""}${res&&res.kind==="up"?` <span class="tag acc">↑ ${fmtW(res.to)}</span>`:""}${res&&res.kind==="down"?` <span class="tag warn">↓ ${fmtW(res.to)}</span>`:""}</span><span class="s">${r.sets[id].map(s=>(L.t==="bw"&&s.w===0?"BW":fmtW(s.w))+"×"+s.r+(s.sec?"s":"")).join("  ")}</span></div>`; }).join("");
-      const blockRows=(r.blocks||[]).map(b=>{ const res=(r.results||[]).find(x=>x.block===b.name); return `<div class="r" style="flex-direction:column;align-items:stretch;gap:4px"><span><b>${esc(b.name)}</b> · ${b.mode==="timer"?`${b.work}/${b.rest}s`:"reps"} · ${b.done} round${b.done===1?"":"s"}${res&&res.kind==="up"?` <span class="tag acc">↑ ${esc(res.chg||"")}</span>`:""}</span><span class="s" style="white-space:normal">${b.moves.map(m=>{ const L=getEx(m.ex); return esc(L.n)+(L.t==="bw"||L.t==="bal"?"":" "+fmtW(m.w)+"lb")+(b.mode==="reps"?" ×"+m.reps:""); }).join(" · ")}</span></div>`; }).join("");
+      const liftRows=Object.keys(r.sets).filter(id=>!inBlocks.has(id)).map(id=>{ const L=getEx(id); const res=(r.results||[]).find(x=>x.ex===id); const fw=v=>NOLOAD(L.t)&&v===0?"BW":fmtW(v); return `<div class="r"><span>${esc(L.n)}${res&&res.pr?` <span class="tag ok">PR</span>`:""}${res&&res.kind==="up"?` <span class="tag acc">↑ ${res.range?`${res.range.lo}–${res.range.hi}`:(res.from===res.to?"add weight":fw(res.to))}</span>`:""}${res&&res.kind==="down"?` <span class="tag warn">↓ ${fw(res.to)}</span>`:""}</span><span class="s">${r.sets[id].map(s=>(NOLOAD(L.t)&&s.w===0?"BW":fmtW(s.w))+"×"+s.r+(s.sec?"s":"")).join("  ")}</span></div>`; }).join("");
+      const blockRows=(r.blocks||[]).map(b=>{ const res=(r.results||[]).find(x=>x.block===b.name); return `<div class="r" style="flex-direction:column;align-items:stretch;gap:4px"><span><b>${esc(b.name)}</b> · ${b.mode==="timer"?`${b.work}/${b.rest}s`:"reps"} · ${b.done} round${b.done===1?"":"s"}${res&&res.kind==="up"?` <span class="tag acc">↑ ${esc(res.chg||"")}</span>`:""}</span><span class="s" style="white-space:normal">${b.moves.map(m=>{ const L=getEx(m.ex); return esc(L.n)+(NOLOAD(L.t)?"":" "+fmtW(m.w)+"lb")+(b.mode==="reps"?" ×"+m.reps:""); }).join(" · ")}</span></div>`; }).join("");
       det=`<div class="hdetail">${liftRows}${blockRows}<button class="btn block ghost danger" style="margin-top:10px;min-height:40px" data-a="del-log" data-id="${r.id}">Delete this workout</button></div>`; }
     return `<button class="hrow" data-a="hist" data-id="${r.id}"><div><div class="d">${esc(r.name)}${r.abs?` <span class="tag">+ abs</span>`:""}</div><div class="small mut">${fmtDate(r.start)} · ${mins} min · ${r.nsets} sets${prs?` · ${prs} PR`:""}</div></div><div class="cond num" style="font-size:20px;font-weight:600">${Math.round(r.volume/100)/10}<span class="small mut" style="font-family:Barlow,sans-serif;font-weight:500">k lb</span></div></button>${det}`;
   }).join("")}</div></div>`;
@@ -1396,7 +1403,7 @@ function viewProgress(){
     <div class="stat"><div class="v num">${E.best?Math.round(E.best)+"<small>lb</small>":"—"}</div><div class="k">Est. 1RM</div></div>
     <div class="stat"><div class="v num">${delta>=0?"+":""}${fmtW(delta)}<small>lb</small></div><div class="k">${H.length} sessions</div></div></div>
     <div class="card"><div class="hd"><h3>Top-set weight</h3><span class="small mut">${TYPE_LABEL[L.t]}</span></div><div class="bd">${chart(H)}</div></div>
-    <div class="card"><div class="hist">${H.slice().reverse().slice(0,12).map(x=>`<div class="hrow" style="min-height:44px"><span class="small">${fmtDate(x.d)}</span><span class="num" style="font-weight:600">${L.t==="bw"&&x.w===0?"BW":fmtW(x.w)+" lb"} × ${x.r.join("/")}</span></div>`).join("")}</div></div>`;
+    <div class="card"><div class="hist">${H.slice().reverse().slice(0,12).map(x=>`<div class="hrow" style="min-height:44px"><span class="small">${fmtDate(x.d)}</span><span class="num" style="font-weight:600">${NOLOAD(L.t)&&x.w===0?"BW":fmtW(x.w)+" lb"} × ${x.r.join("/")}</span></div>`).join("")}</div></div>`;
 }
 function chart(H){
   const pts=H.slice(-24); if(pts.length<2) return `<p class="hint">Two sessions and the line appears.</p>`;
@@ -1431,7 +1438,7 @@ function viewSettings(){
       <div>${W.items.map((it,i)=>{
       const arrows=`<span class="arrows"><button data-a="prog-up" data-wid="${wid}" data-i="${i}" ${i===0?"disabled":""} aria-label="Move up">▲</button><button data-a="prog-down" data-wid="${wid}" data-i="${i}" ${i===n-1?"disabled":""} aria-label="Move down">▼</button></span>`;
       if(it.t==="block"){ const b=it; return `<div class="prog-slot blk"><div><div class="n">${esc(b.name)} <span class="tag">${b.mode==="timer"?`${b.work}/${b.rest}s × ${b.rounds}`:`${b.rounds} rounds`}</span></div><div class="t">${b.moves.map(m=>esc(getEx(m.ex).n)).join(" · ")}</div></div>${arrows}<button data-a="prog-rm" data-wid="${wid}" data-i="${i}">Remove</button></div>
-        ${b.moves.map((m,mi)=>{ const L=getEx(m.ex); return `<div class="prog-slot sub"><div><div class="n">${esc(L.n)}</div><div class="t">${L.m}${L.t==="bw"||L.t==="bal"?"":` · ${fmtW(moveW(m.ex,m))} lb`}${b.mode==="reps"?` · ${moveR(m.ex,m)} ${L.u==="s"?"sec":"reps"}`:""}</div></div><button data-a="prog-swap" data-wid="${wid}" data-i="${i}" data-mi="${mi}">Swap</button><button data-a="prog-rm" data-wid="${wid}" data-i="${i}" data-mi="${mi}">Remove</button></div>`; }).join("")}
+        ${b.moves.map((m,mi)=>{ const L=getEx(m.ex); return `<div class="prog-slot sub"><div><div class="n">${esc(L.n)}</div><div class="t">${L.m}${NOLOAD(L.t)?"":` · ${fmtW(moveW(m.ex,m))} lb`}${b.mode==="reps"?` · ${moveR(m.ex,m)} ${L.u==="s"?"sec":"reps"}`:""}</div></div><button data-a="prog-swap" data-wid="${wid}" data-i="${i}" data-mi="${mi}">Swap</button><button data-a="prog-rm" data-wid="${wid}" data-i="${i}" data-mi="${mi}">Remove</button></div>`; }).join("")}
         <div class="prog-slot sub"><button data-a="prog-add" data-wid="${wid}" data-i="${i}" style="color:var(--acc)">+ Add move to ${esc(b.name)}</button><span></span><span></span></div>`; }
       const L=getEx(it.ex); return `<div class="prog-slot"><div><div class="n">${esc(L.n)}</div><div class="t">${it.sets} × ${it.lo}–${it.hi} · ${L.m}</div></div>${arrows}<button data-a="prog-sets" data-wid="${wid}" data-i="${i}">Sets</button><button data-a="prog-swap" data-wid="${wid}" data-i="${i}">Swap</button><button data-a="prog-rm" data-wid="${wid}" data-i="${i}">Remove</button></div>`; }).join("")}</div>
       <div class="bd entry"><button class="btn block ghost" data-a="prog-add" data-wid="${wid}">+ Exercise</button><button class="btn block ghost" data-a="prog-add-block" data-wid="${wid}">+ HIIT block</button></div></div>`; });
@@ -1458,11 +1465,11 @@ function exerciseList(action, extra, curId, focus, inDay){
 }
 function openSummary(rec,results){
   const rows=results.map(r=>{ if(!r.ex){ const cls=r.kind==="up"?"tag acc":"tag"; return `<div class="row"><span>${esc(r.block)}</span><span class="chg"><span class="${cls}">${r.note}</span> ${esc(r.chg)}</span></div>`; }
-    const L=getEx(r.ex); let chg="", cls="";
-    if(r.kind==="up") { chg=r.range?`${r.range.lo}–${r.range.hi} reps`:`${fmtW(r.from)} → ${fmtW(r.to)}`; cls="tag acc"; }
-    else if(r.kind==="down"){ chg=`${fmtW(r.from)} → ${fmtW(r.to)}`; cls="tag warn"; }
-    else if(r.kind==="retry"){ chg=`${fmtW(r.from)} again`; cls="tag"; }
-    else { chg=`${fmtW(r.from)} again`; cls="tag"; }
+    const L=getEx(r.ex); let chg="", cls=""; const fw=v=>NOLOAD(L.t)&&v===0?"BW":fmtW(v);
+    if(r.kind==="up") { chg=r.range?`${r.range.lo}–${r.range.hi} reps`:(r.from===r.to?"":`${fw(r.from)} → ${fw(r.to)}`); cls="tag acc"; }
+    else if(r.kind==="down"){ chg=`${fw(r.from)} → ${fw(r.to)}`; cls="tag warn"; }
+    else if(r.kind==="retry"){ chg=`${fw(r.from)} again`; cls="tag"; }
+    else { chg=`${fw(r.from)} again`; cls="tag"; }
     return `<div class="row"><span>${esc(L.n)}${r.pr?` <span class="tag ok">PR</span>`:""}</span><span class="chg"><span class="${cls}">${r.note}</span> ${chg}</span></div>`; }).join("");
   openSheet("Next time",`<div class="summary">${rows}</div><p class="hint">${(rec.blocks&&rec.blocks.length)?"Blocks: finish every round and it adds a round, then shortens rest (clock) or raises the weight (reps). ":""}${Object.keys(rec.sets).length&&(!rec.blocks||rec.blocks.length<Object.keys(rec.sets).length)?"Lifts: Up = top of the rep range on every set. Retry = missed the bottom once. Deload = missed twice, weight drops 10%. ":""}${absOn()?(rec.abs?"Abs done — next workout skips them.":"No abs today — they're on next workout."):""}</p><button class="btn primary block" data-a="sheet-close" style="margin-top:8px">Done</button>`);
 }
@@ -1523,7 +1530,7 @@ document.addEventListener("click",e=>{
       if(id==="__create"){ id=createCustom(); if(!id) break; }
       addDo(c,id); break; }
     /* active workout */
-    case "w-": case "w+": { const sl=A.items[i], d=slotDraft(sl), inc=getEx(sl.ex).inc; d.w=Math.max(0,roundTo((Number(d.w)||0)+(a==="w+"?inc:-inc),inc===10?5:inc)); render(); break; }
+    case "w-": case "w+": { const sl=A.items[i], d=slotDraft(sl), inc=getEx(sl.ex).inc; const st=inc===10?5:inc; d.w=Math.max(0,roundTo(Number(d.w)||0,st)+(a==="w+"?inc:-inc)); render(); break; }
     case "r-": case "r+": { const sl=A.items[i], d=slotDraft(sl); d.r=Math.max(0,(Number(d.r)||0)+(a==="r+"?1:-1)); render(); break; }
     case "log": logSet(i); break;
     case "rm-set": removeSet(i,+b.dataset.j); break;
