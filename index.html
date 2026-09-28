@@ -931,9 +931,10 @@ function mountAnims(){
   ANIMS.forEach(a=>a.stop=true); ANIMS=[];
   const els=Array.from(document.querySelectorAll("[data-anim]")).map(el=>{ const L=getEx(el.dataset.anim); return {el,pat:PAT[L.p]||PAT.generic,hiSeg:SEG[L.m]||"torso",view:el.dataset.view==="front"?"front":"side"}; });
   if(!els.length) return;
-  if(REDUCED){ ANIM_T=0.5; els.forEach(e=>{ e.el.innerHTML=animFrame(e.pat,0.5,e.hiSeg,e.view); }); return; }
+  /* the movement IS the instruction, so it never freezes — "Reduce Motion" just gets a slower, gentler rep */
+  const CYC=REDUCED?4200:2600;
   const a={stop:false,t0:ANIM0,last:0}; ANIMS.push(a);
-  const loop=now=>{ if(a.stop) return; const live=els.filter(e=>document.body.contains(e.el)); if(!live.length) return; if(!T&&!document.hidden&&now-a.last>40){ a.last=now; const ph=((now-a.t0)%2600)/2600; const c=0.5-0.5*Math.cos(ph*2*Math.PI); const t=c*c*(3-2*c); ANIM_T=t; live.forEach(e=>{ e.el.innerHTML=animFrame(e.pat,t,e.hiSeg,e.view); }); } requestAnimationFrame(loop); };
+  const loop=now=>{ if(a.stop) return; const live=els.filter(e=>document.body.contains(e.el)); if(!live.length) return; if(!T&&!document.hidden&&now-a.last>40){ a.last=now; const ph=((now-a.t0)%CYC)/CYC; const c=0.5-0.5*Math.cos(ph*2*Math.PI); const t=c*c*(3-2*c); ANIM_T=t; live.forEach(e=>{ e.el.innerHTML=animFrame(e.pat,t,e.hiSeg,e.view); }); } requestAnimationFrame(loop); };
   requestAnimationFrame(loop);
 }
 const rigCols=id=>["side","front"].map(v=>`<div class="rigc"><div class="rig" data-anim="${esc(id)}" data-view="${v}"></div><div class="up mut cap">${v==="side"?"Side":"Front"}</div></div>`).join("");
