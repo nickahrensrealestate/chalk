@@ -918,7 +918,7 @@ function startWorkout(wid){
   S.active={id:uid(),wid,name:P.name||W.name,kind:P.kind||null,start:Date.now(),items:P.items.map(it=> it.t==="block"
     ? ({...cp(it),moves:it.moves.map(m=>({ex:m.ex,reps:moveR(m.ex,m),w:moveW(m.ex,m)})),done:0,status:"idle",skipped:false})
     : ({...cp(it),done:[],skipped:false,draft:null}))};
-  S.plan=null; visOpen.clear();
+  visOpen.clear();
   save(); wakeOn(); render();
 }
 function slotDraft(sl){
@@ -957,7 +957,7 @@ function finishWorkout(){
         sets[m.ex]=(sets[m.ex]||[]).concat(arr); nsets+=arr.length; if(b.mode==="reps"&&L.u!=="s") volume+=m.w*m.reps*b.done;
         const E=exState(m.ex); E.w=m.w; E.last={w:m.w,r:arr.map(x=>x.r)}; E.hist.push({d:now,w:m.w,r:arr.map(x=>x.r),e1:0}); if(E.hist.length>300) E.hist=E.hist.slice(-300); });
       const P=progItemFor(A.wid,b);
-      const full=b.done>=b.rounds; let note="Hold", kind="hold", chg=`${b.done}/${b.rounds} rounds`;
+      const full=b.done>=b.rounds; let note=full?"Done":"Hold", kind="hold", chg=`${b.done}/${b.rounds} rounds`;
       if(P){
         P.mode=b.mode; P.moves=b.moves.map(m=>({ex:m.ex,reps:m.reps,w:m.w})); P.rounds=b.rounds; if(b.mode==="timer"){P.work=b.work;P.rest=b.rest;}
         if(full){
@@ -1221,7 +1221,7 @@ function ctxList(c){ return c.where==="active"?S.active.items:(c.where==="plan"?
 function ctxItem(c){ const it=ctxList(c)[c.i]; return (c.where==="prog"&&c.mi!=null)?it.moves[c.mi]:it; }
 function ctxWid(c){ return c.where==="prog"?c.wid:(c.where==="active"?S.active.wid:S.plan.wid); }
 function ctxFocus(c){ const W=S.program.workouts[ctxWid(c)]; return W&&W.focus?W.focus:null; }
-function scopeSeg(where){ if(where==="prog") return ""; return `<div class="seg scope"><button data-a="scope" data-v="today" class="${scope==="today"?"on":""}">Today only</button><button data-a="scope" data-v="always" class="${scope==="always"?"on":""}">From now on</button></div>`; }
+function scopeSeg(where){ if(where==="prog") return ""; scope="today"; return `<div class="seg scope"><button data-a="scope" data-v="today" class="${scope==="today"?"on":""}">Today only</button><button data-a="scope" data-v="always" class="${scope==="always"?"on":""}">From now on</button></div>`; }
 function openReplace(c){
   const it=ctxItem(c), exId=it.ex, L=getEx(exId), E=S.ex[exId];
   let curW=E&&E.w!=null?E.w:null;
@@ -1240,22 +1240,22 @@ function openReplace(c){
   h+=`<div class="opt-grp">Custom</div><button class="opt" data-a="rep-do" ${ctxAttr(c)} data-ex="__new" data-w=""><span>+ New exercise…</span></button>`;
   openSheet("Replace "+L.n,h);
 }
-function progReplace(wid,it,id){ const P=progItemFor(wid,it); if(P){ P.ex=id; P.pool=[id]; P.rot=false; bumpProg(); keepPlan(); } }
+function progReplace(wid,it,id){ const P=progItemFor(wid,it); if(P){ P.ex=id; P.pool=[id]; P.rot=false; bumpProg(); keepPlan(); } return !!P; }
 function replaceDo(c,id,w){
   if(id==="__new"){ openSheet("New exercise",newExerciseForm("rep-do",ctxAttr(c)+` data-w=""`)); return; }
   if(id==="__create"){ id=createCustom(); if(!id) return; w=null; }
   const B=getEx(id);
   if(w!=null && !(S.ex[id]&&S.ex[id].w!=null)) exState(id).w=w;
-  const sc=c.where==="prog"?"always":scope;
+  const sc=c.where==="prog"?"always":scope; let persisted=true;
   if(c.where==="active"){
     const A=S.active, sl=A.items[c.i];
     const draft={w:w==null?(S.ex[id]&&S.ex[id].w!=null?S.ex[id].w:B.guess):w, r:sl.lo};
-    if(sc==="always") progReplace(A.wid,sl,id);
+    if(sc==="always") persisted=progReplace(A.wid,sl,id);
     if(sl.done.length){ const left=Math.max(1,sl.sets-sl.done.length); sl.sets=sl.done.length; A.items.splice(c.i+1,0,{t:"lift",id:uid(),ex:id,sets:left,lo:sl.lo,hi:sl.hi,done:[],skipped:false,draft,abs:sl.abs}); }
     else { sl.ex=id; sl.done=[]; sl.skipped=false; sl.draft=draft; }
-  } else if(c.where==="plan"){ const it=S.plan.items[c.i]; if(sc==="always") progReplace(S.plan.wid,it,id); it.ex=id; }
+  } else if(c.where==="plan"){ const it=S.plan.items[c.i]; if(sc==="always") persisted=progReplace(S.plan.wid,it,id); it.ex=id; }
   else { const it=ctxItem(c); it.ex=id; if(c.mi==null){ it.pool=[id]; it.rot=false; } bumpProg(); }
-  save(); closeSheet(); render(); toast(sc==="always"?"Replaced from now on":"Replaced for today");
+  save(); closeSheet(); render(); toast(sc==="always"?(persisted?"Replaced from now on":"Replaced for today (this one isn't in your program)"):"Replaced for today");
 }
 function openSets(c){
   const it=ctxItem(c), L=getEx(it.ex);
@@ -1270,13 +1270,15 @@ function setsSave(c){
   if(sc==="always"){ if(c.where==="prog") bumpProg(); else { const P=progItemFor(ctxWid(c),it); if(P){ P.sets=sets; P.lo=lo; P.hi=hi; bumpProg(); keepPlan(); } } }
   save(); closeSheet(); render();
 }
-function openAdd(c){ openSheet("Add exercise",(c.where==="prog"?"":scopeSeg(c.where))+exerciseList("add-do",ctxAttr(c),null,ctxFocus(c))); }
+function openAdd(c){ const inDay=c.where==="prog"&&c.i!=null?[]:ctxList(c).flatMap(x=>x.t==="block"?x.moves.map(v=>v.ex):[x.ex]); openSheet("Add exercise",(c.where==="prog"?"":scopeSeg(c.where))+exerciseList("add-do",ctxAttr(c),null,ctxFocus(c),inDay)); }
 function addDo(c,id){
   const mk=()=>({t:"lift",id:uid(),ex:id,sets:3,lo:isCompound(id)?6:8,hi:isCompound(id)?10:12});
-  if(c.where==="active"){ const A=S.active; const m=mk(); A.items.push({...m,done:[],skipped:false,draft:null}); if(scope==="always"){ S.program.workouts[A.wid].items.push(cp(m)); bumpProg(); } save(); closeSheet(); render(); setTimeout(()=>{ const el=document.getElementById("slot"+(A.items.length-1)); el&&el.scrollIntoView({behavior:"smooth",block:"start"}); },50); }
-  else if(c.where==="plan"){ const m=mk(); S.plan.items.push(m); if(scope==="always"){ S.program.workouts[S.plan.wid].items.push(cp(m)); bumpProg(); keepPlan(); } save(); closeSheet(); render(); }
+  if(c.where==="active"){ const A=S.active; const m=mk(); const at=insertBeforeAbs(A.items,{...m,done:[],skipped:false,draft:null}); if(scope==="always"){ insertBeforeAbs(S.program.workouts[A.wid].items,cp(m)); bumpProg(); } save(); closeSheet(); render(); setTimeout(()=>{ const el=document.getElementById("slot"+at); el&&el.scrollIntoView({behavior:"smooth",block:"start"}); },50); }
+  else if(c.where==="plan"){ const m=mk(); insertBeforeAbs(S.plan.items,m); if(scope==="always"){ S.program.workouts[S.plan.wid].items.push(cp(m)); bumpProg(); keepPlan(); } save(); closeSheet(); render(); }
   else { const W=S.program.workouts[c.wid]; if(c.i!=null) W.items[c.i].moves.push({ex:id}); else W.items.push(mk()); bumpProg(); save(); closeSheet(); render(); }
 }
+/* keep the Abs section last: new items go in front of it */
+function insertBeforeAbs(list,item){ const ai=list.findIndex(x=>x.abs); list.splice(ai<0?list.length:ai,0,item); return ai<0?list.length-1:ai; }
 /* one exercise for a muscle group — your own weights first, rotates over time */
 function pickForMuscle(m,exclude){
   let c=Object.keys(LIB).filter(id=>LIB[id].m===m&&!exclude.includes(id));
@@ -1290,11 +1292,12 @@ function toggleMuscle(m){
   if(cov[m]){
     const keep=P.items.filter(it=>it.t==="block"||getEx(it.ex).m!==m);
     if(!keep.length){ toast("That's the whole workout"); return; }
+    if(keep.length===P.items.length){ toast(m+" is inside a HIIT block — use ⋯ on the block"); return; }
     P.items=keep; if(!P.off.includes(m)) P.off.push(m); if(!P.items.some(x=>x.abs)) P.abs=false;
     toast(m+" off for today");
   } else {
-    const id=pickForMuscle(m,P.items.filter(x=>x.ex).map(x=>x.ex)); if(!id){ toast("No "+m+" exercise yet — add a custom one"); return; }
-    P.items.push({t:"lift",id:uid(),ex:id,sets:3,lo:isCompound(id)?6:8,hi:isCompound(id)?10:12}); P.off=P.off.filter(x=>x!==m);
+    const id=pickForMuscle(m,P.items.flatMap(x=>x.t==="block"?x.moves.map(v=>v.ex):[x.ex])); if(!id){ toast("No "+m+" exercise yet — add a custom one"); return; }
+    insertBeforeAbs(P.items,{t:"lift",id:uid(),ex:id,sets:3,lo:isCompound(id)?6:8,hi:isCompound(id)?10:12}); P.off=P.off.filter(x=>x!==m);
     toast("Added "+getEx(id).n);
   }
   save(); render();
@@ -1444,9 +1447,9 @@ function viewSettings(){
 /* ================= SHEETS ================= */
 function openSheet(title,body){ document.getElementById("sheetT").textContent=title; document.getElementById("sheetB").innerHTML=body; document.getElementById("sheetBg").classList.add("on"); document.getElementById("sheetB").scrollTop=0; requestAnimationFrame(()=>document.getElementById("sheet").classList.add("on")); }
 function closeSheet(){ document.getElementById("sheet").classList.remove("on"); document.getElementById("sheetBg").classList.remove("on"); }
-function exerciseList(action, extra, curId, focus){
-  const ids=Object.keys(LIB).concat(Object.keys(S.custom));
-  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp ${focus&&focus.includes(m)?"foc":""}">${m}</div>`+list.map(id=>{ const L=getEx(id), E=S.ex[id]; return `<button class="opt ${id===curId?"cur":""}" data-a="${action}" data-ex="${id}" ${extra}><span>${esc(L.n)}</span><span class="m">${E&&E.w!=null?fmtW(E.w)+" lb":TYPE_LABEL[L.t]}</span></button>`; }).join(""); };
+function exerciseList(action, extra, curId, focus, inDay){
+  const ids=Object.keys(LIB).concat(Object.keys(S.custom)); const have=new Set(inDay||[]);
+  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp ${focus&&focus.includes(m)?"foc":""}">${m}</div>`+list.map(id=>{ const L=getEx(id), E=S.ex[id]; return `<button class="opt ${id===curId?"cur":""}" data-a="${action}" data-ex="${id}" ${extra}><span>${esc(L.n)}${have.has(id)?` <span class="tag">in today</span>`:""}</span><span class="m">${E&&E.w!=null?fmtW(E.w)+" lb":TYPE_LABEL[L.t]}</span></button>`; }).join(""); };
   const all=MUSCLES.concat(["Other"]); let h="";
   if(focus&&focus.length){ h+=all.filter(m=>focus.includes(m)).map(grp).join(""); const rest=all.filter(m=>!focus.includes(m)); h+=`<button class="opt" data-a="more"><span>All other muscle groups</span><span class="m">show</span></button><div hidden>${rest.map(grp).join("")}</div>`; }
   else h+=all.map(grp).join("");
@@ -1508,10 +1511,10 @@ document.addEventListener("click",e=>{
     case "plan-rep": openReplace({where:"plan",i}); break;
     case "plan-sets": openSets({where:"plan",i}); break;
     case "plan-up": case "plan-down": { const P=S.plan; const j=a==="plan-up"?i-1:i+1; if(j<0||j>=P.items.length) break; [P.items[i],P.items[j]]=[P.items[j],P.items[i]]; save(); closeSheet(); render(); break; }
-    case "plan-rm": { const P=S.plan; if(P.items.length>1){ const it=P.items.splice(i,1)[0]; if(it.abs && !P.items.some(x=>x.abs)) P.abs=false; } save(); closeSheet(); render(); break; }
-    case "plan-abs": { const P=S.plan; if(P.abs){ P.items=P.items.filter(x=>!x.abs); P.abs=false; } else { cp(S.program.workouts[absId()].items).forEach(it=>{ it.abs=true; P.items.push(it); }); P.abs=true; } save(); render(); break; }
+    case "plan-rm": { const P=S.plan; if(P.items.length>1){ const it=P.items.splice(i,1)[0]; if(it.abs && !P.items.some(x=>x.abs)) P.abs=false; } else toast("That's the whole workout"); save(); closeSheet(); render(); break; }
+    case "plan-abs": { const P=S.plan; if(P.abs){ if(P.items.every(x=>x.abs)){ toast("That's the whole workout"); break; } P.items=P.items.filter(x=>!x.abs); P.abs=false; } else { const have=new Set(P.items.filter(x=>x.ex).map(x=>x.ex)); cp(S.program.workouts[absId()].items).forEach(it=>{ if(have.has(it.ex)) return; it.abs=true; P.items.push(it); }); P.abs=true; } save(); render(); break; }
     case "plan-add": openAdd({where:"plan"}); break;
-    case "plan-add-block": { S.plan.items.push(defaultBlock()); save(); render(); toast("Block added for today — edit it once you start"); break; }
+    case "plan-add-block": { insertBeforeAbs(S.plan.items,defaultBlock()); save(); render(); toast("Block added for today — edit it once you start"); break; }
     case "rep-do": replaceDo(ctxOf(b),b.dataset.ex,b.dataset.w===""||b.dataset.w==null?null:Number(b.dataset.w)); break;
     case "ss": { const inp=document.getElementById(b.dataset.id); inp.value=Math.max(1,(Math.round(+inp.value)||0)+(+b.dataset.d)); break; }
     case "ss-save": setsSave(ctxOf(b)); break;
@@ -1602,7 +1605,7 @@ document.addEventListener("click",e=>{
       if(id==="__new"){ openSheet("New exercise",newExerciseForm("badd-do",`data-bi="${bi}"`)); break; }
       if(id==="__create"){ id=createCustom(); if(!id) break; }
       A.items[bi].moves.push(newMove(id)); save(); closeSheet(); render(); break; }
-    case "badd-block": { const d=defaultBlock(); A.items.push({...d,moves:d.moves.map(m=>newMove(m.ex)),done:0,status:"idle",skipped:false}); save(); render(); setTimeout(()=>{ const el=document.getElementById("blk"+(A.items.length-1)); el&&el.scrollIntoView({behavior:"smooth",block:"start"}); },50); break; }
+    case "badd-block": { const d=defaultBlock(); const at=insertBeforeAbs(A.items,{...d,moves:d.moves.map(m=>newMove(m.ex)),done:0,status:"idle",skipped:false}); save(); render(); setTimeout(()=>{ const el=document.getElementById("blk"+at); el&&el.scrollIntoView({behavior:"smooth",block:"start"}); },50); break; }
     case "wipe": openSheet("Erase everything?",`<p class="hint">History, weights, program — all gone from this phone. Copy a backup first.</p><button class="btn block danger" data-a="wipe-do" style="margin-top:8px">Erase</button>`); break;
     case "wipe-do": S=fresh(); stopRest(); save(); applyTheme(); closeSheet(); render(); break;
   }
