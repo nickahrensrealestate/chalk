@@ -430,9 +430,17 @@ const LIB = {
   pallof:{n:"Pallof Press",m:"Core",t:"cb",inc:5,rest:45,guess:30,k:0.3,s:["Shoulders"],r:10,ea:true,p:"pallof"},
   plank:{n:"Plank",m:"Core",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Shoulders"],r:40,u:"s",p:"plank"},
   jump_rope:{n:"Jump Rope",m:"Calves",t:"bw",inc:5,rest:30,guess:0,k:0,s:["Shoulders"],r:45,u:"s",p:"rope"},
+  /* kettlebell · bands · deep core (functional split) */
+  kb_swing:{n:"Kettlebell Swing",m:"Hamstrings",t:"kb",inc:5,rest:60,guess:35,k:null,s:["Glutes","Core"],r:15,p:"kbswing"},
+  kb_goblet:{n:"Kettlebell Goblet Squat",m:"Quads",t:"kb",inc:5,rest:75,guess:35,k:null,s:["Glutes","Core"],r:12,p:"kbgoblet"},
+  hollow_hold:{n:"Hollow Hold",m:"Core",t:"bw",inc:5,rest:45,guess:0,k:0,s:[],r:30,u:"s",p:"hollow"},
+  band_pull_apart:{n:"Band Pull-Apart",m:"Rear Delts",t:"band",inc:5,rest:45,guess:0,k:null,s:["Traps"],r:15,p:"pullapart"},
+  band_walk:{n:"Lateral Band Walk",m:"Glutes",t:"band",inc:5,rest:45,guess:0,k:null,s:[],r:12,ea:true,p:"bandwalk"},
+  glute_bridge:{n:"Glute Bridge",m:"Glutes",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Hamstrings","Core"],r:15,p:"bridge"},
 };
 const MUSCLES = ["Chest","Shoulders","Triceps","Back","Rear Delts","Traps","Biceps","Forearms","Quads","Hamstrings","Glutes","Calves","Core"];
-const TYPE_LABEL = {bb:"total on bar",db:"each hand",mc:"stack",cb:"stack",bw:"added weight",mb:"med ball",bal:"balance"};
+const TYPE_LABEL = {bb:"total on bar",db:"each hand",mc:"stack",cb:"stack",bw:"added weight",mb:"med ball",bal:"balance",kb:"kettlebell",band:"band"};
+const NOLOAD=t=>t==="bw"||t==="bal"||t==="band";
 
 /* ================= PROGRAM BUILDER =================
    Every 45 days you pick a goal. muscle = size (8–12 reps, isolation, machines welcome). functional = strength you use
@@ -458,13 +466,23 @@ const POOLS={
   bw:["burpee","jump_squat","mtn_climber","high_knees","skater","pushup","plank_tap","bicycle","bear_crawl","jumping_jack","jump_rope"],
   bal:["bosu_squat","bosu_sl_stand","sl_reach","bosu_pushup","sl_rdl","curtsy","lat_lunge"],
   dbHiit:["db_thruster","db_swing","db_snatch","renegade_row","db_floor_press","db_pushpress","goblet_squat","db_lunge_walk"],
-  coreHiit:["dead_bug","bird_dog","side_plank","plank","bicycle","mtn_climber","pallof"]
+  coreHiit:["dead_bug","bird_dog","side_plank","plank","bicycle","mtn_climber","pallof"],
+  /* functional split (Legs+Glutes · Upper · Full body + deep core) */
+  hinge:["deadlift","trap_dl","kb_swing","rdl"], pullMainU:["bb_row","pullup","cs_row","tbar_row"],
+  hamF:["rdl","db_rdl","kb_swing","leg_curl","sl_rdl"], gluteF:["hip_thrust","glute_bridge","band_walk","cable_kickback","hip_abd"],
+  calfBal:["calf_stand","bosu_sl_stand","calf_seat","sl_reach"],
+  delts:["lat_raise","face_pull","band_pull_apart","db_rear_fly","cable_lat_raise"], arms:["pushdown","db_curl","hammer","oh_ext","ez_curl","skull"],
+  fullA:["goblet_squat","kb_goblet","split_squat","step_up","db_thruster"], fullB:["pushup","db_bench","db_floor_press","db_ohp","dips"],
+  fullC:["db_row","renegade_row","cable_row","lat_pulldown"], fullD:["db_lunge_walk","step_up","lat_lunge","curtsy","box_jump"],
+  deepCore:["pallof","dead_bug","bird_dog","plank","side_plank","hollow_hold","suitcase_carry","ab_wheel","mb_twist"]
 };
 const PRESETS={
-  nick:{name:"Nick",desc:"Pull · Push · Legs. Muscle first. Abs every other workout, a short finisher on leg day.",mix:{weights:3,hiit:1,ball:1,balance:0,box:1},goal:"muscle"},
-  kat:{name:"Katerina",desc:"HIIT + balance. Dumbbells, med balls, Bosu, box. Timed rounds and rep circuits — switch any block mid-workout.",mix:{weights:1,hiit:3,ball:3,balance:3,box:2},goal:"functional"}
+  nick:{name:"Nick",desc:"Weights only. Pull · Push · Legs, abs every other workout. Flip to HIIT-based any time.",mix:{style:"weights",ball:1,balance:0,box:1},goal:"muscle"},
+  kat:{name:"Katerina",desc:"HIIT-based: 35% weights, 65% HIIT. One main lift, then med ball, Bosu and box blocks. Flip to weights only any time.",mix:{style:"hiit",ball:3,balance:3,box:2},goal:"functional"}
 };
-const MIXROWS=[["weights","Weights","barbells, dumbbells, machines"],["hiit","HIIT","timed rounds, circuits"],["ball","Med ball","slams, throws, wall balls"],["balance","Balance","Bosu, single-leg work"],["box","Box / plyo","box jumps, step-ups, hops"]];
+const STYLES=[["weights","Weights only","100% lifting. Pull · Push · Legs, abs every other workout."],["mixed","Weights + finisher","65% weights · 35% HIIT. Four lifts, then a 16-minute block."],["hiit","HIIT-based","35% weights · 65% HIIT. One main lift + one accessory, then two HIIT blocks."]];
+const STYLE_LABEL={weights:"Weights only",mixed:"65 / 35",hiit:"HIIT 35 / 65"};
+const MIXROWS=[["ball","Med ball","slams, throws, wall balls"],["balance","Balance","Bosu, single-leg work"],["box","Box / plyo","box jumps, step-ups, hops"]];
 const LVL=["None","Less","Normal","More"];
 const GOAL_LABEL={muscle:"Muscle gains",functional:"Functional strength"};
 const pick=(pool,i)=>pool[((i%pool.length)+pool.length)%pool.length];
@@ -478,46 +496,62 @@ function hiitPool(mix,kind){
   if(kind==="sweat") return mixPools(POOLS.bw,w(mix.box,POOLS.box),w(mix.ball,POOLS.ball.slice(0,3)));
   if(kind==="core") return mixPools(POOLS.coreHiit,w(mix.ball,["mb_twist","mb_vup","mb_oh_slam"]));
   if(kind==="balance") return mix.balance>0?mixPools(w(mix.balance,POOLS.bal),POOLS.unilateral.slice(0,2)):POOLS.unilateral;
-  return mix.weights>0?mixPools(POOLS.dbHiit,w(mix.ball,POOLS.ball.slice(0,2))):mixPools(POOLS.bw,w(mix.ball,POOLS.ball),w(mix.box,POOLS.box));
+  return mixPools(POOLS.dbHiit,w(mix.ball,POOLS.ball.slice(0,2)));
 }
 function hiitDayItems(mix,cyc){ const used=new Set(); return [block("Power","timer",40,20,4,hiitPool(mix,"power"),4),block("Sweat","timer",40,20,4,hiitPool(mix,"sweat"),4),block("Core","timer",30,15,3,hiitPool(mix,"core"),4)].map(b=>{ b.id=uid(); b.moves=pickMoves(b,cyc||0,used); return b; }); }
 function liftDayItems(){ const mk=(ex,s,lo,hi)=>({t:"lift",id:uid(),ex,sets:s,lo,hi}); return [mk("squat",3,6,10),mk("bench",3,6,10),mk("cable_row",3,8,12),mk("db_ohp",3,8,12),mk("rdl",3,8,12),mk("cable_crunch",3,10,15)]; }
 function buildProgram(goal,mix,blk){
-  const F=goal==="functional"; blk=blk||0;
-  const pureHiit = !mix.weights || (mix.hiit>=3 && mix.weights<=1);
-  const P={ver:3,gen:true,goal,rev:0,order:[],workouts:{}};
-  if(pureHiit){
-    P.order=["H1","H2","H3"];
-    P.workouts.H1={name:"Day 1 · Burn",sub:"Power · Sweat · Core",items:[block("Power","timer",40,20,4,hiitPool(mix,"power"),4),block("Sweat","timer",40,20,4,hiitPool(mix,"sweat"),4),block("Core","timer",30,15,3,hiitPool(mix,"core"),4)]};
-    P.workouts.H2={name:"Day 2 · Build",sub:"Strength circuit · Balance",items:[block("Strength circuit","reps",40,20,3,hiitPool(mix,"strength"),6),block("Balance","reps",40,20,2,hiitPool(mix,"balance"),4),block("Finisher","timer",30,15,3,hiitPool(mix,"sweat"),3)]};
-    P.workouts.H3={name:"Day 3 · Power + Balance",sub:"Med ball · Box · Core",items:[block("Power","reps",40,20,3,hiitPool(mix,"power"),4),block("Legs + balance","reps",40,20,3,hiitPool(mix,"balance"),4),block("Core intervals","timer",30,15,3,hiitPool(mix,"core"),4)]};
-    return withIds(P);
-  }
-  P.order=["PULL","PUSH","LEGS"]; P.absEvery=2; P.abs="ABS";
-  const W=mix.weights;
+  const F=goal==="functional"; blk=blk||0; const style=mix.style||"weights";
+  const P={ver:4,gen:true,goal,style,rev:0,order:["PULL","PUSH","LEGS"],absEvery:style==="hiit"?0:2,abs:"ABS",workouts:{}};
   const main=pool=>slot(pool,F?5:4,F?4:6,F?6:10,{main:true,ex:pick(pool,blk)});
   const acc=(pool,off,sets,lo,hi)=>slot(pool,sets||3,lo||(F?6:8),hi||(F?10:12),{off:off||0});
   const iso=(pool,off)=>slot(pool,3,F?8:10,F?12:15,{off:off||0});
-  let pull,push,legs;
+  const B=(name,work,rest,rounds,kind)=>block(name,"timer",work,rest,rounds,hiitPool(mix,kind),4);
+  const balOrCore=mix.balance>0?["Balance","balance"]:["Core","core"];
+  const tail=style==="hiit"?" · HIIT":"";
   if(F){
-    pull=[main(POOLS.pullMainF),acc(POOLS.backV),acc(POOLS.backH,1),iso(POOLS.rearDelt),slot(POOLS.carry,3,30,45),acc(POOLS.bi,0,2,8,12)];
-    push=[main(POOLS.pushMainF),acc(POOLS.chest2),acc(POOLS.shoulder,1),iso(POOLS.sideDelt),acc(POOLS.tri),slot(["pallof","suitcase_carry","mb_rot_throw"],3,10,12)];
-    legs=[main(POOLS.legMainF),acc(POOLS.unilateral,0,3,8,12),acc(POOLS.ham),acc(POOLS.glute,1),iso(POOLS.calf)];
-  } else {
+    /* Functional = the Moves-style split: foundational lower + upper days, a full-body day, supersets in rounds, deep core every day. */
+    P.order=["LOWER","UPPER","FULL"]; P.absEvery=0; delete P.abs;
+    const SS=(name,A,Bp,off)=>({t:"block",name,mode:"reps",work:40,rest:20,rounds:3,rot:true,pools:[A,Bp],off:off||0,moves:[{ex:A[0]},{ex:Bp[0]}]});
+    const core=()=>({t:"block",name:"Deep core",mode:"reps",work:40,rest:20,rounds:2,rot:true,pool:POOLS.deepCore,n:3,moves:POOLS.deepCore.slice(0,3).map(ex=>({ex}))});
+    let lower=[main(POOLS.legMainF),SS("Superset A",POOLS.hamF,POOLS.gluteF),SS("Superset B",POOLS.unilateral,POOLS.calfBal,1),core()];
+    let upper=[main(POOLS.pushMainF),slot(POOLS.pullMainU,4,5,8,{main:true,ex:pick(POOLS.pullMainU,blk)}),SS("Superset A",POOLS.chest2,POOLS.backH),SS("Superset B",POOLS.delts,POOLS.arms,1),core()];
+    let full=[slot(POOLS.hinge,4,5,8,{main:true,ex:pick(POOLS.hinge,blk)}),SS("Superset A",POOLS.fullA,POOLS.fullB),SS("Superset B",POOLS.fullC,POOLS.fullD,1),slot(POOLS.carry,3,30,45),core()];
+    if(style==="mixed"){ lower.push(B("Conditioning",40,20,4,"power")); upper.push(B("Conditioning",40,20,4,"sweat")); full.push(B("Conditioning",40,20,4,mix.balance>0?"balance":"power")); }
+    if(style==="hiit"){
+      lower=[lower[0],lower[1],B("Conditioning",40,20,4,"power"),core(),B("Sweat",30,15,4,"sweat")];
+      upper=[upper[0],upper[2],B("Conditioning",40,20,4,"sweat"),core(),B(balOrCore[0],30,15,4,balOrCore[1])];
+      full=[full[0],full[1],B("Conditioning",40,20,4,"power"),core(),B("Sweat",30,15,4,"sweat")];
+    }
+    P.workouts.LOWER={name:"Legs + Glutes",sub:"Foundational lower"+tail,focus:["Quads","Hamstrings","Glutes"],items:lower};
+    P.workouts.UPPER={name:"Upper body",sub:"Back · Chest · Shoulders"+tail,focus:["Chest","Back","Shoulders"],items:upper};
+    P.workouts.FULL={name:"Full body + deep core",sub:"Hinge · circuits · carries"+tail,focus:["Hamstrings","Core"],items:full};
+    if(style!=="weights") P.order.forEach(k=>{ const W=P.workouts[k]; const c=coverage(W.items); W.focus=W.focus.filter(m=>c[m]); });
+    return withIds(P);
+  }
+  let pull,push,legs;
     pull=[main(POOLS.pullMain),acc(POOLS.backV),acc(POOLS.traps),iso(POOLS.rearDelt),acc(POOLS.bi),iso(POOLS.bi,1)];
     push=[main(POOLS.pushMain),acc(POOLS.chest2),acc(POOLS.shoulder),iso(POOLS.sideDelt),iso(POOLS.tri),iso(POOLS.tri,1)];
     legs=[main(POOLS.legMain),acc(POOLS.ham),acc(POOLS.quad2,0,3,10,15),acc(POOLS.glute),acc(POOLS.ham,1,3,10,15),slot(POOLS.calf,4,10,15)];
+  if(style==="weights"){
+    pull.push(acc(POOLS.backH,2)); push.push(acc(POOLS.chest2,2)); legs.push(acc(POOLS.unilateral,1,3,8,12));
+    if(mix.balance>=2) legs.splice(3,0,acc(POOLS.bal,0,2,8,12));
+    if(mix.ball>=2) push.push(slot(["mb_slam","mb_chest_pass","mb_rot_throw"],3,8,12));
+  } else if(style==="mixed"){
+    pull=pull.slice(0,4); push=push.slice(0,4); legs=legs.slice(0,4);
+    pull.push(B("Finisher",40,20,4,"sweat")); push.push(B("Finisher",40,20,4,balOrCore[1])); legs.push(B("Finisher",40,20,4,"power"));
+  } else {
+    pull=pull.slice(0,2); push=push.slice(0,2); legs=legs.slice(0,2);
+    pull.push(B("Power",40,20,4,"power"),B("Core",30,15,4,"core"));
+    push.push(B("Sweat",40,20,4,"sweat"),B(balOrCore[0],30,15,4,balOrCore[1]));
+    legs.push(B("Power",40,20,4,"power"),B("Sweat",30,15,4,"sweat"));
   }
-  if(W>=3){ pull.push(acc(POOLS.backH,2)); push.push(acc(POOLS.chest2,2)); legs.push(acc(POOLS.unilateral,1,3,8,12)); }
-  if(W<=1){ pull=pull.slice(0,3); push=push.slice(0,3); legs=legs.slice(0,3); }
-  if(mix.balance>=2) legs.splice(F?2:3,0,acc(POOLS.bal,0,2,8,12));
-  if(mix.ball>=2 && !F) push.push(slot(["mb_slam","mb_chest_pass","mb_rot_throw"],3,8,12));
-  const fin=days=>{ const rounds=mix.hiit>=3?4:3, n=mix.hiit>=3?5:4; days.forEach(d=>d.push(block("Finisher","timer",30,15,rounds,hiitPool(mix,d===legs?"power":"sweat"),n))); };
-  if(mix.hiit===1) fin([legs]); else if(mix.hiit>=2) fin([pull,push,legs]);
-  P.workouts.PULL={name:"Pull day",sub:"Back · Biceps",focus:F?["Back","Rear Delts","Biceps"]:["Back","Rear Delts","Traps","Biceps"],items:pull};
-  P.workouts.PUSH={name:"Push day",sub:"Chest · Shoulders · Triceps",focus:["Chest","Shoulders","Triceps"],items:push};
-  P.workouts.LEGS={name:"Leg day",sub:"Quads · Hamstrings · Glutes · Calves",focus:["Quads","Hamstrings","Glutes","Calves"],items:legs};
-  P.workouts.ABS={name:"Abs",sub:"every other workout",focus:["Core"],items:F?[slot(POOLS.absF,3,10,15),slot(POOLS.absF,3,10,15,{off:3})]:[slot(POOLS.absM,3,10,15),slot(POOLS.absM,3,10,15,{off:2})]};
+  P.workouts.PULL={name:"Pull day",sub:"Back · Biceps"+tail,focus:["Back","Rear Delts","Traps","Biceps"],items:pull};
+  P.workouts.PUSH={name:"Push day",sub:"Chest · Shoulders · Triceps"+tail,focus:["Chest","Shoulders","Triceps"],items:push};
+  P.workouts.LEGS={name:"Leg day",sub:"Quads · Hamstrings · Glutes · Calves"+tail,focus:["Quads","Hamstrings","Glutes","Calves"],items:legs};
+  P.workouts.ABS={name:"Abs",sub:"every other workout",focus:["Core"],items:[slot(POOLS.absM,3,10,15),slot(POOLS.absM,3,10,15,{off:2})]};
+  /* shorter styles can't hit every group with two lifts — the focus list shrinks to what the day actually covers */
+  if(style!=="weights") ["PULL","PUSH","LEGS"].forEach(k=>{ const W=P.workouts[k]; const c=coverage(W.items); W.focus=W.focus.filter(m=>c[m]); });
   return withIds(P);
 }
 /* Rotation: after each finished day, every rotating slot moves to the next exercise in its pool (never doubling up within the day). */
@@ -528,9 +562,11 @@ function rotateDay(wid){
     if(it.t==="block"){ it.moves=pickMoves(it,c,used); }
     else if(it.pool&&it.pool.length){ let k=c+(it.off||0), ex=pick(it.pool,k), tries=0; while(used.has(ex)&&tries<it.pool.length){ k++; ex=pick(it.pool,k); tries++; } it.ex=ex; used.add(ex); } });
 }
-function pickMoves(b,c,used){ if(!b.pool||!b.pool.length) return b.moves||[]; const n=Math.min(b.n||4,b.pool.length), o=(c*2)%b.pool.length; const out=[]; for(let k=0;k<b.pool.length&&out.length<n;k++){ const ex=pick(b.pool,o+k); if(used.has(ex)) continue; used.add(ex); out.push({ex}); } return out.length?out:b.pool.slice(0,n).map(ex=>({ex})); }
+function pickMoves(b,c,used){
+  if(b.pools) return b.pools.map(pl=>{ let k=c+(b.off||0), ex=pick(pl,k), tries=0; while(used.has(ex)&&tries<pl.length){ k++; ex=pick(pl,k); tries++; } used.add(ex); return {ex}; });
+  if(!b.pool||!b.pool.length) return b.moves||[]; const n=Math.min(b.n||4,b.pool.length), o=(c*2)%b.pool.length; const out=[]; for(let k=0;k<b.pool.length&&out.length<n;k++){ const ex=pick(b.pool,o+k); if(used.has(ex)) continue; used.add(ex); out.push({ex}); } return out.length?out:b.pool.slice(0,n).map(ex=>({ex})); }
 function rotateAll(){ Object.keys(S.program.workouts).forEach(rotateDay); }
-function regen(){ S.mix=S.mix||cp(PRESETS.nick.mix); S.goal=S.goal||{mode:"muscle",setAt:null}; S.cyc=S.cyc||{}; S.program=buildProgram(S.goal.mode,S.mix,S.block||0); rotateAll(); S.next=S.program.order[0]; S.plan=null; S.absNext=true; }
+function regen(){ S.mix=S.mix||cp(PRESETS.nick.mix); S.goal=S.goal||{mode:"muscle",setAt:null}; S.cyc=S.cyc||{}; S.mix.style=S.mix.style||"weights"; S.program=buildProgram(S.goal.mode,S.mix,S.block||0); rotateAll(); S.next=S.program.order.includes(S.next)?S.next:S.program.order[0]; S.plan=null; if(S.absNext==null) S.absNext=true; }
 function goalDaysLeft(){ if(!S.goal||!S.goal.setAt) return 0; return 45-Math.floor((Date.now()-S.goal.setAt)/86400000); }
 function checkinDue(){ return !S.goal||!S.goal.setAt||goalDaysLeft()<=0; }
 function withIds(P){ Object.values(P.workouts).forEach(W=>W.items.forEach(it=>{ if(!it.id) it.id=uid(); })); return P; }
@@ -555,6 +591,8 @@ function upgrade(S){
     regen();
     S.flash="Chalk now builds your program. Every 45 days it asks: muscle gains or functional strength? Dial HIIT, med ball, balance and box up or down. Exercises rotate every session. Your weights and history carried over.";
   }
+  if(S.mix && !S.mix.style){ const pr=PRESETS[S.profile]||PRESETS.nick; S.mix.style=pr.mix.style; delete S.mix.weights; delete S.mix.hiit; }
+  if(S.profile && S.program && S.program.ver===3){ regen(); S.flash="New: choose Weights only, 65 / 35, or HIIT-based (35% weights, 65% HIIT). The toggle sits on Today and in the check-in. Both of you can flip it any time."; }
   if(S.absNext==null) S.absNext=true;
 }
 
@@ -732,7 +770,13 @@ const PAT={
   carry:PP({th:15,s:-10,th2:-15,s2:5},{th:-15,s:5,th2:15,s2:-10},{grip:"db"}),
   pallof:PP({u:40,f:-150},{u:90,f:90},{cable:[10,120]}),
   rope:PP({u:-10,f:60},{u:-10,f:60,rise:10}),
+  hollow:PP({t:-70,th:150,s:150,u:-60,f:-60,hx:150,hy:250},{t:-64,th:144,s:144,u:-66,f:-66,hx:150,hy:250},{lie:1}),
+  pullapart:PP({u:90,f:90},{u:-25,f:-25},{grip:"band"}),
+  bandwalk:{v:"front",a:{ls:8,ab:20,eb:60},b:{ls:30,ab:20,eb:60}},
+  bridge:PP({t:-85,th:100,s:-40,u:-20,f:-10,hx:130,hy:236},{t:-100,th:80,s:-40,u:-20,f:-10,hx:130,hy:214},{lie:1}),
 };
+PAT.kbswing=Object.assign({},PAT.swing,{grip:"kb"});
+PAT.kbgoblet=Object.assign({},PAT.goblet,{grip:"kb"});
 PAT.rdldb=Object.assign({},PAT.rdl,{grip:"db"});
 PAT.hpressdb=Object.assign({},PAT.hpress,{grip:"db"});
 PAT.ipressbar=Object.assign({},PAT.ipress,{grip:"bar"});
@@ -791,6 +835,8 @@ function rigFrame(pat,p,hiSeg){
   else if(pat.grip==="db") s+=`<rect class="eq" x="${f1(HN[0]-11)}" y="${f1(HN[1]-5)}" width="22" height="10" rx="3"/>`;
   else if(pat.grip==="ball") s+=`<circle class="eq" cx="${f1(HN[0])}" cy="${f1(HN[1])}" r="10"/>`;
   else if(pat.grip==="wheel") s+=`<circle class="eq" cx="${f1(HN[0])}" cy="${f1(HN[1]+4)}" r="9"/>`;
+  else if(pat.grip==="kb") s+=`<circle class="eq" cx="${f1(HN[0])}" cy="${f1(HN[1]+10)}" r="9"/><path class="cab" style="stroke:var(--ink);stroke-width:3" d="M${f1(HN[0]-6)} ${f1(HN[1]+2)} A6 6 0 0 1 ${f1(HN[0]+6)} ${f1(HN[1]+2)}"/>`;
+  else if(pat.grip==="band"){ const A=T(arm[2]); s+=`<line class="cab" style="stroke:var(--acc);stroke-width:3" x1="${f1(A[0])}" y1="${f1(A[1])}" x2="${f1(A[0]+2)}" y2="${RG.FLOOR+9}"/>`; }
   else if(pat.grip==="barhi") s+=`<line style="stroke:var(--ink);stroke-width:5;stroke-linecap:round" x1="${f1(HN[0]-40)}" y1="${f1(HN[1])}" x2="${f1(HN[0]+40)}" y2="${f1(HN[1])}"/>`;
   else if(pat.grip==="barlo") s+=`<line style="stroke:var(--ink);stroke-width:5;stroke-linecap:round" x1="${f1(HN[0]-26)}" y1="${f1(HN[1])}" x2="${f1(HN[0]+26)}" y2="${f1(HN[1])}"/><rect class="fur" x="${f1(HN[0]+18)}" y="${f1(HN[1])}" width="6" height="${f1(RG.FLOOR+9-HN[1])}"/>`;
   return `<svg class="rig" viewBox="0 0 280 280">${s}</svg>`;
@@ -852,7 +898,7 @@ function progItemFor(wid,it){ const W=it.abs?S.program.workouts[absId()]:S.progr
 /* coverage: which muscles today's exercises hit directly (primary). A secondary hit doesn't count toward the day's focus. */
 function coverage(items){ const c={}; (items||[]).forEach(it=>{ if(it.t==="block") it.moves.forEach(m=>{ c[getEx(m.ex).m]=(c[getEx(m.ex).m]||0)+1; }); else { const L=getEx(it.ex); c[L.m]=(c[L.m]||0)+1; } }); return c; }
 function coverageAny(items){ const c=coverage(items); (items||[]).forEach(it=>{ const ids=it.t==="block"?it.moves.map(m=>m.ex):[it.ex]; ids.forEach(id=>(getEx(id).s||[]).forEach(m=>{ c[m]=(c[m]||0)+0.5; })); }); return c; }
-function estMin(items){ let s=0; items.forEach(it=>{ if(it.t==="block"){ s+= it.mode==="timer"? it.moves.length*it.rounds*(it.work+it.rest) : it.rounds*it.moves.length*40; } else { const r=isCompound(it.ex)?S.settings.restC:S.settings.restA; s+=it.sets*(35+r); } }); return Math.max(5,Math.round(s/60)); }
+function estMin(items){ let s=0; items.forEach(it=>{ if(it.t==="block"){ s+= it.mode==="timer"? it.moves.length*it.rounds*(it.work+it.rest) : it.rounds*it.moves.length*55; } else { const r=isCompound(it.ex)?S.settings.restC:S.settings.restA; s+=it.sets*(35+r); } }); return Math.max(5,Math.round(s/60)); }
 
 /* ================= WORKOUT FLOW ================= */
 function startWorkout(wid){
@@ -1019,10 +1065,10 @@ function blockCard(b,bi){
       h+=`<div class="bd">`;
       if(running) h+=`<div class="roundbig"><span class="cond num">Round ${b.done+1}</span><span class="mut"> of ${b.rounds}</span></div>`;
       if(!running && !done && !b.skipped) h+= b.mode==="timer" ? `<div class="entry3"><div><span class="lbl">work · sec</span>${stepper("bw",bi,b.work)}</div><div><span class="lbl">rest · sec</span>${stepper("br",bi,b.rest)}</div><div><span class="lbl">rounds</span>${stepper("bn",bi,b.rounds)}</div></div>` : `<div class="entry3"><div></div><div><span class="lbl">rounds</span>${stepper("bn",bi,b.rounds)}</div><div></div></div>`;
-      h+=`<div class="moves">${b.moves.map((m,mi)=>{ const L=getEx(m.ex); const weighted=L.t!=="bw"&&L.t!=="bal"; const lock=running||done;
+      h+=`<div class="moves">${b.moves.map((m,mi)=>{ const L=getEx(m.ex); const weighted=!NOLOAD(L.t); const lock=running||done;
         return `<div class="move"><div class="mn">${mi+1}. ${esc(L.n)}<div class="small mut">${L.m}${L.ea?" · each side":""}${L.u==="s"?" · hold":""}</div></div>
           ${b.mode==="reps"?`<input class="mini" type="number" inputmode="numeric" data-f="mr" data-bi="${bi}" data-mi="${mi}" value="${m.reps}" ${done?"disabled":""}><span class="small mut">${L.u==="s"?"sec":"reps"}</span>`:`<span></span><span></span>`}
-          ${weighted?`<input class="mini" type="number" inputmode="decimal" step="any" data-f="mw" data-bi="${bi}" data-mi="${mi}" value="${fmtW(m.w)}" ${done?"disabled":""}><span class="small mut">lb</span>`:`<span class="small mut" style="grid-column:4/6;text-align:right">${L.t==="bal"?"balance":"bodyweight"}</span>`}
+          ${weighted?`<input class="mini" type="number" inputmode="decimal" step="any" data-f="mw" data-bi="${bi}" data-mi="${mi}" value="${fmtW(m.w)}" ${done?"disabled":""}><span class="small mut">lb</span>`:`<span class="small mut" style="grid-column:4/6;text-align:right">${L.t==="bal"?"balance":L.t==="band"?"band":"bodyweight"}</span>`}
           ${lock?"<span></span>":`<button class="edit" data-a="brm" data-bi="${bi}" data-mi="${mi}" aria-label="Remove move">×</button>`}</div>`; }).join("")}</div>`;
       if(done) h+=`<p class="hint">Done · ${b.done} round${b.done===1?"":"s"}. <button data-a="blk-redo" data-bi="${bi}" style="color:var(--acc);font-weight:600">Redo</button></p>`;
       else if(running) h+=`<button class="btn primary block logbtn" data-a="reps-round" data-bi="${bi}">Round ${b.done+1} done</button><button class="btn block ghost" style="margin-top:8px" data-a="reps-end" data-bi="${bi}">End block</button>`;
@@ -1064,7 +1110,7 @@ let lastTab=null;
 function elapsed(start){ const m=Math.floor((Date.now()-start)/60000); return m<60?m+" min":Math.floor(m/60)+"h "+(m%60)+"m"; }
 setInterval(()=>{ if(tab==="today"&&S.active) document.getElementById("subtitle").textContent=elapsed(S.active.start); },30000);
 
-function wText(id){ const L=getEx(id), E=S.ex[id]; if(E&&E.w!=null) return L.t==="bw"&&E.w===0?"BW":`${fmtW(E.w)} lb${L.t==="db"?" ea":""}`; return L.t==="bw"?"BW":"set weight"; }
+function wText(id){ const L=getEx(id), E=S.ex[id]; if(L.t==="band") return "band"; if(E&&E.w!=null) return L.t==="bw"&&E.w===0?"BW":`${fmtW(E.w)} lb${L.t==="db"?" ea":""}`; return L.t==="bw"?"BW":"set weight"; }
 function planRow(it,i,items){
   const divider = it.abs && (i===0 || !items[i-1].abs) ? `<div class="ex-div">Abs · every other workout</div>` : "";
   if(it.t==="block") return divider+`<div class="ex-row"><div class="ex-main"><div class="n">${esc(it.name)} <span class="tag">${it.mode==="timer"?"clock":"reps"}</span></div><div class="t">${it.moves.map(m=>esc(getEx(m.ex).n)).join(" · ")}</div><div class="t">${blockSummary(it)}</div></div><button class="icon" data-a="plan-menu" data-i="${i}" aria-label="Options">⋯</button></div>`;
@@ -1092,6 +1138,7 @@ function viewToday(){
   const goalTag=S.goal&&S.goal.setAt?`<button class="tag acc" data-a="checkin" style="margin-top:6px">${GOAL_LABEL[S.goal.mode]||"Goal"} · ${Math.max(0,goalDaysLeft())} days left</button>`:"";
   h+=`<div class="card">
     <div class="hd"><div><div class="up mut">Up next</div><h3>${esc(P.name||W.name)}</h3><div class="small mut">${P.kind?(P.kind==="hiit"?"Instead of "+esc(W.name):"Weights instead of "+esc(W.name)):esc(W.sub||"")}${absOn()&&wid!==absId()&&!P.kind?` · ${P.abs?"abs today":"no abs today"}`:""}</div>${goalTag}</div><button class="icon" data-a="pick-workout" aria-label="Choose a different workout">⇄</button></div>
+    <div class="seg" style="display:flex;margin:6px 14px 2px">${STYLES.map(([k])=>`<button data-a="style" data-v="${k}" class="${(S.mix||{}).style===k?"on":""}" style="flex:1;min-width:0;padding:9px 4px;font-size:12px">${STYLE_LABEL[k]}</button>`).join("")}</div>
     ${focus.length?`<div class="figs">${bodySVG(false,cls)}${bodySVG(true,cls)}</div>
     <div class="chips" style="padding:8px 14px 0">${focus.map(m=>`<span class="chip ${cov[m]?"ok":"gap"}">${m}</span>`).join("")}</div>
     ${gaps.length?`<p class="hint" style="padding:0 14px">Not covered today: <b>${gaps.join(", ")}</b>. Add an exercise below.</p>`:""}`:""}
@@ -1133,7 +1180,7 @@ function muscleMap(){
    Same muscle group first, weight converted through each exercise's load factor k. Your own logged weight wins over the formula. */
 function convertWeight(fromId,w,toId){
   const A=getEx(fromId), B=getEx(toId);
-  if(B.t==="bw") return {w:0,how:"bw"};
+  if(NOLOAD(B.t)) return {w:0,how:"bw"};
   if(A.k==null||B.k==null||!A.k||w==null) return {w:null,how:"unknown"};
   return {w:roundTo(w/A.k*B.k,B.inc),how:"est"};
 }
@@ -1144,7 +1191,7 @@ function subsFor(exId, excludeIds, curW){
     const B=getEx(id), E=S.ex[id]; let w=null, how="unknown";
     if(E&&E.w!=null){ w=E.w; how="yours"; }
     else if(curW!=null){ const c=convertWeight(exId,curW,id); w=c.w; how=c.how; }
-    else if(B.t==="bw"){ w=0; how="bw"; }
+    else if(NOLOAD(B.t)){ w=0; how="bw"; }
     const score=(how==="yours"?100:0)+(B.t!==L.t?10:0)+(how==="unknown"?-50:0);
     return {id,w,how,score};
   }).sort((a,b)=>b.score-a.score);
@@ -1227,7 +1274,10 @@ function openCheckin(){
   const goalBtn=(k,lbl,sub)=>`<button class="opt ${g===k?"cur":""}" data-a="ci-goal" data-v="${k}"><span><b>${lbl}</b><br><span class="small mut">${sub}</span></span><span class="m" style="font-size:20px">${g===k?"✓":""}</span></button>`;
   const rows=MIXROWS.map(([k,l,sub])=>`<div class="srow" style="padding:10px 0"><div><div class="l">${l}</div><div class="s">${sub}</div></div><div class="seg">${LVL.map((n,i)=>`<button data-a="ci-mix" data-k="${k}" data-v="${i}" class="${(S.mix[k]||0)===i?"on":""}" style="min-width:0;padding:8px 8px;font-size:12px">${n}</button>`).join("")}</div></div>`).join("");
   const started=!!(S.goal&&S.goal.setAt);
-  openSheet("45-day check-in",`<p class="hint">Pick what the next 45 days are for, then say what you want more or less of. Chalk rebuilds your days from that. Your weights and history stay.</p>
+  const st=S.mix.style||"weights";
+  const styleBtn=([k,lbl,sub])=>`<button class="opt ${st===k?"cur":""}" data-a="ci-style" data-v="${k}"><span><b>${lbl}</b><br><span class="small mut">${sub}</span></span><span class="m" style="font-size:20px">${st===k?"✓":""}</span></button>`;
+  openSheet("45-day check-in",`<p class="hint">Pick your style and what the next 45 days are for, then say what you want more or less of. Chalk rebuilds your days from that. Your weights and history stay.</p>
+    <div class="opt-grp foc">Style</div>${STYLES.map(styleBtn).join("")}
     <div class="opt-grp foc">Goal</div>${goalBtn("muscle","Muscle gains","8–12 reps, isolation work, machines welcome")}${goalBtn("functional","Functional strength","heavy compounds, one-leg work, carries, med-ball power, balance")}
     <div class="opt-grp foc">More or less of</div>${rows}
     <button class="btn primary block" data-a="ci-build" style="margin-top:12px">${started?"Start the next 45 days":"Build my program"}</button>
@@ -1332,7 +1382,7 @@ function viewSettings(){
     <div class="srow"><div><div class="l">Keep screen on during workouts</div></div>${tog("wake")}</div>
     <div class="srow"><div><div class="l">Look</div></div>${segs("theme",["system","light","dark"])}</div></div>`;
   h+=`<h2 class="sec">Program</h2>`;
-  h+=`<div class="card"><div class="srow"><div><div class="l">${GOAL_LABEL[(S.goal||{}).mode]||"Goal"} · ${Math.max(0,goalDaysLeft())} days left</div><div class="s">${MIXROWS.map(([k,l])=>l+": "+LVL[(S.mix||{})[k]||0]).join(" · ")}</div></div><button class="btn" data-a="checkin">Change</button></div>
+  h+=`<div class="card"><div class="srow"><div><div class="l">${STYLE_LABEL[(S.mix||{}).style]||"Weights only"} · ${GOAL_LABEL[(S.goal||{}).mode]||"Goal"} · ${Math.max(0,goalDaysLeft())} days left</div><div class="s">${MIXROWS.map(([k,l])=>l+": "+LVL[(S.mix||{})[k]||0]).join(" · ")}</div></div><button class="btn" data-a="checkin">Change</button></div>
     <div class="srow"><div><div class="l">Exercises rotate</div><div class="s">Accessories change every session, main lifts every 45 days. Swap "from now on" pins one in place.</div></div><button class="btn" data-a="reset-prog">Rebuild</button></div></div>`;
   const hasAbs=!!S.program.workouts[absId()];
   if(hasAbs) h+=`<div class="card"><div class="srow"><div><div class="l">Abs every other workout</div><div class="s">${absOn()?(S.absNext!==false?"Next workout: abs on":"Next workout: abs off"):"Off"}</div></div><button class="toggle ${absOn()?"on":""}" data-a="abs-tog" role="switch" aria-checked="${absOn()}"><i></i></button></div></div>`;
@@ -1382,7 +1432,7 @@ function newExerciseForm(action,extra){
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
     <input id="nxName" placeholder="Exercise name" style="min-height:48px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--sur2)">
     <select id="nxM" class="sel">${MUSCLES.map(m=>`<option>${m}</option>`).join("")}</select>
-    <select id="nxT" class="sel"><option value="bb">Barbell</option><option value="db">Dumbbells</option><option value="mc">Machine</option><option value="cb">Cable</option><option value="bw">Bodyweight</option></select>
+    <select id="nxT" class="sel"><option value="bb">Barbell</option><option value="db">Dumbbells</option><option value="kb">Kettlebell</option><option value="mc">Machine</option><option value="cb">Cable</option><option value="band">Band</option><option value="bw">Bodyweight</option></select>
     <button class="btn primary block" data-a="${action}" data-ex="__create" ${extra}>Add</button></div>`;
 }
 function createCustom(){
@@ -1390,7 +1440,7 @@ function createCustom(){
   const t=document.getElementById("nxT").value, m=document.getElementById("nxM").value;
   const id="c_"+n.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"")+"_"+uid().slice(-3);
   const pByM={Chest:"hpressdb",Shoulders:"opressdb",Triceps:"pushdown",Back:"cablerow","Rear Delts":"rearfly",Traps:"shrugdb",Biceps:"curl",Forearms:"wrist",Quads:"squat",Hamstrings:"rdldb",Glutes:"hipthrust",Calves:"calf",Core:"crunch"};
-  S.custom[id]={n,m,t,inc:t==="mc"||t==="cb"?10:5,rest:t==="bb"?120:75,guess:t==="bw"?0:(t==="db"?25:50),k:1,s:[],p:pByM[m]||"generic"};
+  S.custom[id]={n,m,t,inc:t==="mc"||t==="cb"?10:5,rest:t==="bb"?120:75,guess:NOLOAD(t)?0:(t==="db"||t==="kb"?25:50),k:NOLOAD(t)?0:1,s:[],p:pByM[m]||"generic"};
   return id;
 }
 /* ================= EVENTS ================= */
@@ -1480,6 +1530,8 @@ document.addEventListener("click",e=>{
     case "checkin": openCheckin(); break;
     case "ci-goal": S.goal=S.goal||{}; S.goal.mode=b.dataset.v; openCheckin(); break;
     case "ci-mix": S.mix[b.dataset.k]=+b.dataset.v; openCheckin(); break;
+    case "ci-style": S.mix.style=b.dataset.v; openCheckin(); break;
+    case "style": { if((S.mix||{}).style===b.dataset.v) break; S.mix=S.mix||cp(PRESETS.nick.mix); S.mix.style=b.dataset.v; regen(); bumpProg(); save(); render(); toast(STYLE_LABEL[b.dataset.v]+" — days rebuilt"); break; }
     case "ci-build": { if(S.goal&&S.goal.setAt) S.block=(S.block||0)+1; S.goal.setAt=Date.now(); regen(); bumpProg(); save(); closeSheet(); tab="today"; render(); toast("Next 45 days built"); break; }
     case "ci-apply": regen(); bumpProg(); save(); closeSheet(); tab="today"; render(); toast("Program rebuilt"); break;
     case "plan-kind": { const wid=nextWorkoutId(), W=S.program.workouts[wid], P=planFor(wid);

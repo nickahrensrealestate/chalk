@@ -1,4 +1,4 @@
-const CACHE = "chalk-v6";
+const CACHE = "chalk-v7";
 const CORE = ["./", "index.html", "manifest.json", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", e => {
