@@ -136,7 +136,11 @@ t("ai.json key path: plain-English errors for 401, 403, 429, 529, 500, 400 credi
   global.fetch = async () => claudeReply("I can't do JSON today");
   await M.ai.json("x").then(() => assert.fail(), e => assert.strictEqual(e.code, "bad_json"));
   global.fetch = async () => { throw new TypeError("Failed to fetch"); };
-  await M.ai.json("x").then(() => assert.fail(), e => { assert.strictEqual(e.code, "network"); assert.ok(/connection/i.test(e.message)); });
+  await M.ai.json("x").then(() => assert.fail(), e => { assert.strictEqual(e.code, "network"); assert.ok(/isn't answering/i.test(e.message) && !/connection/i.test(e.message), "online: never blame their connection: " + e.message); });
+  global.fetch = async () => ({ ok: false, status: 418, json: async () => ({ type: "error", error: { type: "weird_error", message: "raw API words" } }) });
+  await M.ai.json("x").then(() => assert.fail(), e => { assert.ok(!/418|raw API/.test(e.message), "no raw codes or API text: " + e.message); });
+  global.fetch = async () => ({ ok: false, status: 400, json: async () => ({ type: "error", error: { type: "invalid_request_error", message: "messages.0.content: raw API words" } }) });
+  await M.ai.json("x").then(() => assert.fail(), e => { assert.strictEqual(e.code, "bad_request"); assert.ok(!/raw API|messages\.0/.test(e.message), e.message); });
   NAV.onLine = false;
   await M.ai.json("x").then(() => assert.fail(), e => { assert.strictEqual(e.code, "offline"); assert.ok(/offline/i.test(e.message)); });
   delete NAV.onLine;
@@ -452,15 +456,17 @@ t("lookup: not found / bad codes / OFF busy (429 HTML) / OFF down (503) / offlin
   await M.food.lookup("4006381333931").then(() => assert.fail(), e => { assert.strictEqual(e.code, "busy"); assert.ok(/busy.*minute/i.test(e.message)); });
   global.fetch = async () => ({ ok: false, status: 503, json: async () => { throw new SyntaxError("<html>"); } });
   await M.food.lookup("4006381333931").then(() => assert.fail(), e => assert.strictEqual(e.code, "off_down"));
-  global.fetch = async () => { throw new TypeError("Failed to fetch"); };
-  await M.food.lookup("4006381333931").then(() => assert.fail(), e => { assert.strictEqual(e.code, "network"); assert.ok(/connection/i.test(e.message)); });
+  let tries = 0;
+  global.fetch = async () => { tries++; throw new TypeError("Failed to fetch"); };
+  await M.food.lookup("4006381333931").then(() => assert.fail(), e => { assert.strictEqual(e.code, "off_down"); assert.ok(/isn't answering right now.*minute.*scan the label/i.test(e.message) && !/connection/i.test(e.message), e.message); });
+  assert.strictEqual(tries, 2, "a CORS-blocked 503 (network error while online) is tried once more");
   NAV.onLine = false;
   await M.food.lookup("4006381333931").then(() => assert.fail(), e => assert.strictEqual(e.code, "offline"));
   delete NAV.onLine;
   let n = 0;
   global.fetch = () => { n++; return new Promise(() => {}); };
   const t0 = Date.now();
-  await M.food.lookup("4006381333931", { timeout: 50 }).then(() => assert.fail(), e => { assert.strictEqual(e.code, "timeout"); assert.ok(/too long/.test(e.message)); });
+  await M.food.lookup("4006381333931", { timeout: 50 }).then(() => assert.fail(), e => { assert.strictEqual(e.code, "timeout"); assert.ok(/slow right now/.test(e.message) && !/connection/i.test(e.message), e.message); });
   assert.ok(Date.now() - t0 < 1000 && n === 1, "gives up after one slow request");
   delete global.fetch;
 });
@@ -889,7 +895,11 @@ t("describe (no Claude): the person's own saved foods win by name; raw when they
   const r = await M.food.describe("6 oz chicken breast", {});
   assert.strictEqual(r.items[0].foodId, mine.id, "saved food first: " + r.items[0].name);
   near(r.items[0].g, 170.1, 1);
-  near(kcalOf(r.items[0]), 197, 3, "from the saved food's per 100 g");
+  /* a scanned raw chicken saved before cook info existed borrows the built-in chicken's y, so
+     "6 oz chicken breast" (what was on the plate) is 6 oz COOKED: 170 g ÷ 0.7258 raw × 1.16 */
+  assert.strictEqual(r.items[0].state, "cooked");
+  assert.ok(r.items[0].cook && Math.abs(r.items[0].cook.y - 0.7258) < 0.001, JSON.stringify(r.items[0].cook));
+  near(kcalOf(r.items[0]), 272, 4, "from the saved food's per 100 g, cooked");
   const bread = M.foods.add({ name: "Good Seed Thin-Sliced", brand: "Dave's Killer Bread", source: "off", serving: { qty: 1, unit: "slice", g: 28 }, per: { cal: 70, p: 3, c: 13, f: 1.5, fiber: 2, sugar: 2, sodium: 105 } });
   const b = await M.food.describe("2 slices dave's bread", {});
   assert.strictEqual(b.items[0].foodId, bread.id, "their own Dave's loaf beats the built-in one");
@@ -1049,7 +1059,7 @@ t("suggest with Claude: 3 ideas last (source claude, ids ai_…), prompt uses th
   global.fetch = async () => { throw new TypeError("Failed to fetch"); };
   const off = await M.food.suggest({ slot: "Breakfast", remaining: { cal: 600, p: 40, c: 60, f: 20 } });
   assert.ok(off.length >= 6 && off.every(s => s.source === "idea"));
-  assert.ok(/connection/i.test(off.aiError), "why Claude is missing, in plain words");
+  assert.ok(/isn't answering/i.test(off.aiError) && !/connection/i.test(off.aiError), "why Claude is missing, in plain words: " + off.aiError);
   const realList = M.meals.list; M.meals.list = () => { throw new Error("boom"); };
   const safe = await M.food.suggest({ slot: "Lunch", remaining: { cal: 600, p: 40, c: 60, f: 20 }, ai: false });
   assert.ok(Array.isArray(safe) && safe.length >= 3, "never throws");
@@ -1070,6 +1080,214 @@ t("suggest built-ins: tight budget prefers small meals; protein weighted; jitter
   const big = { id: "x", slot: "Dinner", per: { cal: 900, p: 60, c: 80, f: 40 }, items: [] };
   const small = { id: "y", slot: "Dinner", per: { cal: 400, p: 35, c: 30, f: 12 }, items: [] };
   assert.ok(M.food.scoreSuggestion(small, "Dinner", { cal: 300, p: 40, c: 30, f: 10 }, null, 0) > M.food.scoreSuggestion(big, "Dinner", { cal: 300, p: 40, c: 30, f: 10 }, null, 0) + 40);
+});
+
+/* ======================================================================= */
+/* F4 fixes (swarm triage): label reader, Open Food Facts retries, describe, cook info on scan */
+t("BEF-01 label.parse: glued units pick the ÷10 reading closest to calories; >300 tries ÷10; sugar/fiber ≤ carbs; flagged in check + warning", () => {
+  const P = s => M.food.label.parse("Nutrition Facts\nServing size 1 bar (40g)\n" + s);
+  let r = P("Calories 120\nTotal Fat 30g\nSodium 100mg\nTotal Carbohydrate 20g\nDietary Fiber 2g\nTotal Sugars 5g\nProtein 3g");
+  assert.strictEqual(r.per.f, 3, "'30g' for 3 g fat: only the ÷10 reading matches 120 kcal");
+  assert.strictEqual(r.per.c, 20, "a right 20 g is left alone");
+  assert.deepStrictEqual(r.check, ["f"]);
+  assert.ok(/Check fat\. It may be wrong\./.test(r.warning), r.warning);
+  r = P("Calories 230\nTotal Fat 8g\nSodium 160mg\nTotal Carbohydrate 379g\nDietary Fiber 4g\nTotal Sugars 12g\nProtein 3g");
+  assert.strictEqual(r.per.c, 37, "379 (> 300 g) read as 37, not dropped");
+  assert.ok(r.check.includes("c") && r.fields.includes("c"));
+  r = P("Calories 110\nTotal Fat 2g\nSodium 200mg\nTotal Carbohydrate 12g\nDietary Fiber 3g\nTotal Sugars 90g\nProtein 4g");
+  assert.strictEqual(r.per.sugar, 9, "sugar 90 > carbs 12 → the ÷10 reading");
+  r = P("Calories 110\nTotal Fat 2g\nSodium 200mg\nTotal Carbohydrate 12g\nDietary Fiber 3g\nTotal Sugars 45g\nProtein 4g");
+  assert.strictEqual(r.per.sugar, 12, "no ÷10 reading fits → capped at the carbs");
+  assert.deepStrictEqual(r.check, ["sugar"]);
+  r = P("Calories 150\nTotal Fat 5g\nSodium 180mg\nTotal Carbohydrate 30g\nDietary Fiber 5g\nTotal Sugars 1g\nSugar Alcohol 20g\nProtein 20g");
+  assert.deepStrictEqual([r.per.c, r.per.p, r.check.length], [30, 20, 0], "sugar alcohol bars really don't add up: carbs are not 'fixed'");
+  r = P("Calories 250\nTotal Fat 10g\nSodium 400mg\nTotal Carbohydrate 20g\nDietary Fiber 0g\nTotal Sugars 10g\nProtein 20g");
+  assert.deepStrictEqual([r.per.f, r.per.c, r.per.p, r.per.sugar, r.check.length, r.warning], [10, 20, 20, 10, 0, undefined], "right numbers ending in 0 are never touched");
+});
+
+t("BEF-01/UX1-02 label.parse: serving grams sanity ('1 tortilla (459g)' → 45 g, flagged), serving found anywhere in the text, fields not found listed", () => {
+  const body = "\nCalories 110\nTotal Fat 3g\nSodium 290mg\nTotal Carbohydrate 19g\nDietary Fiber 11g\nTotal Sugars 0g\nProtein 8g";
+  let r = M.food.label.parse("Nutrition Facts\n8 servings per container\nServing size 1 tortilla (459g)" + body);
+  assert.deepStrictEqual(r.serving, { qty: 1, unit: "tortilla", g: 45 });
+  assert.deepStrictEqual(r.check, ["g"]);
+  assert.ok(/Check the grams\. We read 459 g for 1 tortilla and used 45 g\./.test(r.warning), r.warning);
+  r = M.food.label.parse("Nutrition Facts\nServing size 1 tortilla (450g)" + body);
+  assert.strictEqual(r.serving.g, 450, "no misread to undo: kept");
+  assert.ok(r.check.includes("g") && /Check the grams: 1 tortilla = 450 g\?/.test(r.warning), r.warning);
+  r = M.food.label.parse("Nutrition Facts\n8 servings per container\nServing size\nAmount per serving" + body + "\n1 tortilla (45g)");
+  assert.deepStrictEqual(r.serving, { qty: 1, unit: "tortilla", g: 45 }, "'1 tortilla (45g)' found away from 'Serving size'");
+  r = M.food.label.parse("Nutrition Facts\nServing size 1 cup (240mL)\nCalories 130\nTotal Fat 2.5g\nSodium 125mg\nTotal Carbohydrate 12g\nProtein 16g");
+  assert.deepStrictEqual(r.missing, ["fiber", "sugar"]);
+  assert.strictEqual(r.warning, "Couldn't read fiber and sugar. Type them in.");
+  assert.deepStrictEqual(r.check, []);
+});
+
+/* the be-food finder's 20 OCR edge cases (linear labels, rn→m, mq, 05g, "4 5g", split columns, Sg / Smg, EU, package words, "1 9 0", servlngs) */
+const BEF_LABELS = [
+  { t: "Nutrition Facts Serv. size: 1 pouch (43g), Amount per serving: Calories 150, Total Fat 2.5g (3% DV), Sat. Fat 0g (0% DV),\nTrans Fat 0g, Cholest. 0mg (0% DV), Sodium 90mg (4% DV), Total Carb. 32g (12% DV), Fiber 1g (4% DV), Total Sugars 19g\n(Incl. 19g Added Sugars, 38% DV), Protein 1g. Not a significant source of vitamin D. *The % Daily Value (DV) tells you how much a nutrient contributes to a daily diet.", exp: { cal: 150, f: 2.5, sodium: 90, c: 32, fiber: 1, sugar: 19, p: 1 }, sv: { qty: 1, unit: "pouch", g: 43 } },
+  { t: "Nutrition Facts\nServing size 1 slice (28g)\nCalories 70\nTotal Fat 1g\nSodiurn 140mg 6%\nTotal Carbohydrate 13g\nProtein 3g", exp: { sodium: 140 } },
+  { t: "Nutrition Facts\nServing size 2/3 cup (55g)\nCalories 230\nTotal Fat 8g\nSodium 160mq 7%\nTotal Carbohydrate 37g\nProtein 3g", exp: { sodium: 160 } },
+  { t: "Nutrition Facts\nServing size 1 cup (240mL)\nCalories 80\nTotal Fat 05g 1%\nSodium 125mg 5%\nTotal Carbohydrate 12g 4%\nTotal Sugars 12g\nProtein 8g", exp: { f: 0.5 } },
+  { t: "Nutrition Facts\nServing size 1 bar (40g)\nCalories 190\nTotal Fat 4 5g 6%\nSodium 150mg\nTotal Carbohydrate 28g\nProtein 10g", exp: { f: 4.5 } },
+  { t: "Nutrition Facts\nServing size 2/3 cup (55g)\nCalories 230\nTotal Fat\nSodium\nTotal Carbohydrate\nProtein\n8g\n160mg\n37g\n3g", exp: { cal: 230, f: 8, sodium: 160, c: 37, p: 3 } },
+  { t: "Nutrition Facts\nServing size 1 cup (30g)\nCalories 110\nTotal Fat 2g\nSodium 200mg\nTotal Carbohydrate 20g\nProtein Sg 10%", exp: { p: 5 } },
+  { t: "Nutrition Facts\nServing size 1 piece (15g)\nCalories 60\nTotal Fat 3g\nSodium Smg 0%\nTotal Carbohydrate 8g\nProtein 1g", exp: { sodium: 5 } },
+  { t: "Nutrition declaration\nper 100g\nEnergy 1570kJ / 375kcal\nFat 8.1g\nof which saturates 1.2g\nCarbohydrate 62g\nof which sugars 21g\nFibre 6.5g\nProtein 9.7g\nSalt 0.55g", exp: { cal: 375, f: 8.1, c: 62, sugar: 21, fiber: 6.5, p: 9.7, sodium: 220 }, sv: { qty: 100, unit: "g", g: 100 } },
+  { t: "KEEP REFRIGERATED\nNutrition Facts\nServing size 1 container (150g)\nCalories 100\nTotal Fat 0g\nSodium 60mg\nTotal Carbohydrate 6g\nTotal Sugars 4g\nProtein 18g", exp: { cal: 100 }, name: "" },
+  { t: "Nutrition Facts\nServing size 1 bar (60g)\nCalories 1 9 0\nTotal Fat 7g\nSodium 210mg\nTotal Carbohydrate 23g\nProtein 21g", exp: { cal: 190 } },
+  { t: "Nutrition Facts\nabout 2.5 servlngs per contalner\nServing size 3 oz (85g)\nCalories 120\nTotal Fat 1g\nSodium 300mg\nTotal Carbohydrate 0g\nProtein 26g", exp: { cal: 120 }, spc: 2.5 },
+  { t: "Nutrition Facts\nServing size 1 can (355 mL)\nCalories 0\nTotal Fat 0g 0%\nSodium 40mg 2%\nTotal Carbohydrate 0g 0%\nTotal Sugars 0g\nProtein 0g", exp: { cal: 0, sodium: 40, c: 0, p: 0 } }
+];
+t("BEF-07/08/14/15/16 label.parse: the finder's OCR edge cases all read right", () => {
+  BEF_LABELS.forEach(c => {
+    const r = M.food.label.parse(c.t);
+    Object.keys(c.exp).forEach(k => near(r.per[k], c.exp[k], 0.051, c.t.slice(0, 40) + " → " + k));
+    if (c.sv) assert.deepStrictEqual(r.serving, c.sv, c.t.slice(0, 40));
+    if (c.spc) assert.strictEqual(r.servingsPerContainer, c.spc);
+    if (c.name !== undefined) assert.strictEqual(r.name || "", c.name, "package words are not the name");
+  });
+});
+
+t("label.fromImage (built-in reader): fields not found come back empty (null), with check / missing / warning", async () => {
+  M.ai.setKey("");
+  const realPrep = M.img.prepOCR;
+  M.img.prepOCR = async () => ({ canvas: {}, blob: {}, width: 10, height: 10 });
+  const text = "Nutrition Facts\nServing size 1 tortilla (459g)\nCalories 110\nTotal Fat 3g\nSodium 290mg\nTotal Carbohydrate 19g\nProtein 8g";
+  global.Tesseract = { createWorker: async () => ({ setParameters: async () => {}, recognize: async () => ({ data: { text } }), terminate: async () => {} }) };
+  try {
+    const r = await M.food.label.fromImage({ type: "image/jpeg", size: 10 }, { method: "ocr" });
+    assert.strictEqual(r.method, "ocr");
+    assert.strictEqual(r.food.per.fiber, null, "not read → empty box, not 0");
+    assert.strictEqual(r.food.per.sugar, null);
+    assert.strictEqual(r.food.per.cal, 110);
+    assert.strictEqual(r.food.serving.g, 45);
+    assert.deepStrictEqual(r.check, ["g"]);
+    assert.deepStrictEqual(r.missing, ["fiber", "sugar"]);
+    assert.ok(/Check the grams/.test(r.warning) && /Couldn't read fiber and sugar/.test(r.warning), r.warning);
+  } finally { M.img.prepOCR = realPrep; delete global.Tesseract; }
+});
+
+t("BEF-02/OFL-09 Open Food Facts: a CORS-blocked 503 is retried (once for a lookup, twice for search); online it's never blamed on their connection", async () => {
+  M.reset();
+  let n = 0;
+  global.fetch = async () => { n++; if (n === 1) throw new TypeError("Load failed"); return reply(OFF_KIRKLAND_BAR); };
+  const r = await M.food.lookup("096619193738");
+  assert.strictEqual(r.status, "found");
+  assert.strictEqual(n, 2, "second try worked");
+  n = 0;
+  global.fetch = async () => { n++; if (n <= 2) return { ok: false, status: 503, json: async () => null }; return reply({ products: [OFF_OIKOS.product] }); };
+  const list = await M.food.searchOFF("oikos");
+  assert.deepStrictEqual([n, list.length], [3, 1], "search: two retries");
+  n = 0;
+  global.fetch = async () => { n++; throw new TypeError("Failed to fetch"); };
+  await M.food.searchOFF("oikos").then(() => assert.fail(), e => { assert.strictEqual(e.code, "off_down"); assert.strictEqual(e.message, "Open Food Facts isn't answering right now. Try again in a minute, or scan the label."); });
+  assert.strictEqual(n, 3);
+  NAV.onLine = false; n = 0;
+  await M.food.searchOFF("oikos").then(() => assert.fail(), e => { assert.strictEqual(e.code, "offline"); assert.ok(/offline/i.test(e.message)); });
+  assert.strictEqual(n, 0, "offline: no request at all");
+  delete NAV.onLine; delete global.fetch;
+});
+
+t("BEF-06 store price stickers (UPC-A starting with 2): matched on the first 6 digits, Open Food Facts never asked", async () => {
+  M.reset();
+  const gt = M.food.gtin;
+  const code = p => { const b = "20123450" + p; return b + gt.check(b); };      /* item 01234, price digits p */
+  const first = code("599"), later = code("749");
+  assert.ok(gt.valid(first) && gt.valid(later) && first !== later);
+  let calls = 0;
+  global.fetch = async () => { calls++; return reply(OFF_KIRKLAND_BAR); };
+  const miss = await M.food.lookup(first);
+  assert.deepStrictEqual([miss.status, miss.store, calls], ["not_found", true, 0]);
+  assert.ok(/price sticker/.test(miss.message), miss.message);
+  const f = M.foods.add({ name: "Pork tenderloin 2-pack", brand: "King Soopers", source: "label", barcode: first, serving: { qty: 4, unit: "oz", g: 113 }, per: { cal: 120, p: 22, c: 0, f: 3, fiber: 0, sugar: 0, sodium: 50 } });
+  const hit = await M.food.lookup(later);
+  assert.deepStrictEqual([hit.status, hit.saved, hit.food.id, calls], ["found", true, f.id, 0], "another price, same item");
+  assert.strictEqual((await M.food.lookup("0" + later)).food.id, f.id, "EAN-13 form too");
+  delete global.fetch;
+});
+
+t("UX2-03 scanned raw meat / dry rice / pasta get the built-in food's cook info when saved; cooked products don't", async () => {
+  M.reset();
+  const off = (code, name, kcal100, p100, c100) => ({ code, product: { code, product_name: name, brands: "Kroger", serving_size: "4 oz (112 g)", serving_quantity: 112, nutriments: { "energy-kcal_100g": kcal100, proteins_100g: p100, carbohydrates_100g: c100, fat_100g: 2 } }, status: 1 });
+  const upc = b => b + M.food.gtin.check(b);
+  const C = [["Boneless Skinless Chicken Breasts", 110, 23, 0], ["Jasmine Rice", 356, 7, 79], ["Ready Rice Jasmine", 150, 3, 32], ["Penne Rigate", 357, 13, 71], ["Grilled Chicken Breast Strips", 150, 26, 2], ["93% Lean Ground Beef", 152, 21, 0]];
+  const codes = C.map((c, i) => upc("0111100000" + i));
+  const cases = {}; codes.forEach((k, i) => { cases[k] = off("0" + k, C[i][0], C[i][1], C[i][2], C[i][3]); });
+  global.fetch = async url => { const k = codes.find(c => url.indexOf("/0" + c + ".json") >= 0); return k ? reply(cases[k]) : { ok: false, status: 404, json: async () => OFF_NOT_FOUND }; };
+  const y = id => M.DB.generic.find(f => f.id === id).cook.y;
+  const ch = (await M.food.lookup(codes[0])).food;
+  assert.ok(ch.cook, "raw chicken breast gets cook info");
+  assert.strictEqual(ch.cook.word, "raw");
+  near(ch.cook.y, y("g_chicken_breast"), 1e-6);
+  near(ch.cook.per100gCooked.cal, 110 / y("g_chicken_breast"), 0.6, "cooked = this label's raw ÷ y");
+  assert.strictEqual(M.foods.get(ch.id).cook.word, "raw", "saved with it");
+  const rice = (await M.food.lookup(codes[1])).food;
+  assert.ok(rice.cook && rice.cook.word === "dry" && Math.abs(rice.cook.y - y("g_white_rice")) < 1e-6);
+  assert.ok(!(await M.food.lookup(codes[2])).food.cook, "ready rice is already cooked");
+  const pasta = (await M.food.lookup(codes[3])).food;
+  assert.ok(pasta.cook && pasta.cook.word === "dry");
+  assert.ok(!(await M.food.lookup(codes[4])).food.cook, "grilled strips are already cooked");
+  near((await M.food.lookup(codes[5])).food.cook.y, y("g_ground_beef_93"), 1e-6, "93% lean → the 93/7 beef");
+  if (M.cook && typeof M.cook.unitsFor === "function") assert.ok(M.cook.unitsFor(M.foods.get(ch.id), "us").some(o => o.state === "cooked"), "raw and cooked units offered");
+  delete global.fetch;
+});
+
+t("BEF-03/UX2-18 describe (no Claude): the thing they ate must be in the name; 'Avocado oil' isn't an avocado; saved meals by name first (batch by cooked weight); unknown dishes unmatched", async () => {
+  M.reset(); M.ai.setKey("");
+  const d = s => M.food.describeLocal(s);
+  const name = s => { const r = d(s); return r.items.length ? r.items[0].name : "(none) " + r.unmatched.join(","); };
+  assert.ok(/^avocado$/i.test(name("avocado").split(",")[0]) || !/oil/i.test(name("avocado")), "avocado → " + name("avocado"));
+  assert.ok(!/oil/i.test(name("half an avocado")));
+  assert.ok(/ground turkey/i.test(name("turkey")) && !/bacon/i.test(name("4 oz turkey")), name("turkey"));
+  assert.deepStrictEqual(d("two tacos").unmatched, ["two tacos"], "not the taco seasoning");
+  assert.deepStrictEqual(d("9 oz chicken veggie bake").unmatched, ["9 oz chicken veggie bake"], "an unknown dish isn't plain chicken");
+  assert.deepStrictEqual(d("a turkey sandwich").unmatched, ["a turkey sandwich"]);
+  assert.ok(/^Egg/.test(name("2 eggs over easy")) && d("2 eggs over easy").items[0].servings === 2);
+  assert.ok(/white rice/i.test(name("rice")) && /chicken breast/i.test(name("chicken")) && /ground beef/i.test(name("beef")));
+  const ch = M.foods.list().find(f => /chicken breast/i.test(f.name));
+  const bake = M.meals.add({ name: "Chicken veggie bake", slot: "Dinner", items: [{ name: "Chicken", servings: 1, servingLabel: "32 oz raw", g: 907, per: { cal: 1090, p: 204, c: 0, f: 24, fiber: 0, sugar: 0, sodium: 400 }, foodId: ch ? ch.id : undefined }, { name: "Zucchini", servings: 1, servingLabel: "500 g", g: 500, per: { cal: 85, p: 6, c: 15, f: 1, fiber: 5, sugar: 12, sodium: 40 } }], batch: { rawG: 1407, cookedG: 1100 } });
+  let r = d("9 oz chicken veggie bake");
+  assert.deepStrictEqual(r.unmatched, []);
+  assert.strictEqual(r.items[0].mealId, bake.id);
+  assert.deepStrictEqual([r.items[0].servings, r.items[0].servingLabel, r.items[0].state], [9, "1 oz cooked", "cooked"]);
+  near(r.items[0].per.cal * r.items[0].servings, 1175 * 9 * 28.35 / 1100, 2, "9 oz of the cooked batch");
+  assert.strictEqual(d("chicken bake").items[0].mealId, bake.id, "two of its words");
+  const eggs = M.meals.add({ name: "Eggs and toast", slot: "Breakfast", items: [{ name: "Egg", servings: 3, servingLabel: "1 large egg (50 g)", g: 50, per: { cal: 72, p: 6, c: 0, f: 5, fiber: 0, sugar: 0, sodium: 70 } }] });
+  r = d("eggs and toast, 1 cup rice");
+  assert.deepStrictEqual(r.items.map(x => x.mealId || x.name), [eggs.id, "White rice"], "the meal's name spans the 'and'");
+  assert.strictEqual(r.items[0].servings, 1);
+});
+
+t("BEF-03 describe uses M.searchTokens when m-core has it", () => {
+  const had = M.searchTokens;
+  const seen = [];
+  M.searchTokens = s => { seen.push(s); return String(s).toLowerCase().replace(/['’]/g, "").split(/[^a-z]+/).filter(Boolean).map(w => (w.length > 3 && /s$/.test(w) && !/ss$/.test(w) ? w.replace(/ies$/, "y").replace(/oes$/, "o").replace(/s$/, "") : w)); };
+  try {
+    const r = M.food.describeLocal("2 slices daves bread");
+    assert.ok(seen.length > 0, "called");
+    assert.ok(/dave/i.test(r.items[0].name + r.items[0].brand), r.items[0].name);
+  } finally { if (had) M.searchTokens = had; else delete M.searchTokens; }
+});
+
+t("BEF-04/OFL-04 scanner engine: no offline gate (a cached engine starts offline); load capped (~10 s) with a state the UI can show", async () => {
+  const S0 = M.food._.SCAN;
+  assert.ok(S0.loadMs <= 10000 && S0.pageAfterMs <= 4000);
+  /* the page engine's script is already there (cached / loaded before): offline must not stop it */
+  global.BarcodeDetectionAPI = { setZXingModuleOverrides() {}, BarcodeDetector: class { async detect() { return []; } }, prepareZXingModule: async () => true };
+  global.document = { head: { appendChild() {} }, createElement: () => ({}) };
+  NAV.onLine = false;
+  M.food.scanner._setEngine(null);
+  assert.strictEqual(M.food.scanner.state(), "none");
+  const p = M.food.scanner.preload();
+  assert.strictEqual(M.food.scanner.state(), "loading");
+  assert.strictEqual(await p, "wasm", "offline, but the engine is on the phone");
+  assert.strictEqual(M.food.scanner.state(), "ready");
+  delete global.BarcodeDetectionAPI;
+  M.food.scanner._setEngine(null);
+  await M.food.scanner.preload();
+  assert.strictEqual(M.food.scanner.state(), "failed");
+  delete global.document; delete NAV.onLine;
+  M.food.scanner._setEngine(null);
 });
 
 /* ---- run ---- */

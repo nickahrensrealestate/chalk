@@ -60,17 +60,26 @@ function mockServer() {
       if (u.pathname !== "/rest/v1/chalk_sync") return send(res, 404, { message: "not found" });
       if (req.headers.apikey !== KEY && req.headers.apikey !== JWT_KEY) return send(res, 401, { message: "Invalid API key" });
       if (req.headers.apikey === JWT_KEY && req.headers.authorization !== "Bearer " + JWT_KEY) return send(res, 401, { message: "JWT missing" });
-      if (srv.failNext) { const s = srv.failNext; srv.failNext = 0; return send(res, s, { message: "boom" }); }
+      if (srv.failNext) { const s = srv.failNext; srv.failNext = 0; if (srv.retryAfter) res.setHeader("retry-after", String(srv.retryAfter)); return send(res, s, { message: "boom" }); }
+      if (srv.hook) { const h = srv.hook(req, entry, body); if (h) return send(res, h.status, h.body || { message: "hook" }); }
       const q = u.searchParams;
       if (req.method === "GET") {
-        let out = srv.all().filter(r => r.household === hh);                /* RLS: only your own household */
+        let out = srv.all().filter(r => srv.noRLS || r.household === hh);   /* RLS: only your own household */
         for (const [k, v] of q) {
-          if (k === "select" || k === "order" || k === "limit") continue;
-          const m = /^(eq|gt)\.(.*)$/.exec(v); if (!m) return send(res, 400, { message: "bad filter " + k });
+          if (k === "select" || k === "order" || k === "limit" || k === "offset") continue;
+          const m = /^(eq|gt|in|like)\.(.*)$/.exec(v); if (!m) return send(res, 400, { message: "bad filter " + k });
           if (k === "updated_at") { const t = tsVal(m[2]); if (!isFinite(t)) return send(res, 400, { message: "bad ts " + m[2] }); out = out.filter(r => (m[1] === "gt" ? r._us > t : r._us === t)); }
+          else if (m[1] === "in") { const list = m[2].replace(/^\(|\)$/g, "").split(","); out = out.filter(r => list.includes(String(r[k]))); }
+          else if (m[1] === "like") { const re = new RegExp("^" + m[2].split("*").map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$"); out = out.filter(r => re.test(String(r[k]))); }
+          else if (m[1] === "gt") out = out.filter(r => String(r[k]) > m[2]);
           else out = out.filter(r => String(r[k]) === m[2]);
         }
-        if (q.get("order") === "updated_at.asc") out.sort((a, b) => a._us - b._us || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));  /* ties: any order */
+        if (q.get("order")) {
+          const keys = q.get("order").split(",").map(s => s.split(".")[0]);
+          const val = (r, k) => (k === "updated_at" ? r._us : String(r[k]));
+          out.sort((a, b) => { for (const k of keys) { const x = val(a, k), y = val(b, k); if (x < y) return -1; if (x > y) return 1; } return 0; });
+        }
+        if (q.get("offset")) out = out.slice(+q.get("offset"));
         if (q.get("limit")) out = out.slice(0, +q.get("limit"));
         const cols = (q.get("select") || "*").split(",");
         entry.n = out.length; entry.ts = out.map(r => r.updated_at);
@@ -236,12 +245,19 @@ t("turn on: 20-letter code, everything goes up in chunks, headers right, nothing
   assert.strictEqual(post.headers.Prefer, "resolution=merge-duplicates,return=minimal");
   assert.strictEqual(post.headers.apikey, KEY); assert.strictEqual(post.headers["x-household"], code); assert.strictEqual(post.headers["content-type"], "application/json");
   assert.ok(!("Authorization" in post.headers), "no Bearer for a non-JWT key");
-  const get = A.gets()[0];
-  assert.ok(get.url.startsWith(URLBASE + "/rest/v1/chalk_sync?select=kind,id,data,deleted,client_updated,updated_at&household=eq." + code + "&updated_at=gt."), get.url);
-  assert.ok(/&order=updated_at\.asc&limit=500$/.test(get.url));
-  const row = JSON.parse(A.posts()[0].body)[0];
+  /* self-test first: our household row goes up alone, comes back with our code, and another code sees none of it */
+  assert.deepStrictEqual(JSON.parse(post.body).map(r => r.kind + "|" + r.id), ["meta|household"], "first request writes only the household row");
+  const iso = A.gets().find(g => /kind=eq\.meta/.test(g.url) && g.headers["x-household"] !== code);
+  assert.ok(iso && CODE_RE.test(iso.headers["x-household"]), "isolation check with another code");
+  const get = A.gets().find(g => /updated_at=gt\./.test(g.url));
+  assert.ok(get.url.startsWith(URLBASE + "/rest/v1/chalk_sync?select=household,kind,id,data,deleted,client_updated,updated_at&updated_at=gt."), get.url);
+  assert.ok(/&order=updated_at\.asc,kind\.asc,id\.asc&limit=500$/.test(get.url), get.url);
+  /* the code is a secret: only ever in the x-household header, never in a URL */
+  assert.ok(A.reqs.every(r => r.url.indexOf(code) < 0), "code never in a URL");
+  const row = JSON.parse(A.posts()[1].body)[0];
   assert.deepStrictEqual(Object.keys(row).sort(), ["client_updated", "data", "deleted", "device", "household", "id", "kind"]);
   assert.ok(row.device.length <= 64);
+  assert.strictEqual(row.kind, "train", "training goes first");
   /* second sync: the pull re-reads our own rows (jsonb key order!) and nothing goes back up */
   const n = A.posts().length;
   const r2 = await A.sync();
@@ -261,7 +277,9 @@ t("joining with a code typed in lowercase with dashes works", async () => {
   assert.strictEqual(B.M.cloud.status().code, CODE);
   assert.deepStrictEqual(foodNames(B), foodNames(A), "foods arrived");
   assert.deepStrictEqual(mealNames(B), mealNames(A), "meals arrived");
-  assert.ok(B.M.MS.days["nick|" + B.M.today()], "Nick's days backed up on Katerina's phone");
+  assert.ok(!B.M.MS.days["nick|" + B.M.today()], "Nick's diary stays in the cloud, not on Katerina's phone");
+  assert.ok(!Object.keys(B.M.MS.body).some(k => k.startsWith("nick|")), "and so do his weigh-ins");
+  assert.ok(SERVER.get(CODE, "day", "nick|" + B.M.today()), "(they are in the cloud)");
   assert.ok(B.M.MS.profiles.nick && B.M.MS.profiles.nick.weightLb === 185, "Nick's profile arrived");
   assert.ok(B.M.ui.renders >= 1, "re-rendered after applying");
   const savedMacros = JSON.parse(B.store.get("chalk.macros.v1"));
@@ -316,15 +334,15 @@ t("a newer edit wins, whichever phone syncs first", async () => {
 t("deletions propagate and are not resurrected", async () => {
   const meal = Object.values(A.M.MS.meals).find(m => m.name === "Pork tenderloin plate");
   const bodyDay = A.M.addDays(A.M.today(), -4);
-  assert.ok(B.M.MS.meals[meal.id] && B.M.MS.body["nick|" + bodyDay]);
+  assert.ok(B.M.MS.meals[meal.id] && SERVER.get(CODE, "body", "nick|" + bodyDay).deleted === false);
   A.M.meals.remove(meal.id);
   A.M.body.remove(bodyDay, "nick");
   assert.ok((await A.sync()).ok);
   const row = SERVER.get(CODE, "meal", meal.id);
   assert.strictEqual(row.deleted, true, "tombstone, not a delete");
+  assert.strictEqual(SERVER.get(CODE, "body", "nick|" + bodyDay).deleted, true, "weigh-in tombstoned");
   await B.sync();
   assert.ok(!B.M.MS.meals[meal.id], "meal gone on B");
-  assert.ok(!B.M.MS.body["nick|" + bodyDay], "weigh-in gone on B");
   for (let i = 0; i < 2; i++) { await A.sync(); await B.sync(); }
   assert.ok(!A.M.MS.meals[meal.id] && !B.M.MS.meals[meal.id], "still gone after more syncs");
   assert.strictEqual(SERVER.get(CODE, "meal", meal.id).deleted, true);
@@ -463,7 +481,7 @@ t("offline: data stays, the error is plain, the retry succeeds later", async () 
   /* server trouble reads plainly too */
   SERVER.failNext = 503;
   const r2 = await A.sync();
-  assert.match(r2.error, /The cloud is having trouble \(error 503\)/);
+  assert.strictEqual(r2.error, "The cloud is having trouble. We'll try again soon.", "plain words, no codes");
   assert.ok((await A.sync()).ok);
 });
 
@@ -500,13 +518,16 @@ t("paging: 650 new foods cross page and same-timestamp boundaries and all arrive
   const pages = G.gets().filter(g => /updated_at=gt\./.test(g.url));
   assert.ok(pages.length >= 2, "more than one page");
   pages.forEach(g => assert.ok(/updated_at=gt\.[^&]*%3A/.test(g.url), "cursor is URL-encoded"));
-  /* prove the split: page 1 was full and ended inside one request's timestamp group, and page 2 re-read that group */
-  const served = SERVER.log.filter(e => e.method === "GET" && e.hh === CODE && e.ts && /updated_at=gt/.test(e.query));
-  const i = served.findIndex(e => e.n === 500);
+  /* prove the group read: page 1 was full and ended inside one request's timestamp group; that
+     whole group was then read by its own timestamp before the cursor moved past it */
+  const served = SERVER.log.filter(e => e.method === "GET" && e.hh === CODE && e.ts && /updated_at=(gt|eq)/.test(e.query));
+  const i = served.findIndex(e => e.n === 500 && /updated_at=gt/.test(e.query));
   assert.ok(i >= 0 && served[i + 1], "a full page was served");
   const tail = served[i].ts[499];
-  assert.ok(served[i].ts.filter(x => x === tail).length < 200, "page 1 cut a group short");
-  assert.strictEqual(served[i + 1].ts.filter(x => x === tail).length, 200, "page 2 re-read the whole group");
+  const inGroup = SERVER.all(CODE).filter(r => r.updated_at === tail).length;
+  assert.ok(served[i].ts.filter(x => x === tail).length < inGroup, "page 1 cut a group short");
+  assert.ok(/updated_at=eq\./.test(served[i + 1].query) && /offset=0/.test(served[i + 1].query), "then the group by its timestamp: " + served[i + 1].query);
+  assert.strictEqual(served[i + 1].n, inGroup, "the whole group came back");
   assert.ok((await B.sync()).ok);
   assert.strictEqual(Object.keys(B.M.MS.foods).filter(k => k.startsWith("bulk")).length, 650);
   G.M.cloud.leave();
@@ -566,12 +587,24 @@ t("a row the server rejects is skipped; the rest still sync", async () => {
   assert.ok(r.ok, JSON.stringify(r));
   assert.ok(SERVER.all(CODE).some(x => /Broccoli crowns/.test(x.data)), "good row saved");
   assert.ok(!SERVER.all(CODE).some(x => /REJECT/.test(x.data)));
-  assert.match(A.M.cloud.status().lastError, /couldn't be saved/);
+  assert.strictEqual(A.M.cloud.status().lastError, "1 item isn't backed up yet. We'll keep trying.");
+  assert.strictEqual(A.M.cloud.status().stuck, 1);
+  assert.ok(A.M.cloud.status().pending >= 1, "still counted as waiting");
+  /* background syncs don't hammer it; the line stays */
   const n = A.posts().length;
+  await A.M.cloud._.cycle({ reason: "tick" });
+  assert.strictEqual(A.posts().length, n, "not retried on every tick");
+  assert.strictEqual(A.M.cloud.status().lastError, "1 item isn't backed up yet. We'll keep trying.", "the line lasts");
+  /* Sync now tries it again, alone */
   await A.sync();
-  assert.strictEqual(A.posts().length, n, "the bad one isn't retried until it changes");
-  assert.strictEqual(A.M.cloud.status().lastError, "");
+  assert.strictEqual(A.posts().length, n + 1);
+  assert.strictEqual(JSON.parse(A.posts()[n].body).length, 1);
+  assert.strictEqual(A.M.cloud.status().stuck, 1);
+  /* once the server takes it, it's up and the line clears */
   SERVER.reject = null;
+  assert.ok((await A.sync()).ok);
+  assert.ok(SERVER.all(CODE).some(x => /REJECT/.test(x.data)));
+  assert.strictEqual(A.M.cloud.status().lastError, ""); assert.strictEqual(A.M.cloud.status().stuck, 0);
 });
 
 t("a full phone keeps pulled data in memory and never records it as saved", async () => {
@@ -622,7 +655,7 @@ t("JWT keys also send Authorization; a bad key reads plainly", async () => {
   assert.strictEqual(P.reqs[0].headers.Authorization, "Bearer " + JWT_KEY);
   P.M.cloud.configure({ key: "wrong" });
   const r = await P.sync();
-  assert.match(r.error, /turned this phone away \(error 401\)/);
+  assert.strictEqual(r.error, "The cloud didn't let this phone in. We'll try again later.", "no codes, no rejoin advice");
   P.M.cloud.leave();
 });
 

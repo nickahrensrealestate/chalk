@@ -26,6 +26,17 @@ const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, (msg || "") +
 
 const tests = [];
 function t(name, fn) { tests.push({ name, fn }); }
+/* What is on disk, put back together (main key + month keys + body key). */
+function diskState() {
+  const main = JSON.parse(localStorage.getItem(M.KEY));
+  if (!main || main.fmt !== 2) return main;
+  const out = Object.assign({}, main, { days: {}, body: {} });
+  (main.months || []).forEach(m => { const c = JSON.parse(localStorage.getItem(M.KEY + ".d." + m)); Object.keys(c.d).forEach(id => { out.days[id] = M.storage._.unpackDay(id, c.d[id]); }); });
+  const b = localStorage.getItem(M.KEY + ".body");
+  if (b) { const o = JSON.parse(b); Object.keys(o.b).forEach(id => { out.body[id] = M.storage._.unpackBody(id, o.b[id]); }); }
+  return out;
+}
+const macroKeys = () => Object.keys(localStorage.store).filter(k => k.indexOf("chalk.macros") === 0).sort();
 
 /* pretend Chalk picked Nick */
 global.S = { profile: "nick" };
@@ -40,9 +51,11 @@ t("load: state shape + persistence key", () => {
   assert.deepStrictEqual(M.NUT, ["cal", "p", "c", "f", "fiber", "sugar", "sodium"]);
   assert.strictEqual(M.MS.v, 1);
   assert.deepStrictEqual(Object.keys(M.MS).sort(), ["body", "days", "foods", "meals", "profiles", "ui", "updatedAt", "v"]);
+  const mainBefore = localStorage.getItem(M.KEY);
   M.setMode("macros");
-  const raw = JSON.parse(localStorage.getItem(M.KEY));
-  assert.strictEqual(raw.ui.mode, "macros");
+  const raw = JSON.parse(localStorage.getItem(M.UI_KEY));
+  assert.strictEqual(raw.mode, "macros");
+  assert.strictEqual(localStorage.getItem(M.KEY), mainBefore, "a mode tap never rewrites the diary");
   M.setMode("train");
   assert.strictEqual(M.mode(), "train");
   M.setMode("bogus"); assert.strictEqual(M.mode(), "train");
@@ -312,8 +325,7 @@ t("log add / totals / move / remove / copySlot / clearSlot / water", () => {
   /* other person's days are separate */
   assert.deepStrictEqual(M.log.loggedDays("kat"), []);
   assert.strictEqual(M.log.totals(today, "kat").cal, 0);
-  const raw = JSON.parse(localStorage.getItem(M.KEY));
-  assert.strictEqual(raw.days["nick|" + today].entries.length, 2, "persisted");
+  assert.strictEqual(diskState().days["nick|" + today].entries.length, 2, "persisted");
 });
 
 /* ---- body ---- */
@@ -710,56 +722,217 @@ t("storage: a failed save keeps data, retries, reports once per streak", () => {
   M.save();
   assert.strictEqual(M.storage.ok, true); assert.strictEqual(M.storage.lastError, null);
   assert.ok(M.storage.bytes > 100);
-  assert.strictEqual(JSON.parse(localStorage.getItem(M.KEY)).days["nick|" + today].entries.length, 2, "retry wrote everything");
+  assert.strictEqual(diskState().days["nick|" + today].entries.length, 2, "retry wrote everything");
   full = true; M.save();
   assert.strictEqual(calls.length, 2, "a new streak is reported again");
   full = false; M.save();
   localStorage.setItem = orig;
 });
 
-t("storage: daily .bak copy; load falls back to it when the main copy is damaged; reset removes it", () => {
+/* days in a .bak (either format), put back together */
+function bakDays(b) {
+  if (b.bak === 1) return b.data.days;
+  const out = {};
+  Object.keys(b.d || {}).forEach(m => Object.keys(b.d[m].d).forEach(id => { out[id] = M.storage._.unpackDay(id, b.d[m].d[id]); }));
+  return out;
+}
+const QUOTA = () => { const e = new Error("The quota has been exceeded."); e.name = "QuotaExceededError"; return e; };
+
+t("storage: daily .bak copy; damaged data is copied aside, then restored from the backup; reset removes it", () => {
   const BAK = M.KEY + ".bak";
   M.reset();
   assert.strictEqual(localStorage.getItem(BAK), null, "reset clears the backup");
+  M.foods.add({ name: "Backed up food", per: { cal: 1 } });
   M.log.add(today, { slot: "Lunch", name: "Day one", per: { cal: 1 } });   /* 2nd save of the day copies the 1st */
   const bak = JSON.parse(localStorage.getItem(BAK));
-  assert.strictEqual(bak.day, today); assert.strictEqual(bak.data.v, 1);
+  assert.strictEqual(bak.bak, 2); assert.strictEqual(bak.day, today); assert.strictEqual(bak.main.v, 1); assert.strictEqual(bak.main.fmt, 2);
   assert.strictEqual(M.storage.bakDay, today);
   const kept = localStorage.getItem(BAK);
   M.log.add(today, { slot: "Lunch", name: "Later today", per: { cal: 1 } });
   assert.strictEqual(localStorage.getItem(BAK), kept, "one copy a day");
-  /* next day: the first save copies the last good main */
+  /* next day: the first save copies the last good save */
   const t0 = NOW; NOW += DAY;
   M.log.add(M.today(), { slot: "Lunch", name: "Day two", per: { cal: 1 } });
   const b2 = JSON.parse(localStorage.getItem(BAK));
   assert.strictEqual(b2.day, M.today());
-  assert.strictEqual(b2.data.days["nick|" + today].entries.length, 2, "yesterday's last save");
-  /* damage the main copy */
-  localStorage.setItem(M.KEY, "{\"v\":1,\"days\":");
+  assert.strictEqual(bakDays(b2)["nick|" + today].entries.length, 2, "yesterday's last save");
+  /* damage the main copy: a copy is kept aside before anything is saved, then the backup fills the gap */
+  const junk = "{\"v\":1,\"days\":";
+  localStorage.setItem(M.KEY, junk);
   M.load();
   assert.strictEqual(M.storage.restoredFrom, M.today());
-  assert.strictEqual(M.MS.days["nick|" + today].entries.length, 2, "restored from the backup");
+  assert.strictEqual(localStorage.getItem(M.KEY + ".damaged"), junk, "damaged copy kept");
+  assert.deepStrictEqual(M.storage.damaged, [M.KEY + ".damaged"]);
+  assert.strictEqual(M.MS.days["nick|" + today].entries.length, 2, "days kept");
+  assert.ok(Object.values(M.MS.foods).some(f => f.name === "Backed up food"), "foods back from the backup");
   localStorage.setItem(M.KEY, JSON.stringify({ v: 1, days: "junk" }));
   M.load(); assert.ok(M.storage.restoredFrom, "a bad shape counts as damaged");
+  assert.strictEqual(localStorage.getItem(M.KEY + ".damaged"), junk, "an older damaged copy is never overwritten");
+  assert.strictEqual(localStorage.getItem(M.KEY + ".damaged.2"), JSON.stringify({ v: 1, days: "junk" }));
   M.save();
-  assert.strictEqual(JSON.parse(localStorage.getItem(M.KEY)).days["nick|" + today].entries.length, 2, "the restored copy is saved back");
+  assert.strictEqual(diskState().days["nick|" + today].entries.length, 2, "the restored copy is saved back");
   M.load(); assert.strictEqual(M.storage.restoredFrom, null, "healthy main copy");
-  /* full phone: the backup is dropped to make room for the main copy */
-  const orig = localStorage.setItem; let room = false;
-  localStorage.setItem = function (k, v) { if (k === M.KEY && !room && localStorage.getItem(BAK) != null) { const e = new Error("full"); e.name = "QuotaExceededError"; throw e; } return orig.call(this, k, v); };
+  /* a damaged month key: copied aside, its days come back from the backup */
+  const mk = M.KEY + ".d." + today.slice(0, 7);
+  localStorage.setItem(mk, "{broken");
+  M.load();
+  assert.strictEqual(localStorage.getItem(M.KEY + ".damaged.d." + today.slice(0, 7)), "{broken");
+  assert.strictEqual(M.MS.days["nick|" + today].entries.length, 2, "month restored from the backup");
+  assert.ok(M.storage.restoredFrom);
   M.save();
-  assert.strictEqual(M.storage.ok, true, "saved after dropping the backup");
-  assert.strictEqual(localStorage.getItem(BAK), null);
+  assert.ok(JSON.parse(localStorage.getItem(mk)).d, "month key written again");
+  M.load(); assert.strictEqual(M.storage.restoredFrom, null);
+  /* an old month, so a trimmed backup is smaller than a full one */
+  M.log.add(M.addDays(today, -100), { slot: "Lunch", name: "Long ago", per: { cal: 1 } });
+  NOW += DAY; M.save();
+  assert.ok(bakDays(JSON.parse(localStorage.getItem(BAK)))["nick|" + M.addDays(today, -100)], "full copy has the old month");
+  /* full phone: the backup is never dropped; it's swapped for a trimmed copy to make room */
+  const orig = localStorage.setItem;
+  localStorage.setItem = function (k, v) { if (k === M.KEY && !/^\{"bak":2,"day":"[^"]*","at":\d+,"trim":1/.test(localStorage.getItem(BAK) || "")) throw QUOTA(); return orig.call(this, k, v); };
+  M.log.add(M.today(), { slot: "Lunch", name: "Needs room", per: { cal: 1 } });
+  assert.strictEqual(M.storage.ok, true, "saved after trimming the backup");
+  const tb = JSON.parse(localStorage.getItem(BAK));
+  assert.strictEqual(tb.trim, 1); assert.ok(!bakDays(tb)["nick|" + M.addDays(today, -100)], "old month left out"); assert.ok(bakDays(tb)["nick|" + today], "recent days kept");
+  /* still full: the save fails, the backup stays */
+  localStorage.setItem = function (k, v) { if (k === M.KEY) throw QUOTA(); return orig.call(this, k, v); };
+  M.log.add(M.today(), { slot: "Lunch", name: "No room", per: { cal: 1 } });
+  assert.strictEqual(M.storage.ok, false);
+  assert.ok(localStorage.getItem(BAK), "backup never deleted");
   localStorage.setItem = orig;
-  /* a big data set gets no copy (like Chalk's own chalk.bak), so it can't crowd out the training log */
-  M.save(); NOW += DAY; M.save();
-  assert.ok(localStorage.getItem(BAK), "small data: copied");
+  M.save(); assert.strictEqual(M.storage.ok, true);
+  /* big data: the daily copy is trimmed, never just dropped */
   const cap = M.storage.bakMax; M.storage.bakMax = 50;
   NOW += DAY; M.save();
-  assert.strictEqual(localStorage.getItem(BAK), null, "over the cap: no copy, old copy dropped");
+  const big = JSON.parse(localStorage.getItem(BAK));
+  assert.strictEqual(big.trim, 1, "over the cap: a trimmed copy");
+  assert.ok(big.main.foods && big.main.profiles, "profiles, foods and meals kept");
   assert.strictEqual(M.storage.ok, true);
-  M.storage.bakMax = cap; NOW -= DAY;
+  M.storage.bakMax = cap;
   NOW = t0;
+  M.reset();
+  assert.deepStrictEqual(macroKeys(), [M.KEY, M.UI_KEY].sort(), "reset leaves only the fresh main key and the ui key");
+});
+
+t("storage: month keys + body key; a save writes only what changed; entries packed small", () => {
+  M.reset();
+  const writes = [];
+  const orig = localStorage.setItem;
+  localStorage.setItem = function (k, v) { writes.push(k); return orig.call(this, k, v); };
+  M.log.add(M.addDays(today, -40), { slot: "Lunch", name: "Old", per: { cal: 5 } });
+  M.log.add(today, { slot: "Lunch", name: "Now", per: { cal: 5 } });
+  M.body.add({ date: today, w: 185 });
+  writes.length = 0;
+  M.log.add(today, { slot: "Dinner", name: "Steak", servings: 2, servingLabel: "4 oz (113 g)", g: 113, per: { cal: 280, p: 30, c: 0, f: 17 } });
+  assert.deepStrictEqual(writes.sort(), [M.KEY, M.KEY + ".d." + today.slice(0, 7)].sort(), "one month key + the main key, once");
+  writes.length = 0;
+  M.setMode("macros"); M.setPerson("nick");
+  assert.deepStrictEqual(Array.from(new Set(writes)), [M.UI_KEY], "mode / person taps write only the ui key");
+  writes.length = 0;
+  M.body.add({ date: M.addDays(today, -1), w: 186 });
+  assert.deepStrictEqual(writes.sort(), [M.KEY, M.KEY + ".body"].sort());
+  M.setMode("train");
+  localStorage.setItem = orig;
+  const main = JSON.parse(localStorage.getItem(M.KEY));
+  assert.strictEqual(main.fmt, 2); assert.ok(!("days" in main) && !("body" in main) && !("ui" in main));
+  assert.deepStrictEqual(main.months, [M.addDays(today, -40).slice(0, 7), today.slice(0, 7)].sort());
+  /* packed entry: short keys, zero nutrients and empty strings left out */
+  const chunk = JSON.parse(localStorage.getItem(M.KEY + ".d." + today.slice(0, 7)));
+  const pe = chunk.d["nick|" + today].e.find(x => x[2] === "Steak");
+  assert.deepStrictEqual(pe[6], [280, 30, 0, 17], "nutrients as a list, trailing zeros dropped"); assert.strictEqual(pe[5], 2); assert.strictEqual(pe.length, 8, "empty fields at the end left out");
+  /* load puts it back exactly */
+  const before = M.export();
+  M.load();
+  assert.deepStrictEqual(M.export(), before, "load rebuilds M.MS exactly");
+  /* removing the last day of a month removes its key */
+  M.log.clearSlot(M.addDays(today, -40), "Lunch");
+  M.MS.days = Object.assign({}, M.MS.days); delete M.MS.days["nick|" + M.addDays(today, -40)];
+  M.save();
+  assert.strictEqual(localStorage.getItem(M.KEY + ".d." + M.addDays(today, -40).slice(0, 7)), null);
+  assert.deepStrictEqual(JSON.parse(localStorage.getItem(M.KEY)).months, [today.slice(0, 7)]);
+  /* a day only looked at (M.day) is not written */
+  M.day(M.addDays(today, -200)); M.save();
+  assert.strictEqual(localStorage.getItem(M.KEY + ".d." + M.addDays(today, -200).slice(0, 7)), null);
+  /* one save per action: log.add of a saved food touches the food and saves once */
+  const f = M.foods.add({ name: "Saved", per: { cal: 10 } });
+  let saves = 0; const s0 = M.save; M.save = function () { saves++; return s0.apply(this, arguments); };
+  M.log.add(today, { slot: "Lunch", foodId: f.id });
+  M.save = s0;
+  assert.strictEqual(saves, 1, "one save");
+  assert.strictEqual(M.foods.get(f.id).uses, 1);
+});
+
+t("storage: packing round-trips exactly, odd records included", () => {
+  const P = M.storage._;
+  const J = v => JSON.parse(JSON.stringify(v));
+  const std = { id: "e1", slot: "Dinner", name: "Chicken breast, boneless skinless", brand: "", servings: 6.5, servingLabel: "1 oz raw", g: 28.3495, per: { cal: 34.02, p: 6.3787, c: 0, f: 0.7371, fiber: 0, sugar: 0, sodium: 12.7573 }, at: 1790618400000, foodId: "g_chicken_breast", state: "raw", cook: { y: 0.7258, word: "raw" } };
+  const cases = [
+    std,
+    Object.assign({}, std, { state: "cooked", cook: { y: 2.8077, word: "dry" }, mealId: "m1", brand: "Kirkland" }),
+    Object.assign({}, std, { per: { cal: 0, p: 0, c: 0, f: 0, fiber: 0, sugar: 0, sodium: 0 }, servings: 1, g: null }),
+    Object.assign({}, std, { source: "photo", items: [{ name: "x" }], note: "" }),              /* extra fields kept */
+    { id: "e2", slot: "Brunch", name: "Odd slot", per: { cal: 1 } },                            /* not the app's shape: kept whole */
+    Object.assign({}, std, { per: { cal: 1, p: 2, alcohol: 3 } }),
+    Object.assign({}, std, { cook: { y: 0.7, word: "raw", extra: 1 } }),
+    Object.assign({}, std, { foodId: undefined }),
+    null, 5, "text"
+  ];
+  cases.forEach((e, i) => assert.deepStrictEqual(P.unpackEntry(J(P.packEntry(e))), J(e === undefined ? null : e), "entry " + i));
+  const day = { id: "nick|2026-09-28", pid: "nick", date: "2026-09-28", entries: cases.slice(0, 5), water: 24, note: "felt good", updatedAt: 99 };
+  assert.deepStrictEqual(P.unpackDay(day.id, J(P.packDay(day.id, day))), J(day));
+  const odd = Object.assign({}, day, { water: undefined, extra: { a: 1 } });
+  assert.deepStrictEqual(P.unpackDay(day.id, J(P.packDay(day.id, odd))), J(odd), "a day without water is kept whole");
+  const b = { id: "kat|2026-09-01", pid: "kat", date: "2026-09-01", w: 140.2, rhr: null, at: 5 };
+  assert.deepStrictEqual(P.unpackBody(b.id, J(P.packBody(b.id, b))), b);
+  const ob = Object.assign({}, b, { note: "x" });
+  assert.deepStrictEqual(P.unpackBody(b.id, J(P.packBody(b.id, ob))), ob);
+  /* packed is smaller */
+  assert.ok(JSON.stringify(P.packEntry(std)).length < JSON.stringify(std).length * 0.6, JSON.stringify(P.packEntry(std)));
+  assert.deepStrictEqual(P.unpackEntry(J(P.packEntry(Object.assign({}, std, { state: undefined, cook: undefined })))), J(Object.assign({}, std, { state: undefined, cook: undefined })));
+  assert.deepStrictEqual(P.packEntry(Object.assign({}, std, { state: undefined, cook: { y: 1, word: "raw" } })).r !== undefined, true, "cook without a state is kept whole");
+});
+
+t("storage: the old one-key format loads, moves to month keys on the next save, and stays put when that doesn't fit", () => {
+  M.reset();
+  const old = { v: 1, updatedAt: 5, ui: { mode: "macros", person: "nick", date: null, tab: "diary" }, profiles: { nick: Object.assign(M.cp(M.person("nick")), { setupAt: 1, sex: "m" }) }, foods: { f1: { id: "f1", name: "Saved food", per: { cal: 1 } } }, meals: {}, days: {}, body: {} };
+  for (let i = 0; i < 90; i++) {
+    const d = M.addDays(today, -i), id = "nick|" + d;
+    old.days[id] = { id, pid: "nick", date: d, entries: [{ id: "e" + i, slot: "Lunch", name: "Food " + i, brand: "", servings: 1, servingLabel: "1 serving", g: null, per: { cal: 100 + i, p: 10, c: 0, f: 0, fiber: 0, sugar: 0, sodium: 0 }, at: NOW - i * DAY }], water: 0, note: "", updatedAt: NOW - i * DAY };
+    if (i % 7 === 0) old.body[id] = { id, pid: "nick", date: d, w: 190 - i / 10, rhr: 60, at: NOW - i * DAY };
+  }
+  const oldStr = JSON.stringify(old);
+  Object.keys(localStorage.store).forEach(k => delete localStorage.store[k]);
+  localStorage.setItem(M.KEY, oldStr);
+  M.load();
+  assert.strictEqual(M.mode(), "macros", "ui from the old key");
+  assert.strictEqual(Object.keys(M.MS.days).length, 90);
+  const want = M.export();
+  /* doesn't fit next to the old key: nothing is lost, the old key stays readable */
+  const orig = localStorage.setItem;
+  localStorage.setItem = function (k, v) { if (k.indexOf(M.KEY + ".d.") === 0 && Object.keys(localStorage.store).filter(x => x.indexOf(M.KEY + ".d.") === 0).length >= 2) throw QUOTA(); return orig.call(this, k, v); };
+  M.save();
+  localStorage.setItem = orig;
+  assert.strictEqual(M.storage.ok, true, "saved in the old format");
+  assert.deepStrictEqual(macroKeys().filter(k => k.indexOf(M.KEY + ".d.") === 0), [], "half-done month keys taken back");
+  assert.strictEqual(JSON.parse(localStorage.getItem(M.KEY)).days["nick|" + today].entries.length, 1, "old key still whole");
+  M.load();
+  assert.deepStrictEqual(Object.assign(M.export(), { updatedAt: 0 }), Object.assign(M.cp(want), { updatedAt: 0 }));
+  /* with room: moved over */
+  M.save();
+  const main = JSON.parse(localStorage.getItem(M.KEY));
+  assert.strictEqual(main.fmt, 2); assert.ok(main.months.length >= 3);
+  assert.ok(localStorage.getItem(M.KEY + ".body"));
+  assert.ok(JSON.parse(localStorage.getItem(M.KEY + ".bak")).bak === 1, "the day's backup is the old key, taken before the move");
+  M.load();
+  assert.deepStrictEqual(Object.assign(M.export(), { updatedAt: 0 }), Object.assign(M.cp(want), { updatedAt: 0 }), "same data after the move");
+  const packed = macroKeys().filter(k => !/bak|ui$/.test(k)).reduce((n, k) => n + localStorage.getItem(k).length, 0);
+  assert.ok(packed < oldStr.length * 0.75, "smaller on disk: " + packed + " vs " + oldStr.length);
+  /* an old build (rolled back) wrote the old format again: newer month-key days are not lost */
+  const later = JSON.parse(JSON.stringify(want));
+  later.days["nick|" + today].entries = [];
+  later.days["nick|" + today].updatedAt = 1;
+  localStorage.setItem(M.KEY, JSON.stringify(later));
+  M.load();
+  assert.strictEqual(M.MS.days["nick|" + today].entries.length, 1, "the newer copy in a month key wins");
   M.reset();
 });
 

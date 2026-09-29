@@ -13,15 +13,15 @@
 <link rel="icon" href="icon-192.png">
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css">
-<link rel="stylesheet" href="m-trends.css">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
+<link rel="stylesheet" href="m.css?v=16">
+<link rel="stylesheet" href="m-trends.css?v=16">
 <style>
 :root{
-  --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#6B7079; --line:#DBD7CD;
-  --acc:#8F5E08; --acc-ink:#FFFFFF; --acc-soft:#F3E4C2; --ok:#24714A; --ok-soft:#DCEFE3; --warn:#C7432B; --warn-soft:#F6DED9;
+  --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
+  --acc:#8F5E08; --acc-ink:#FFFFFF; --acc-soft:#F3E4C2; --ok:#24714A; --ok-soft:#DCEFE3; --warn:#B03A24; --warn-soft:#F6DED9;
   --chip:#EEEAE0; --shadow:0 1px 2px rgba(0,0,0,.06);
-  --mus:#2F7DF6; --mus-line:#1B5FCC; --skin:#ECE9E1; --skin-line:#D0CCC1; --mus0:#DDD9CE; --mus0-line:#C6C1B4;
+  --mus:#2F7DF6; --mus-t:#1F66D6; --mus-line:#1B5FCC; --skin:#ECE9E1; --skin-line:#D0CCC1; --mus0:#DDD9CE; --mus0-line:#C6C1B4;
   --fig:#8E949C; --fig2:#C9CDD3;
 }
 @media (prefers-color-scheme: dark){
@@ -29,7 +29,7 @@
     --bg:#111417; --sur:#1A1E23; --sur2:#232830; --ink:#F2EFE8; --mut:#8E949C; --line:#2C323A;
     --acc:#F2B33D; --acc-ink:#1A1400; --acc-soft:#33290F; --ok:#58C98A; --ok-soft:#14301F; --warn:#E8654E; --warn-soft:#3A1A14;
     --chip:#262B33; --shadow:none;
-    --mus:#3D8BEF; --mus-line:#8CC0FF; --skin:#2B3139; --skin-line:#3D444D; --mus0:#353C45; --mus0-line:#4A525B;
+    --mus:#3D8BEF; --mus-t:#3D8BEF; --mus-line:#8CC0FF; --skin:#2B3139; --skin-line:#3D444D; --mus0:#353C45; --mus0-line:#4A525B;
     --fig:#A7ADB5; --fig2:#4A525B;
   }
 }
@@ -37,7 +37,7 @@
   --bg:#111417; --sur:#1A1E23; --sur2:#232830; --ink:#F2EFE8; --mut:#8E949C; --line:#2C323A;
   --acc:#F2B33D; --acc-ink:#1A1400; --acc-soft:#33290F; --ok:#58C98A; --ok-soft:#14301F; --warn:#E8654E; --warn-soft:#3A1A14;
   --chip:#262B33; --shadow:none;
-  --mus:#3D8BEF; --mus-line:#8CC0FF; --skin:#2B3139; --skin-line:#3D444D; --mus0:#353C45; --mus0-line:#4A525B;
+  --mus:#3D8BEF; --mus-t:#3D8BEF; --mus-line:#8CC0FF; --skin:#2B3139; --skin-line:#3D444D; --mus0:#353C45; --mus0-line:#4A525B;
   --fig:#A7ADB5; --fig2:#4A525B;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -55,6 +55,11 @@ body{
 button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;touch-action:manipulation;cursor:pointer}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .stepper button:focus-visible,.stepper input:focus-visible,.seg button:focus-visible{outline-offset:-3px}
+/* a selected segment or mode button is filled with --acc, so its ring uses the text color instead */
+.seg button.on:focus-visible,.modebar button.on:focus-visible{outline-color:var(--acc-ink);outline-offset:-4px}
+.modebar button:focus-visible{outline-offset:-4px}
+.m-file:focus-within{outline:2px solid var(--acc);outline-offset:2px}
+input::placeholder,textarea::placeholder{color:var(--mut);opacity:1}
 input,select{font:inherit;color:inherit}
 .cond{font-family:"Barlow Condensed","Barlow",-apple-system,"Helvetica Neue",Arial,sans-serif}
 .num{font-variant-numeric:tabular-nums}
@@ -71,8 +76,9 @@ input,select{font:inherit;color:inherit}
 .modebar button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;font-family:"Barlow Condensed","Barlow",sans-serif;font-weight:700;font-size:17px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
 .modebar button.on{background:var(--acc);color:var(--acc-ink)}
 .modebar svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.modebar .mb-l{white-space:nowrap;font-variant-numeric:tabular-nums}
 
-.wrap{padding:0 max(12px,env(safe-area-inset-right)) 24px max(12px,env(safe-area-inset-left));display:flex;flex-direction:column;gap:12px;max-width:560px;margin:0 auto}
+.wrap{padding:10px max(12px,env(safe-area-inset-right)) 24px max(12px,env(safe-area-inset-left));display:flex;flex-direction:column;gap:12px;max-width:560px;margin:0 auto}
 
 /* cards */
 .card{background:var(--sur);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
@@ -84,7 +90,7 @@ input,select{font:inherit;color:inherit}
 .tag.ok{background:var(--ok-soft);color:var(--ok)}
 .tag.warn{background:var(--warn-soft);color:var(--warn)}
 .chip{display:inline-flex;align-items:center;padding:6px 11px;border-radius:999px;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--chip);color:var(--mut);min-height:36px}
-.chip.ok{background:var(--mus);border-color:var(--mus);color:var(--sur)}
+.chip.ok{background:var(--mus-t);border-color:var(--mus-t);color:var(--sur)}
 .chip.gap{background:var(--warn-soft);color:var(--warn);border-color:var(--warn);border-style:dashed}
 
 /* buttons */
@@ -105,7 +111,7 @@ input,select{font:inherit;color:inherit}
 .ex-row .n{font-weight:600;font-size:17px;line-height:1.2}
 .ex-row .t{color:var(--mut);font-size:14px;margin-top:2px;font-variant-numeric:tabular-nums}
 .ex-row .t b{color:var(--ink);font-weight:600}
-.ex-div{padding:12px 14px 4px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mus);border-top:1px solid var(--line)}
+.ex-div{padding:12px 14px 4px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mus-t);border-top:1px solid var(--line)}
 .ex-div:first-child{border-top:0}
 
 /* sticky start */
@@ -167,7 +173,8 @@ input,select{font:inherit;color:inherit}
 
 /* rest timer bar */
 /* full-screen rest countdown */
-#rest{position:absolute;inset:0;z-index:25;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px max(20px,env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left))}
+/* starts under the Train | Macros bar so that bar stays tappable while resting */
+#rest{position:absolute;left:0;right:0;bottom:0;top:var(--rest-top,0px);z-index:25;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px max(20px,env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left))}
 #rest.on{display:flex}
 .rest .l{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
 .rest .t{font-family:"Barlow Condensed","Barlow",sans-serif;font-size:128px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;margin:6px 0 10px}
@@ -293,6 +300,7 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
 .sheet.on{transform:translateY(0)}
 .sheet .sh{padding:14px max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left));display:flex;justify-content:space-between;align-items:center}
 .sheet .sh h3{margin:0;font-family:"Barlow Condensed","Barlow",sans-serif;font-size:24px;font-weight:600}
+#sheetT:focus{outline:none}
 .sheet .sb{overflow:auto;overscroll-behavior:contain;padding:0 max(16px,env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));-webkit-overflow-scrolling:touch}
 .ex-row .n,.card .hd h3,.opt>span:first-child,.summary .row>span:first-child,.move .mn,.sheet .sh h3{overflow-wrap:anywhere;min-width:0}
 .opt{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:left;padding:12px 4px;border-top:1px solid var(--line);min-height:48px}
@@ -300,12 +308,16 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
 .opt .m{font-size:13px;color:var(--mut);text-align:right}
 .opt.cur{color:var(--acc)}
 .opt-grp{margin:12px 4px 4px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
-.opt-grp.foc{color:var(--mus)}
+.opt-grp.foc{color:var(--mus-t)}
 .summary .row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
 .summary .row:first-child{border-top:0}
 .summary .chg{font-family:"Barlow Condensed","Barlow",sans-serif;font-size:20px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
 .toast{position:absolute;left:16px;right:16px;width:max-content;max-width:calc(100% - 32px);margin:0 auto;bottom:calc(96px + env(safe-area-inset-bottom));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;z-index:30;opacity:0;transition:opacity .2s;pointer-events:none;white-space:normal;text-align:center}
 .toast.on{opacity:1}
+/* while a sheet is open the bottom is covered, so the toast shows at the top */
+.toast.top{top:calc(12px + env(safe-area-inset-top));bottom:auto !important}
+.upd{position:absolute;left:16px;right:16px;width:max-content;max-width:calc(100% - 32px);margin:0 auto;bottom:calc(96px + env(safe-area-inset-bottom));z-index:29;background:var(--acc);color:var(--acc-ink);padding:12px 18px;min-height:44px;border-radius:12px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.28)}
+.upd[hidden],#sheet.on~.upd{display:none}
 .empty{padding:28px 14px;text-align:center;color:var(--mut)}
 @media (prefers-reduced-motion: reduce){*{transition:none !important}}
 </style>
@@ -313,8 +325,8 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
 <body>
 <div class="top"><h1 id="title">Chalk</h1><div class="sub" id="subtitle"></div></div>
 <div class="modebar" id="modebar">
-  <button data-m="mode" data-v="train" class="on"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h2M19 12h2M6 8v8M18 8v8M9 6v12M15 6v12M9 12h6"/></svg>Train</button>
-  <button data-m="mode" data-v="macros"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v6a3 3 0 0 0 6 0V3M8 3v18M5 3v6M11 3v6M18 3c-2 1.5-3 4-3 7 0 1.7 1.3 3 3 3v8"/></svg>Macros</button>
+  <button data-m="mode" data-v="train" class="on" aria-pressed="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h2M19 12h2M6 8v8M18 8v8M9 6v12M15 6v12M9 12h6"/></svg><span class="mb-l">Train</span></button>
+  <button data-m="mode" data-v="macros" aria-pressed="false"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v6a3 3 0 0 0 6 0V3M8 3v18M5 3v6M11 3v6M18 3c-2 1.5-3 4-3 7 0 1.7 1.3 3 3 3v8"/></svg>Macros</button>
 </div>
 <div id="scroll"><div class="wrap" id="app"></div></div>
 <div class="cta" id="cta"></div>
@@ -336,15 +348,16 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
 </nav>
 
 <div class="sheet-bg" id="sheetBg"></div>
-<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetT"><div class="sh"><h3 id="sheetT"></h3><button class="icon" data-a="sheet-close" aria-label="Close">×</button></div><div class="sb" id="sheetB"></div></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetT" aria-hidden="true" inert><div class="sh"><h3 id="sheetT" tabindex="-1"></h3><button class="icon" data-a="sheet-close" aria-label="Close">×</button></div><div class="sb" id="sheetB"></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<button class="upd" id="upd" data-a="upd-reload" hidden>Updated. Tap to reload</button>
 
-<script src="m-core.js"></script>
-<script src="m-data.js"></script>
-<script src="m-food.js"></script>
-<script src="m-ui.js"></script>
-<script src="m-trends.js"></script>
-<script src="m-sync.js"></script>
+<script src="m-core.js?v=16"></script>
+<script src="m-data.js?v=16"></script>
+<script src="m-food.js?v=16"></script>
+<script src="m-ui.js?v=16"></script>
+<script src="m-trends.js?v=16"></script>
+<script src="m-sync.js?v=16"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -612,8 +625,35 @@ function migrate(S){
   if(A) A.items.forEach(it=>{ if(!it.t) it.t=it.moves?"block":"lift"; if(!it.id) it.id=uid(); });
   if(A){ let live=null; try{ live=CT&&A.items[CT.bi]; }catch(e){} A.items.forEach(it=>{ if(it!==live&&it.t==="block"&&it.mode==="timer"&&it.status==="running") it.status=it.done>0?"done":"idle"; }); }
 }
+/* A restored backup or a synced save is data from outside this phone: numbers must be numbers and muscle / equipment
+   names must be known ones, so no field can turn into markup on screen. Real saves pass through unchanged. */
+function cleanTrain(S){
+  if(!S||typeof S!=="object") return;
+  const isO=o=>o&&typeof o==="object", num=v=>{ const n=typeof v==="number"?v:Number(v); return isFinite(n)?n:0; };
+  const nums=(o,keys)=>{ if(isO(o)) keys.forEach(k=>{ if(o[k]!=null&&typeof o[k]!=="number") o[k]=num(o[k]); }); };
+  const MS=new Set(MUSCLES.concat(["Other"])), musc=a=>Array.isArray(a)?a.filter(m=>MS.has(m)):[];
+  const set=x=>nums(x,["w","r"]);
+  const item=x=>{ if(!isO(x)) return; nums(x,["sets","lo","hi","work","rest","rounds","planned","off","n"]);
+    if(Array.isArray(x.done)) x.done.forEach(set); else if(x.done!=null) nums(x,["done"]);
+    if(Array.isArray(x.moves)) x.moves.forEach(m=>nums(m,["w","reps"])); if(isO(x.draft)) nums(x.draft,["w","r"]); };
+  const items=W=>{ if(isO(W)&&Array.isArray(W.items)) W.items.forEach(item); };
+  const rec=r=>{ if(!isO(r)) return; nums(r,["start","end","volume","nsets"]);
+    if(isO(r.sets)) Object.keys(r.sets).forEach(k=>{ if(Array.isArray(r.sets[k])) r.sets[k].forEach(set); else delete r.sets[k]; });
+    if(Array.isArray(r.blocks)) r.blocks.forEach(b=>{ nums(b,["done","rounds","work","rest"]); if(Array.isArray(b.moves)) b.moves.forEach(m=>nums(m,["w","reps"])); });
+    if(Array.isArray(r.results)) r.results.forEach(x=>{ nums(x,["from","to","dsets"]); if(isO(x.range)) nums(x.range,["lo","hi"]); }); };
+  if(Array.isArray(S.log)) S.log.forEach(rec);
+  if(isO(S.lastSummary)){ rec(S.lastSummary.rec); if(Array.isArray(S.lastSummary.results)) S.lastSummary.results.forEach(x=>{ nums(x,["from","to","dsets"]); if(isO(x.range)) nums(x.range,["lo","hi"]); }); }
+  if(isO(S.ex)) Object.keys(S.ex).forEach(k=>{ const E=S.ex[k]; if(!isO(E)){ delete S.ex[k]; return; } nums(E,["w","miss","best","streak","sets","reps"]);
+    if(Array.isArray(E.hist)) E.hist.forEach(h=>{ nums(h,["d","w","e1"]); if(isO(h)&&Array.isArray(h.r)) h.r=h.r.map(num); });
+    if(isO(E.last)){ nums(E.last,["w"]); if(Array.isArray(E.last.r)) E.last.r=E.last.r.map(num); } if(isO(E.range)) nums(E.range,["lo","hi"]); });
+  if(isO(S.custom)) Object.keys(S.custom).forEach(k=>{ const c=S.custom[k]; if(!isO(c)){ delete S.custom[k]; return; } if(!MS.has(c.m)) c.m="Other"; if(!TYPE_LABEL[c.t]) c.t="mc"; c.s=musc(c.s); nums(c,["inc","rest","guess"]); });
+  if(isO(S.program)&&isO(S.program.workouts)) Object.values(S.program.workouts).forEach(W=>{ if(isO(W)){ if(W.focus) W.focus=musc(W.focus); items(W); } });
+  if(isO(S.plan)){ items(S.plan); if(S.plan.off) S.plan.off=musc(S.plan.off); }
+  if(isO(S.active)){ items(S.active); nums(S.active,["start"]); }
+}
 /* Bring older saves up to date. The full-body A/B/C program becomes Pull / Push / Legs; weights and history stay. */
 function upgrade(S){
+  cleanTrain(S);
   S.custom=S.custom||{};
   if(S.profile===undefined && (S.log.length||S.active)) S.profile="strength";
   migrate(S);
@@ -637,15 +677,16 @@ function upgrade(S){
 const KEY = "chalk.v1";
 const cp = o => JSON.parse(JSON.stringify(o));
 function fresh(){ return {v:1,updatedAt:0,settings:{restC:60,restA:45,sound:true,wake:true,theme:"system"},program:buildProgram("weights",PRESETS.nick.mix,0),mix:cp(PRESETS.nick.mix),goal:{mode:"weights",setAt:null},block:0,cyc:{},ex:{},log:[],next:"PULL",active:null,custom:{},absNext:true,plan:null}; }
-function load(){ let t=null; try{ t=localStorage.getItem(KEY); const s=JSON.parse(t); if(s&&s.v===1) return s; }catch(e){ try{ if(t) localStorage.setItem("chalk.bad",t); }catch(e2){} } return null; }
-/* daily backup of the save exactly as it was before this launch touched it; skipped (and any old twin removed) when the save is huge so the backup can't fill the quota */
-try{ const d=new Date().toISOString().slice(0,10); if(localStorage.getItem("chalk.bak.d")!==d){ const cur=localStorage.getItem(KEY)||""; if(cur.length>600000) localStorage.removeItem("chalk.bak"); else localStorage.setItem("chalk.bak",cur); localStorage.setItem("chalk.bak.d",d);} }catch(e){}
+/* the save is read once per launch (it can be megabytes) */
 let bootRaw=null; try{ bootRaw=localStorage.getItem(KEY); }catch(e){}
-let S = load() || fresh();
-const boot0=JSON.stringify(S);
+function load(t){ if(t===undefined){ try{ t=localStorage.getItem(KEY); }catch(e){ t=null; } } try{ const s=JSON.parse(t); if(s&&s.v===1) return s; }catch(e){ try{ if(t) localStorage.setItem("chalk.bad",t); }catch(e2){} } return null; }
+/* daily backup of the save exactly as it was before this launch touched it; skipped (and any old twin removed) when the save is huge so the backup can't fill the quota */
+try{ const d=new Date().toISOString().slice(0,10); if(localStorage.getItem("chalk.bak.d")!==d){ const cur=bootRaw||""; if(cur.length>600000) localStorage.removeItem("chalk.bak"); else localStorage.setItem("chalk.bak",cur); localStorage.setItem("chalk.bak.d",d);} }catch(e){}
+let S = load(bootRaw) || fresh();
+const boot0=bootRaw!=null&&S.v===1?bootRaw:null;
 upgrade(S);
 /* write back only when the key was missing or upgrade() actually changed something */
-try{ if(bootRaw==null||JSON.stringify(S)!==boot0) localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){}
+try{ const now=JSON.stringify(S); if(bootRaw==null||now!==boot0) localStorage.setItem(KEY,now); }catch(e){}
 let saveT=null;
 let saveWarned=false;
 function save(){ S.updatedAt=Date.now(); try{ localStorage.setItem(KEY,JSON.stringify(S)); saveWarned=false; }catch(e){ if(!saveWarned){ saveWarned=true; if(typeof toast==="function") toast("Couldn't save — storage full. Copy a backup in Settings"); } } clearTimeout(saveT); saveT=setTimeout(dbPush,600); }
@@ -653,10 +694,10 @@ function save(){ S.updatedAt=Date.now(); try{ localStorage.setItem(KEY,JSON.stri
 function getEx(id){ return LIB[id] || S.custom[id] || {n:id,m:"Other",t:"mc",inc:5,rest:75,guess:50}; }
 function exState(id){ return S.ex[id] || (S.ex[id]={w:null,miss:0,best:0,hist:[]}); }
 const roundTo=(v,inc)=>Math.max(0,Math.round(v/inc)*inc);
-const fmtW=w=>(w%1?w.toFixed(1):String(w));
+const fmtW=w=>{ const n=typeof w==="number"?w:Number(w); return n%1?n.toFixed(1):String(n); };
 const e1rm=(w,r)=>w*(1+r/30);
 function fmtDate(ts){ return new Date(ts).toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}); }
-function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 function isCompound(id){ const e=getEx(id); return e.rest>=120; }
 
@@ -945,13 +986,17 @@ const REDUCED=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: red
 function animFrame(pat,t,hiSeg,view){ return rigFrame(pat,lerpPose(pat.a,pat.b,t),hiSeg,view); }
 /* one shared clock drives every rig on the page, so a card's side and front views always show the same instant (ANIM_T) */
 function mountAnims(){
-  ANIMS.forEach(a=>a.stop=true); ANIMS=[];
+  ANIMS.forEach(a=>{ a.stop=true; if(a.io) a.io.disconnect(); }); ANIMS=[];
   const els=Array.from(document.querySelectorAll("[data-anim]")).map(el=>{ const L=getEx(el.dataset.anim); return {el,pat:PAT[L.p]||PAT.generic,hiSeg:SEG[L.m]||"torso",view:el.dataset.view==="front"?"front":"side"}; });
   if(!els.length) return;
   /* the movement IS the instruction, so it never freezes — "Reduce Motion" just gets a slower, gentler rep */
   const CYC=REDUCED?4200:2600;
-  const a={stop:false,t0:ANIM0,last:0}; ANIMS.push(a);
-  const loop=now=>{ if(a.stop) return; const live=els.filter(e=>document.body.contains(e.el)); if(!live.length) return; if(!T&&!document.hidden&&now-a.last>40){ a.last=now; const ph=((now-a.t0)%CYC)/CYC; const c=0.5-0.5*Math.cos(ph*2*Math.PI); const t=c*c*(3-2*c); ANIM_T=t; live.forEach(e=>{ e.el.innerHTML=animFrame(e.pat,t,e.hiSeg,e.view); }); } requestAnimationFrame(loop); };
+  const a={stop:false,t0:ANIM0,last:0,io:null,seen:null}; ANIMS.push(a);
+  /* battery: only figures on screen are drawn, about 12 times a second, and nothing while resting or in the background */
+  if(typeof IntersectionObserver==="function"){ a.seen=new Set(); a.io=new IntersectionObserver(es=>es.forEach(en=>{ if(en.isIntersecting) a.seen.add(en.target); else a.seen.delete(en.target); })); els.forEach(e=>a.io.observe(e.el)); }
+  const loop=now=>{ if(a.stop) return; const live=els.filter(e=>document.body.contains(e.el)); if(!live.length){ if(a.io) a.io.disconnect(); return; }
+    if(!T&&!document.hidden&&now-a.last>80){ const show=a.seen?live.filter(e=>a.seen.has(e.el)):live; if(show.length){ a.last=now; const ph=((now-a.t0)%CYC)/CYC; const c=0.5-0.5*Math.cos(ph*2*Math.PI); const t=c*c*(3-2*c); ANIM_T=t; show.forEach(e=>{ e.el.innerHTML=animFrame(e.pat,t,e.hiSeg,e.view); }); } }
+    requestAnimationFrame(loop); };
   requestAnimationFrame(loop);
 }
 const rigCols=id=>["side","front"].map(v=>`<div class="rigc"><div class="rig" data-anim="${esc(id)}" data-view="${v}"></div><div class="up mut cap">${v==="side"?"Side":"Front"}</div></div>`).join("");
@@ -1016,7 +1061,7 @@ function whyLine(wid,P){
   if(wid===rot) return "";
   const R=S.program.workouts[rot]; if(!R) return ""; const rec=recentMuscles(Date.now());
   const hit=dayMuscles(rot).filter(m=>rec[m]).sort((a,b)=>rec[b]-rec[a]).slice(0,2);
-  return `<div class="small mut">Pushed back ${esc(R.name)}${hit.length?` — you hit ${hit.map(m=>m.toLowerCase()).join(" and ")} ${hitWhen(hit[0])}`:""}.</div>`;
+  return `<div class="small mut">Pushed back ${esc(R.name)}${hit.length?` — you hit ${esc(hit.map(m=>String(m).toLowerCase()).join(" and "))} ${hitWhen(hit[0])}`:""}.</div>`;
 }
 /* ================= HISTORY-BASED LOADS =================
    Your own number wins. Otherwise the most recently trained exercise for the same muscle is converted through the load factors. Never written to S.ex. */
@@ -1039,8 +1084,8 @@ function weekCard(){
     if(main){ const L=getEx(main.ex), pw=plannedW(main.ex); const wl=pw.w==null?"":(NOLOAD(L.t)&&pw.w===0?"BW":`${pw.est?"est. ":""}${fmtW(pw.w)} lb${L.t==="db"?" ea":""}`); lift=`${esc(L.n)}${wl?" "+wl:""} × ${plannedSets(main)} sets`; }
     const focus=(W.focus&&W.focus.length?W.focus:dayMuscles(wid)).join(" · ");
     const label=k===0?` <span class="tag acc">Today</span>`:(k===3?` <span class="tag">Optional 4th</span>`:"");
-    const btn=k===0?"":`<button class="btn sm" data-a="pick" data-wid="${wid}">Do today</button>`;
-    return `<div class="ex-row"><div class="ex-main"><div class="n">${k+1} · ${esc(W.name)}${label}</div><div class="t">${[focus,lift].filter(Boolean).join(" · ")}</div></div>${btn}</div>`; };
+    const btn=k===0?"":`<button class="btn sm" data-a="pick" data-wid="${esc(wid)}">Do today</button>`;
+    return `<div class="ex-row"><div class="ex-main"><div class="n">${k+1} · ${esc(W.name)}${label}</div><div class="t">${[esc(focus),lift].filter(Boolean).join(" · ")}</div></div>${btn}</div>`; };
   return `<div class="card"><div class="hd"><div><div class="up mut">This week</div><h3>Your next workouts</h3></div></div>
     <div class="ex-list">${sched.slice(0,4).map(row).join("")}</div>
     <div class="hd" style="padding-top:10px"><h3 style="font-size:18px">Next week</h3></div>
@@ -1161,13 +1206,22 @@ function finishWorkout(){
 function discardWorkout(){ S.active=null; clearInterval(ctTick); CT=null; stopRest(); wakeOff(); save(); render(); }
 
 /* ================= REST TIMER ================= */
+/* The overlay starts under the Train | Macros bar. In Macros it hides but the clock keeps going: the Train half reads
+   "Train · 0:42", and when rest ends it beeps and says so. Back in Train early, the overlay is there again. */
 let T=null, tick=null;
+function inMacros(){ try{ return !!(window.M&&typeof M.mode==="function"&&M.mode()==="macros"); }catch(e){ return false; } }
+function showRest(){
+  const el=document.getElementById("rest"); if(!el) return; const on=!!T&&!inMacros();
+  if(on){ const mb=document.getElementById("modebar"); if(mb) el.style.setProperty("--rest-top",(mb.offsetTop+mb.offsetHeight)+"px"); }
+  if(el.classList.contains("on")!==on) el.classList.toggle("on",on);
+}
 function startRest(sec,label,next,sub){
-  T={end:Date.now()+sec*1000,total:sec,label,fired:false};
-  const el=document.getElementById("rest"); el.classList.add("on"); el.classList.remove("go");
+  T={end:Date.now()+sec*1000,total:sec,label,next:next||label||"",fired:false};
+  const el=document.getElementById("rest"); el.classList.remove("go");
   document.getElementById("restL").textContent="Rest";
   document.getElementById("restN").textContent=next||label||"";
   document.getElementById("restS").textContent=sub||"";
+  showRest();
   clearInterval(tick); tick=setInterval(tickRest,250); tickRest();
 }
 function tickRest(){
@@ -1176,9 +1230,26 @@ function tickRest(){
   const s=Math.ceil(left/1000);
   document.getElementById("restT").textContent=Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
   document.getElementById("restBar").style.width=(100*left/(T.total*1000))+"%";
-  if(left<=0 && !T.fired){ T.fired=true; beep(); document.getElementById("restL").textContent="Go"; document.getElementById("rest").classList.add("go"); setTimeout(()=>{ if(T&&T.fired) stopRest(); },1800); }
+  if(left<=0 && !T.fired){ T.fired=true; beep(); document.getElementById("restL").textContent="Go"; document.getElementById("rest").classList.add("go"); if(inMacros()) toast("Rest is over. "+(T.next||"Back to Train")); setTimeout(()=>{ if(T&&T.fired) stopRest(); },1800); }
+  showRest(); paintBadge();
 }
-function stopRest(){ T=null; clearInterval(tick); const el=document.getElementById("rest"); el.classList.remove("on"); el.classList.remove("go"); }
+function stopRest(){ T=null; clearInterval(tick); const el=document.getElementById("rest"); el.classList.remove("on"); el.classList.remove("go"); paintBadge(); }
+/* Label on the Train half of the mode bar: the rest clock while resting, the workout time while a workout runs. */
+function trainBadge(){
+  if(T&&!T.fired){ const s=Math.ceil(Math.max(0,T.end-Date.now())/1000); return "Train · "+Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+  if(S&&S.active) return "Train · "+elapsed(S.active.start);
+  return "Train";
+}
+window.trainBadge=trainBadge;
+function paintBadge(){
+  const b=document.querySelector('#modebar [data-v="train"]'); if(!b) return;
+  let l=b.querySelector(".mb-l");
+  if(!l){ l=document.createElement("span"); l.className="mb-l"; Array.from(b.childNodes).forEach(n=>{ if(n.nodeType===3&&n.textContent.trim()) n.remove(); }); b.appendChild(l); }
+  const txt=trainBadge(); if(l.textContent!==txt) l.textContent=txt;
+  document.querySelectorAll('#modebar [data-m="mode"]').forEach(x=>{ const v=x.classList.contains("on")?"true":"false"; if(x.getAttribute("aria-pressed")!==v) x.setAttribute("aria-pressed",v); });
+}
+/* background clocks (HIIT phase changes) redraw Train only; in Macros they just update the badge */
+function trainRender(){ if(inMacros()){ paintBadge(); return; } render(); }
 let AC=null;
 function unlockAudio(){ try{ AC=AC||new (window.AudioContext||window.webkitAudioContext)(); if(AC.state==="suspended") AC.resume(); }catch(e){} }
 function beep(){
@@ -1215,12 +1286,12 @@ function ctAdvance(from){
   if(CT.phase==="work"){
     const lastMove=CT.mi>=b.moves.length-1;
     if(lastMove && CT.round>=b.rounds){ ctFinish(); return; }
-    if(b.rest>0){ CT.phase="rest"; CT.end=base+b.rest*1000; CT.warned=false; beep(); render(); return; }
+    if(b.rest>0){ CT.phase="rest"; CT.end=base+b.rest*1000; CT.warned=false; beep(); trainRender(); return; }
   }
   if(CT.mi>=b.moves.length-1){ CT.mi=0; CT.round++; b.done=CT.round-1; } else CT.mi++;
-  CT.phase="work"; CT.end=base+b.work*1000; CT.warned=false; beep(); save(); render();
+  CT.phase="work"; CT.end=base+b.work*1000; CT.warned=false; beep(); save(); trainRender();
 }
-function ctFinish(){ const b=S.active.items[CT.bi]; b.done=b.rounds; b.status="done"; clearInterval(ctTick); CT=null; beep(); save(); render(); toast("Block done"); }
+function ctFinish(){ const b=S.active.items[CT.bi]; b.done=b.rounds; b.status="done"; clearInterval(ctTick); CT=null; beep(); save(); trainRender(); toast("Block done"); }
 function ctOnRemove(i){ if(!CT) return; if(CT.bi===i) ctEnd(); else if(CT.bi>i) CT.bi--; }
 function ctEnd(){ if(!CT) return; const b=S.active.items[CT.bi]; b.done=Math.max(b.done,CT.round-((CT.phase==="rest"&&CT.mi>=b.moves.length-1)?0:1)); b.status=b.done>0?"done":"idle"; clearInterval(ctTick); CT=null; save(); render(); }
 function ctPause(){ if(!CT) return; if(CT.paused){ CT.end=Date.now()+CT.remain; CT.paused=false; } else { CT.remain=Math.max(0,CT.end-Date.now()); CT.paused=true; } render(); }
@@ -1254,7 +1325,7 @@ function blockCard(b,bi){
       if(running) h+=`<div class="roundbig"><span class="cond num">Round ${b.done+1}</span><span class="mut"> of ${b.rounds}</span></div>`;
       if(!running && !done && !b.skipped) h+= b.mode==="timer" ? `<div class="entry3"><div><span class="lbl">work · sec</span>${stepper("bw",bi,b.work)}</div><div><span class="lbl">rest · sec</span>${stepper("br",bi,b.rest)}</div><div><span class="lbl">rounds</span>${stepper("bn",bi,b.rounds)}</div></div>` : `<div class="entry3"><div></div><div><span class="lbl">rounds</span>${stepper("bn",bi,b.rounds)}</div><div></div></div>`;
       h+=`<div class="moves">${b.moves.map((m,mi)=>{ const L=getEx(m.ex); const weighted=!NOLOAD(L.t); const lock=running||done;
-        return `<div class="move"><div class="mn">${mi+1}. ${esc(L.n)}<div class="small mut">${L.m}${L.ea?" · each side":""}${L.u==="s"?" · hold":""}</div></div>
+        return `<div class="move"><div class="mn">${mi+1}. ${esc(L.n)}<div class="small mut">${esc(L.m)}${L.ea?" · each side":""}${L.u==="s"?" · hold":""}</div></div>
           ${b.mode==="reps"?`<input class="mini" type="number" inputmode="numeric" data-f="mr" data-bi="${bi}" data-mi="${mi}" value="${m.reps}" aria-label="${L.u==="s"?"Seconds":"Reps"} · ${esc(L.n)}" ${done?"disabled":""}><span class="small mut">${L.u==="s"?"sec":"reps"}</span>`:`<span></span><span></span>`}
           ${weighted?`<input class="mini" type="number" inputmode="decimal" step="any" data-f="mw" data-bi="${bi}" data-mi="${mi}" value="${fmtW(m.w)}" aria-label="Weight, lb · ${esc(L.n)}" ${done?"disabled":""}><span class="small mut">lb</span>`:`<span class="small mut" style="grid-column:4/6;text-align:right">${L.t==="bal"?"balance":L.t==="band"?"band":"bodyweight"}</span>`}
           ${lock?"<span></span>":`<button class="edit" data-a="brm" data-bi="${bi}" data-mi="${mi}" aria-label="Remove move">×</button>`}</div>`; }).join("")}</div>`;
@@ -1268,12 +1339,16 @@ function blockCard(b,bi){
     return h;
 }
 function viewPicker(){
-  return `<div class="card"><div class="hd"><div><div class="up mut">First time here</div><h3>Who's training?</h3></div></div><div class="bd"><p class="hint">Pick a starting point. Chalk builds your days from it, asks every 45 days how you want to train (weights, functional or HIIT), and rotates exercises so it never gets stale. Change the mix any time in Settings.</p></div></div>`+
-    Object.keys(PRESETS).map(k=>{ const p=PRESETS[k]; return `<div class="card"><div class="hd"><div><div class="up mut">${esc(GOAL_LABEL[p.goal])}</div><h3>${esc(p.name)}</h3></div></div><div class="bd"><p class="hint" style="margin-bottom:10px">${esc(p.desc)}</p><button class="btn primary block" data-a="pick-profile" data-v="${k}">Use this</button></div></div>`; }).join("");
+  const from=S.switchFrom&&PRESETS[S.switchFrom]?S.switchFrom:null;
+  if(from) return `<div class="card"><div class="hd"><div><div class="up mut">Switch person</div><h3>Who's training?</h3></div></div><div class="bd"><p class="hint" style="margin-bottom:10px">Pick who trains on this phone. Picking ${esc(PRESETS[from].name)} again keeps the plan as it is. History stays.</p><button class="btn block ghost" data-a="switch-cancel">Cancel</button></div></div>`+pickerCards();
+  return `<div class="card"><div class="hd"><div><div class="up mut">First time here</div><h3>Who's training?</h3></div></div><div class="bd"><p class="hint">Pick a starting point. Chalk builds your days from it, asks every 45 days how you want to train (weights, functional or HIIT), and rotates exercises so it never gets stale. Change the mix any time in Settings.</p></div></div>`+pickerCards();
+}
+function pickerCards(){
+  return Object.keys(PRESETS).map(k=>{ const p=PRESETS[k]; return `<div class="card"><div class="hd"><div><div class="up mut">${esc(GOAL_LABEL[p.goal])}</div><h3>${esc(p.name)}</h3></div></div><div class="bd"><p class="hint" style="margin-bottom:10px">${esc(p.desc)}</p><button class="btn primary block" data-a="pick-profile" data-v="${k}">Use this</button></div></div>`; }).join("");
 }
 function openBlockMenu(bi){
   const b=S.active.items[bi];
-  openSheet(b.name,b.moves.map((m,mi)=>`<button class="opt" data-a="bswap-menu" data-bi="${bi}" data-mi="${mi}"><span>Swap ${esc(getEx(m.ex).n)}</span><span class="m">${getEx(m.ex).m}</span></button>`).join("")+
+  openSheet(b.name,b.moves.map((m,mi)=>`<button class="opt" data-a="bswap-menu" data-bi="${bi}" data-mi="${mi}"><span>Swap ${esc(getEx(m.ex).n)}</span><span class="m">${esc(getEx(m.ex).m)}</span></button>`).join("")+
     `<button class="opt" data-a="badd" data-bi="${bi}"><span>Add a move</span></button>
      ${b.status==="idle"?`<button class="opt" data-a="bskip" data-bi="${bi}"><span>Skip this block</span></button>`:""}
      <button class="opt" data-a="brm-block" data-bi="${bi}"><span style="color:var(--warn)">Remove block from today</span></button>`);
@@ -1284,7 +1359,7 @@ let CI=null; /* check-in draft: {mode,mix}; committed by ci-build / ci-apply, di
 function ciDraft(){ return CI=CI||{mode:(S.goal||{}).mode||"weights",mix:cp(S.mix||PRESETS.nick.mix)}; }
 function ciCommit(){ const D=ciDraft(); S.goal=S.goal||{mode:"weights",setAt:null}; S.goal.mode=D.mode; S.mix=D.mix; CI=null; }
 function render(){
-  if(window.M&&M.ui){ if(M.ui.chrome) M.ui.chrome(); if(M.mode()==="macros"){ M.ui.render(); return; } }
+  if(window.M&&M.ui){ if(M.ui.chrome) M.ui.chrome(); if(M.mode()==="macros"){ showRest(); paintBadge(); M.ui.render(); return; } }
   document.querySelectorAll("#tabs button").forEach(b=>{ const on=b.dataset.tab===tab; b.classList.toggle("on",on); if(on) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current"); });
   const app=document.getElementById("app");
   const title=document.getElementById("title"), sub=document.getElementById("subtitle");
@@ -1294,13 +1369,18 @@ function render(){
   else { title.textContent="Settings"; sub.textContent=""; app.innerHTML=viewSettings(); }
   const cta=document.getElementById("cta"); const showCta=tab==="today"&&!S.active&&!!S.profile;
   cta.classList.toggle("on",showCta);
-  if(showCta){ const wid=nextWorkoutId(); const P=planFor(wid); cta.innerHTML=`<button class="btn primary block" data-a="start" data-wid="${wid}">Start ${esc(P.name||S.program.workouts[wid].name)}</button>`; } else cta.innerHTML="";
+  if(showCta){ const wid=nextWorkoutId(); const P=planFor(wid); cta.innerHTML=`<button class="btn primary block" data-a="start" data-wid="${esc(wid)}">Start ${esc(P.name||S.program.workouts[wid].name)}</button>`; } else cta.innerHTML="";
   if(lastTab!==tab){ const sc=document.getElementById("scroll"); if(sc) sc.scrollTop=0; lastTab=tab; }
+  showRest(); paintBadge();
   mountAnims();
+  showFlash();
 }
 let lastTab=null;
 function elapsed(start){ const m=Math.floor((Date.now()-start)/60000); return m<60?m+" min":Math.floor(m/60)+"h "+(m%60)+"m"; }
-setInterval(()=>{ if(tab==="today"&&S.active&&!(window.M&&M.mode()==="macros")) document.getElementById("subtitle").textContent=elapsed(S.active.start); },30000);
+/* a Train "Program updated" note waits for the first Train screen instead of popping up over Macros */
+let flashT=null;
+function showFlash(){ if(!S.flash||flashT) return; flashT=setTimeout(()=>{ flashT=null; if(!S.flash||inMacros()||sheetOn()) return; const f=S.flash; delete S.flash; save(); openSheet("Program updated",`<p class="hint" style="font-size:15px">${esc(f)}</p><button class="btn primary block" data-a="sheet-close" style="margin-top:12px">Got it</button>`); },400); }
+setInterval(()=>{ if(!S.active) return; if(tab==="today"&&!inMacros()) document.getElementById("subtitle").textContent=elapsed(S.active.start); paintBadge(); },30000);
 
 function wText(id){ const L=getEx(id), E=S.ex[id]; if(L.t==="band") return "band"; if(E&&E.w!=null) return NOLOAD(L.t)&&E.w===0?"BW":`${fmtW(E.w)} lb${L.t==="db"?" ea":""}`; return NOLOAD(L.t)?"BW":"set weight"; }
 function planRow(it,i,items){
@@ -1313,7 +1393,10 @@ function viewToday(){
   const wid=nextWorkoutId(), W=S.program.workouts[wid], P=planFor(wid);
   const last=S.log[0];
   const sum=S.lastSummary && (Date.now()-S.lastSummary.at<6*3600e3) ? S.lastSummary : null;
-  let h=(window.M&&M.ui&&M.ui.bannerHTML?M.ui.bannerHTML():"");
+  let h="";
+  /* Chalk's own 45-day check-in comes first, then the Macros check-in banner and today's food row */
+  if(checkinDue()) h+=`<div class="card first"><div class="hd"><div><div class="up mut">Every 45 days</div><h3>Check-in time</h3></div></div><div class="bd"><p class="hint" style="margin-bottom:10px">Weights, functional or HIIT for the next 45 days? Pick one and Chalk rebuilds your days.</p><button class="btn primary block" data-a="checkin">Check in</button></div></div>`;
+  if(window.M&&M.ui&&M.ui.bannerHTML){ try{ h+=M.ui.bannerHTML()||""; }catch(e){} }
   if(window.M&&M.ui&&typeof M.ui.trainSummaryHTML==="function"){ try{ h+=M.ui.trainSummaryHTML()||""; }catch(e){} }
   if(sum){
     const r=sum.rec; const ups=sum.results.filter(x=>x.kind==="up").length, prs=sum.results.filter(x=>x.pr).length;
@@ -1323,7 +1406,6 @@ function viewToday(){
       <div class="stat"><div class="v num">${ups}${prs?`<small>· ${prs} PR</small>`:""}</div><div class="k">Weights up</div></div></div>
       <button class="btn block ghost" style="margin-top:10px" data-a="show-summary">See changes</button></div></div>`;
   }
-  if(checkinDue()) h+=`<div class="card first"><div class="hd"><div><div class="up mut">Every 45 days</div><h3>Check-in time</h3></div></div><div class="bd"><p class="hint" style="margin-bottom:10px">Weights, functional or HIIT for the next 45 days? Pick one and Chalk rebuilds your days.</p><button class="btn primary block" data-a="checkin">Check in</button></div></div>`;
   const items=P.items; P.off=P.off||[]; const nL=items.filter(it=>it.t!=="block").length, nB=items.length-nL; const focus=P.kind?[]:(W.focus||[]).concat(P.abs?["Core"]:[]);
   const cov=coverage(items), any=coverageAny(items); const progCov=coverage(W.items.concat(P.abs&&S.program.workouts[absId()]?S.program.workouts[absId()].items:[])); const gaps=focus.filter(m=>!cov[m]&&!P.off.includes(m)&&progCov[m]);
   const cls=m=>cov[m]?"on":(gaps.includes(m)?"gap":(any[m]?"m1":""));
@@ -1335,7 +1417,7 @@ function viewToday(){
     <div class="figs">${bodySVG(false,cls)}${bodySVG(true,cls)}</div>
     <div class="up mut" style="padding:8px 14px 4px">Muscle groups · tap to add or remove</div>
     <div class="chips" style="padding:0 14px">${MUSCLES.map(m=>`<button class="chip ${cov[m]?"ok":(gaps.includes(m)?"gap":"")}" data-a="mg" data-m="${m}">${cov[m]?"✓ ":"+ "}${m}</button>`).join("")}</div>
-    ${gaps.length?`<p class="hint" style="padding:0 14px">Usually on this day but not covered: <b>${gaps.join(", ")}</b>. Tap to add ${gaps.length>1?"them":"it"} back.</p>`:""}
+    ${gaps.length?`<p class="hint" style="padding:0 14px">Usually on this day but not covered: <b>${esc(gaps.join(", "))}</b>. Tap to add ${gaps.length>1?"them":"it"} back.</p>`:""}
     <div class="hd" style="padding-top:10px;align-items:baseline"><h3 style="font-size:18px">${[nL?nL+" exercise"+(nL===1?"":"s"):"",nB?nB+" block"+(nB===1?"":"s"):""].filter(Boolean).join(" · ")}</h3><span class="small mut">~${estMin(items)} min</span></div>
     <div class="ex-list">${items.map((it,i)=>planRow(it,i,items)).join("")}</div>
     <div class="bd" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost" style="flex:1" data-a="plan-add">+ Add exercise</button><button class="btn ghost" style="flex:1" data-a="plan-add-block">+ HIIT block</button>${absOn()&&wid!==absId()&&!P.kind?`<button class="btn ghost" style="flex:1" data-a="plan-abs">${P.abs?"Skip abs today":"Add abs today"}</button>`:""}
@@ -1393,7 +1475,7 @@ function subsFor(exId, excludeIds, curW){
 }
 function prCount(){ return S.log.reduce((n,r)=>n+(r.results||[]).filter(x=>x.pr).length,0); }
 /* ctx = where an exercise lives: active workout, today's plan, or the program in Settings */
-function ctxAttr(c){ return `data-where="${c.where}"${c.i!=null?` data-i="${c.i}"`:""}${c.wid!=null?` data-wid="${c.wid}"`:""}${c.mi!=null?` data-mi="${c.mi}"`:""}`; }
+function ctxAttr(c){ return `data-where="${c.where}"${c.i!=null?` data-i="${c.i}"`:""}${c.wid!=null?` data-wid="${esc(c.wid)}"`:""}${c.mi!=null?` data-mi="${c.mi}"`:""}`; }
 function ctxOf(b){ const d=b.dataset; return {where:d.where, i:d.i!=null&&d.i!==""?+d.i:null, wid:d.wid||null, mi:d.mi!=null&&d.mi!==""?+d.mi:null}; }
 function ctxList(c){ return c.where==="active"?S.active.items:(c.where==="plan"?S.plan.items:S.program.workouts[c.wid].items); }
 function ctxItem(c){ const it=ctxList(c)[c.i]; return (c.where==="prog"&&c.mi!=null)?it.moves[c.mi]:it; }
@@ -1405,12 +1487,12 @@ function openReplace(c){
   let curW=E&&E.w!=null?E.w:null;
   if(c.where==="active"&&it.done&&it.done.length) curW=it.done[it.done.length-1].w;
   const inDay=ctxList(c).flatMap(x=>x.t==="block"?(x.moves||[]).map(v=>v.ex):[x.ex]).filter(x=>x&&x!==exId);
-  const rowFor=(id,w,how)=>{ const B=getEx(id); const wl= how==="bw"?"bodyweight":(w==null?TYPE_LABEL[B.t]:`${fmtW(w)} lb${B.t==="db"?" each":""}`); const tag= how==="yours"?`<span class="tag ok">your number</span>`:(how==="est"?`<span class="tag">est.</span>`:""); return `<button class="opt" data-a="rep-do" ${ctxAttr(c)} data-ex="${id}" data-w="${w==null?"":w}"><span>${esc(B.n)} ${tag}</span><span class="m">${wl}</span></button>`; };
+  const rowFor=(id,w,how)=>{ const B=getEx(id); const wl= how==="bw"?"bodyweight":(w==null?TYPE_LABEL[B.t]:`${fmtW(w)} lb${B.t==="db"?" each":""}`); const tag= how==="yours"?`<span class="tag ok">your number</span>`:(how==="est"?`<span class="tag">est.</span>`:""); return `<button class="opt" data-a="rep-do" ${ctxAttr(c)} data-ex="${esc(id)}" data-w="${w==null?"":esc(w)}"><span>${esc(B.n)} ${tag}</span><span class="m">${wl}</span></button>`; };
   const subs=subsFor(exId,inDay,curW);
   let h=scopeSeg(c.where)+`<p class="hint">Same muscle first, weight converted${curW!=null?` from ${fmtW(curW)} lb`:""}.${c.where==="active"&&it.done&&it.done.length?" Sets you already logged stay.":""}</p>`;
-  h+=`<div class="opt-grp foc">${L.m} · same muscle</div>`+(subs.length?subs.map(x=>rowFor(x.id,x.w,x.how)).join(""):`<p class="hint">Nothing else for ${L.m} yet — add a custom one below.</p>`);
+  h+=`<div class="opt-grp foc">${esc(L.m)} · same muscle</div>`+(subs.length?subs.map(x=>rowFor(x.id,x.w,x.how)).join(""):`<p class="hint">Nothing else for ${esc(L.m)} yet — add a custom one below.</p>`);
   const ids=Object.keys(LIB).concat(Object.keys(S.custom)).filter(id=>id!==exId&&!inDay.includes(id)&&getEx(id).m!==L.m);
-  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp">${m}</div>`+list.map(id=>{ const E2=S.ex[id]; return rowFor(id,E2&&E2.w!=null?E2.w:null,E2&&E2.w!=null?(E2.est?"est":"yours"):(NOLOAD(getEx(id).t)?"bw":"unknown")); }).join(""); };
+  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp">${esc(m)}</div>`+list.map(id=>{ const E2=S.ex[id]; return rowFor(id,E2&&E2.w!=null?E2.w:null,E2&&E2.w!=null?(E2.est?"est":"yours"):(NOLOAD(getEx(id).t)?"bw":"unknown")); }).join(""); };
   const focus=(ctxFocus(c)||[]).filter(m=>m!==L.m);
   if(focus.length) h+=focus.map(grp).join("");
   const rest=MUSCLES.concat(["Other"]).filter(m=>m!==L.m&&!focus.includes(m));
@@ -1486,7 +1568,7 @@ function openPlanMenu(i){
   const nav=`<div class="opt" style="gap:8px"><button class="btn" style="flex:1" data-a="plan-up" data-i="${i}" ${i===0?"disabled":""}>▲ Move up</button><button class="btn" style="flex:1" data-a="plan-down" data-i="${i}" ${i===n-1?"disabled":""}>▼ Move down</button></div>`;
   if(it.t==="block"){ openSheet(it.name,nav+`<button class="opt" data-a="plan-rm" data-i="${i}"><span style="color:var(--warn)">Remove for today</span></button><p class="hint">Edit the block's moves once the workout starts, or in Settings.</p>`); return; }
   const L=getEx(it.ex);
-  openSheet(L.n,`<button class="opt" data-a="plan-rep" data-i="${i}"><span><b>Replace</b></span><span class="m">${L.m} · weight converted</span></button>
+  openSheet(L.n,`<button class="opt" data-a="plan-rep" data-i="${i}"><span><b>Replace</b></span><span class="m">${esc(L.m)} · weight converted</span></button>
     <button class="opt" data-a="plan-sets" data-i="${i}"><span>Sets & reps</span><span class="m">${it.sets} × ${it.lo}–${it.hi}</span></button>${nav}
     <button class="opt" data-a="plan-rm" data-i="${i}"><span style="color:var(--warn)">Remove for today</span></button>`);
 }
@@ -1503,7 +1585,7 @@ function openCheckin(){
 }
 function openSlotMenu(i){
   const sl=S.active.items[i], L=getEx(sl.ex);
-  openSheet(L.n,`<button class="opt" data-a="act-rep" data-i="${i}"><span><b>Replace</b>${NOLOAD(L.t)?"":" · machine's taken?"}</span><span class="m">${L.m} · weight converted</span></button>
+  openSheet(L.n,`<button class="opt" data-a="act-rep" data-i="${i}"><span><b>Replace</b>${NOLOAD(L.t)?"":" · machine's taken?"}</span><span class="m">${esc(L.m)} · weight converted</span></button>
     <button class="opt" data-a="act-sets" data-i="${i}"><span>Sets & reps</span><span class="m">${sl.sets} × ${sl.lo}–${sl.hi}</span></button>
     <button class="opt" data-a="skip" data-i="${i}"><span>Skip today</span></button>
     <button class="opt" data-a="act-rm" data-i="${i}"><span style="color:var(--warn)">Remove from today</span></button>
@@ -1513,7 +1595,7 @@ function openSlotMenu(i){
 function viewWorkout(){
   const A=S.active; let h=""; const cur=nextOpenSlot(-1);
   A.items.forEach((it,i)=>{
-    if(it.abs && (i===0||!A.items[i-1].abs)) h+=`<h2 class="sec" style="color:var(--mus)">Abs</h2>`;
+    if(it.abs && (i===0||!A.items[i-1].abs)) h+=`<h2 class="sec" style="color:var(--mus-t)">Abs</h2>`;
     if(it.t==="block"){ h+=blockCard(it,i); return; }
     const sl=it;
     const L=getEx(sl.ex), E=S.ex[sl.ex]||{}; const first=(E.w==null||E.est) && !sl.done.length && !NOLOAD(L.t);
@@ -1522,7 +1604,7 @@ function viewWorkout(){
     let warm="";
     if(L.t==="bb" && !sl.done.length && (E.w||0)>=95 && isCompound(sl.ex)){ const w=E.w; warm=`<div class="warm">Warm-up: <b>bar × 10</b> → <b>${roundTo(w*0.5,5)} × 5</b> → <b>${roundTo(w*0.75,5)} × 3</b></div>`; }
     h+=`<div class="card ${complete?"done":""} ${sl.skipped?"skipped":""} ${first?"first":""} ${i===cur?"cur":""}" id="slot${i}">
-      <div class="hd"><div><h3><button data-a="vis" data-id="${sl.id}" title="Show how to do it" aria-expanded="${showVis}">${esc(L.n)}</button></h3><div class="small mut">${sl.sets} sets × ${sl.lo}–${sl.hi} ${L.u==="s"?"sec":"reps"}${L.ea?" each side":""} · ${TYPE_LABEL[L.t]}${E.last?` · last ${fmtW(E.last.w)} × ${E.last.r.join("/")}`:""}</div>
+      <div class="hd"><div><h3><button data-a="vis" data-id="${esc(sl.id)}" title="Show how to do it" aria-expanded="${showVis}">${esc(L.n)}</button></h3><div class="small mut">${sl.sets} sets × ${sl.lo}–${sl.hi} ${L.u==="s"?"sec":"reps"}${L.ea?" each side":""} · ${TYPE_LABEL[L.t]}${E.last?` · last ${fmtW(E.last.w)} × ${E.last.r.join("/")}`:""}</div>
         ${first?`<span class="tag acc" style="margin-top:4px">First time — set your weight</span>`:""}</div>
         <button class="icon" data-a="slot-menu" data-i="${i}" aria-label="Exercise options">⋯</button></div>
       ${showVis?visStrip(sl.ex):""}
@@ -1556,8 +1638,8 @@ function viewHistory(){
       const inBlocks=new Set((r.blocks||[]).flatMap(b=>b.moves.map(m=>m.ex)));
       const flagged=Object.keys(r.sets).some(id=>r.sets[id].some(s=>s.blk)); const liftSets=id=>flagged?r.sets[id].filter(s=>!s.blk):(inBlocks.has(id)?[]:r.sets[id]); const liftRows=Object.keys(r.sets).filter(id=>liftSets(id).length).map(id=>{ const L=getEx(id), ss=liftSets(id); const res=(r.results||[]).find(x=>x.ex===id); const fw=v=>NOLOAD(L.t)&&v===0?"BW":fmtW(v); return `<div class="r"><span>${esc(L.n)}${res&&res.pr?` <span class="tag ok">PR</span>`:""}${res&&res.kind==="up"?` <span class="tag acc">↑ ${res.range?`${res.range.lo}–${res.range.hi}`:(res.from===res.to?"add weight":fw(res.to))}</span>`:""}${res&&res.kind==="down"?` <span class="tag warn">↓ ${fw(res.to)}</span>`:""}${res&&res.dsets?` <span class="tag">${res.dsets>0?"+1 set":"−1 set"}</span>`:""}</span><span class="s">${ss.map(s=>(NOLOAD(L.t)&&s.w===0?"BW":fmtW(s.w))+"×"+s.r+(s.sec?"s":"")).join("  ")}</span></div>`; }).join("");
       const bres=(r.results||[]).filter(x=>!x.ex); const blockRows=(r.blocks||[]).map((b,bi)=>{ const res=(bres[bi]&&bres[bi].block===b.name)?bres[bi]:(r.results||[]).find(x=>x.block===b.name); return `<div class="r" style="flex-direction:column;align-items:stretch;gap:4px"><span><b>${esc(b.name)}</b> · ${b.mode==="timer"?`${b.work}/${b.rest}s`:"reps"} · ${b.done} round${b.done===1?"":"s"}${res&&res.kind==="up"?` <span class="tag acc">↑ ${esc(res.chg||"")}</span>`:""}</span><span class="s" style="white-space:normal">${b.moves.map(m=>{ const L=getEx(m.ex); return esc(L.n)+(NOLOAD(L.t)?"":" "+fmtW(m.w)+"lb")+(b.mode==="reps"?" ×"+m.reps:""); }).join(" · ")}</span></div>`; }).join("");
-      det=`<div class="hdetail">${liftRows}${blockRows}<button class="btn block ghost danger" style="margin-top:10px;min-height:40px" data-a="del-log" data-id="${r.id}">Delete this workout</button></div>`; }
-    return `<button class="hrow" data-a="hist" data-id="${r.id}"><div><div class="d">${esc(r.name)}${r.abs?` <span class="tag">+ abs</span>`:""}</div><div class="small mut">${fmtDate(r.start)} · ${mins} min · ${r.nsets} sets${prs?` · ${prs} PR`:""}</div></div><div class="cond num" style="font-size:20px;font-weight:600">${r.volume>=50?`${Math.round(r.volume/100)/10}<span class="small mut" style="font-family:Barlow,sans-serif;font-weight:500">k lb</span>`:`<span class="mut">—</span>`}</div></button>${det}`;
+      det=`<div class="hdetail">${liftRows}${blockRows}<button class="btn block ghost danger" style="margin-top:10px;min-height:40px" data-a="del-log" data-id="${esc(r.id)}">Delete this workout</button></div>`; }
+    return `<button class="hrow" data-a="hist" data-id="${esc(r.id)}"><div><div class="d">${esc(r.name)}${r.abs?` <span class="tag">+ abs</span>`:""}</div><div class="small mut">${fmtDate(r.start)} · ${mins} min · ${r.nsets} sets${prs?` · ${prs} PR`:""}</div></div><div class="cond num" style="font-size:20px;font-weight:600">${r.volume>=50?`${Math.round(r.volume/100)/10}<span class="small mut" style="font-family:Barlow,sans-serif;font-weight:500">k lb</span>`:`<span class="mut">—</span>`}</div></button>${det}`;
   }).join("")}</div>${S.log.length>histN?`<div class="bd"><button class="btn block ghost" data-a="hist-more">Show more · ${S.log.length-histN} older</button></div>`:""}</div>`;
 }
 
@@ -1569,7 +1651,7 @@ function viewProgress(){
   const E=S.ex[progEx], L=getEx(progEx), H=E.hist;
   const first=H[0], last=H[H.length-1];
   const delta=last.w-first.w;
-  const opts=ids.map(id=>`<option value="${id}" ${id===progEx?"selected":""}>${esc(getEx(id).n)}</option>`).join("");
+  const opts=ids.map(id=>`<option value="${esc(id)}" ${id===progEx?"selected":""}>${esc(getEx(id).n)}</option>`).join("");
   return `<select class="sel" data-f="progEx" aria-label="Exercise">${opts}</select>
     <div class="stats"><div class="stat"><div class="v num">${E.w==null?"—":(NOLOAD(L.t)&&E.w===0?"BW":fmtW(E.w)+"<small>lb</small>")}</div><div class="k">Next</div></div>
     <div class="stat"><div class="v num">${E.best?Math.round(E.best)+"<small>lb</small>":"—"}</div><div class="k">Est. 1RM</div></div>
@@ -1608,27 +1690,52 @@ function viewSettings(){
     h+=`<div class="card"><div class="hd"><div><h3>${esc(W.name)}</h3>${W.sub?`<div class="small mut">${esc(W.sub)}</div>`:""}</div></div>
       ${focus.length?`<div class="chips" style="padding:0 14px 6px">${focus.map(m=>`<span class="chip ${cov[m]?"ok":"gap"}">${m}</span>`).join("")}</div>`:""}
       <div>${W.items.map((it,i)=>{
-      const arrows=`<span class="arrows"><button data-a="prog-up" data-wid="${wid}" data-i="${i}" ${i===0?"disabled":""} aria-label="Move up">▲</button><button data-a="prog-down" data-wid="${wid}" data-i="${i}" ${i===n-1?"disabled":""} aria-label="Move down">▼</button></span>`;
-      if(it.t==="block"){ const b=it; return `<div class="prog-slot blk"><div><div class="n">${esc(b.name)} <span class="tag">${b.mode==="timer"?`${b.work}/${b.rest}s × ${b.rounds}`:`${b.rounds} rounds`}</span></div><div class="t">${b.moves.map(m=>esc(getEx(m.ex).n)).join(" · ")}</div></div>${arrows}<button data-a="prog-rm" data-wid="${wid}" data-i="${i}">Remove</button></div>
-        ${b.moves.map((m,mi)=>{ const L=getEx(m.ex); return `<div class="prog-slot sub"><div><div class="n">${esc(L.n)}</div><div class="t">${L.m}${NOLOAD(L.t)?"":` · ${fmtW(moveW(m.ex,m))} lb`}${b.mode==="reps"?` · ${moveR(m.ex,m)} ${L.u==="s"?"sec":"reps"}`:""}</div></div><button data-a="prog-swap" data-wid="${wid}" data-i="${i}" data-mi="${mi}">Swap</button><button data-a="prog-rm" data-wid="${wid}" data-i="${i}" data-mi="${mi}">Remove</button></div>`; }).join("")}
-        <div class="prog-slot sub"><button data-a="prog-add" data-wid="${wid}" data-i="${i}" style="color:var(--acc)">+ Add move to ${esc(b.name)}</button><span></span><span></span></div>`; }
-      const L=getEx(it.ex); return `<div class="prog-slot"><div><div class="n">${esc(L.n)}</div><div class="t">${it.sets} × ${it.lo}–${it.hi} · ${L.m}</div></div>${arrows}<button data-a="prog-sets" data-wid="${wid}" data-i="${i}">Sets</button><button data-a="prog-swap" data-wid="${wid}" data-i="${i}">Swap</button><button data-a="prog-rm" data-wid="${wid}" data-i="${i}">Remove</button></div>`; }).join("")}</div>
-      <div class="bd entry"><button class="btn block ghost" data-a="prog-add" data-wid="${wid}">+ Exercise</button><button class="btn block ghost" data-a="prog-add-block" data-wid="${wid}">+ HIIT block</button></div></div>`; });
+      const arrows=`<span class="arrows"><button data-a="prog-up" data-wid="${esc(wid)}" data-i="${i}" ${i===0?"disabled":""} aria-label="Move up">▲</button><button data-a="prog-down" data-wid="${esc(wid)}" data-i="${i}" ${i===n-1?"disabled":""} aria-label="Move down">▼</button></span>`;
+      if(it.t==="block"){ const b=it; return `<div class="prog-slot blk"><div><div class="n">${esc(b.name)} <span class="tag">${b.mode==="timer"?`${b.work}/${b.rest}s × ${b.rounds}`:`${b.rounds} rounds`}</span></div><div class="t">${b.moves.map(m=>esc(getEx(m.ex).n)).join(" · ")}</div></div>${arrows}<button data-a="prog-rm" data-wid="${esc(wid)}" data-i="${i}">Remove</button></div>
+        ${b.moves.map((m,mi)=>{ const L=getEx(m.ex); return `<div class="prog-slot sub"><div><div class="n">${esc(L.n)}</div><div class="t">${esc(L.m)}${NOLOAD(L.t)?"":` · ${fmtW(moveW(m.ex,m))} lb`}${b.mode==="reps"?` · ${moveR(m.ex,m)} ${L.u==="s"?"sec":"reps"}`:""}</div></div><button data-a="prog-swap" data-wid="${esc(wid)}" data-i="${i}" data-mi="${mi}">Swap</button><button data-a="prog-rm" data-wid="${esc(wid)}" data-i="${i}" data-mi="${mi}">Remove</button></div>`; }).join("")}
+        <div class="prog-slot sub"><button data-a="prog-add" data-wid="${esc(wid)}" data-i="${i}" style="color:var(--acc)">+ Add move to ${esc(b.name)}</button><span></span><span></span></div>`; }
+      const L=getEx(it.ex); return `<div class="prog-slot"><div><div class="n">${esc(L.n)}</div><div class="t">${esc(it.sets)} × ${esc(it.lo)}–${esc(it.hi)} · ${esc(L.m)}</div></div>${arrows}<button data-a="prog-sets" data-wid="${esc(wid)}" data-i="${i}">Sets</button><button data-a="prog-swap" data-wid="${esc(wid)}" data-i="${i}">Swap</button><button data-a="prog-rm" data-wid="${esc(wid)}" data-i="${i}">Remove</button></div>`; }).join("")}</div>
+      <div class="bd entry"><button class="btn block ghost" data-a="prog-add" data-wid="${esc(wid)}">+ Exercise</button><button class="btn block ghost" data-a="prog-add-block" data-wid="${esc(wid)}">+ HIIT block</button></div></div>`; });
   h+=`<h2 class="sec">Your data</h2><div class="card">
     <div class="srow"><div><div class="l">Back up</div><div class="s">Copies everything as text. Save it in Notes.</div></div><button class="btn" data-a="export">Copy</button></div>
     <div class="srow"><div><div class="l">Restore from backup</div></div><button class="btn" data-a="import">Paste</button></div>
-    <div class="srow"><div><div class="l">Switch person</div><div class="s">Now: ${esc((PRESETS[S.profile]||PRESETS.nick).name)}. History stays.</div></div><button class="btn" data-a="switch-profile">Switch</button></div>
+    ${S.active?"":`<div class="srow"><div><div class="l">Switch person</div><div class="s">Now: ${esc((PRESETS[S.profile]||PRESETS.nick).name)}. History stays.</div></div><button class="btn" data-a="switch-profile">Switch</button></div>`}
     <div class="srow"><div><div class="l">Erase everything</div></div><button class="btn danger" data-a="wipe">Erase</button></div></div>
     <p class="hint" style="text-align:center">Chalk · your data lives on this phone${dbOn?" and syncs to your Claude account":""}.</p>`;
   return h;
 }
 
 /* ================= SHEETS ================= */
-function openSheet(title,body){ document.getElementById("sheetT").textContent=title; document.getElementById("sheetB").innerHTML=body; document.getElementById("sheetBg").classList.add("on"); document.getElementById("sheetB").scrollTop=0; requestAnimationFrame(()=>document.getElementById("sheet").classList.add("on")); }
-function closeSheet(){ CI=null; document.getElementById("sheet").classList.remove("on"); document.getElementById("sheetBg").classList.remove("on"); }
+/* While a sheet is open the screen behind it is inert (VoiceOver and Tab stay inside the sheet); focus moves to the title
+   and comes back to the button that opened it. sheetGen counts opens and closes so late work never hits a newer sheet. */
+let sheetGen=0, sheetOpener=null;
+function sheetOn(){ const bg=document.getElementById("sheetBg"); return !!(bg&&bg.classList.contains("on")); }
+function bgInert(on){ [document.querySelector(".top"),...["modebar","scroll","cta","tabs"].map(id=>document.getElementById(id))].forEach(el=>{ if(!el) return; if(on) el.setAttribute("inert",""); else el.removeAttribute("inert"); }); }
+function openSheet(title,body){
+  const sh=document.getElementById("sheet"), t=document.getElementById("sheetT"), bg=document.getElementById("sheetBg");
+  const a=document.activeElement; if(!sheetOn()&&a&&a!==document.body&&!sh.contains(a)) sheetOpener=a;
+  sheetGen++;
+  t.textContent=title; document.getElementById("sheetB").innerHTML=body; bg.classList.add("on"); document.getElementById("sheetB").scrollTop=0;
+  sh.removeAttribute("aria-hidden"); sh.removeAttribute("inert"); bgInert(true);
+  try{ t.focus({preventScroll:true}); }catch(e){}
+  requestAnimationFrame(()=>{ if(bg.classList.contains("on")) sh.classList.add("on"); });
+}
+function closeSheet(){
+  CI=null; const sh=document.getElementById("sheet"), bg=document.getElementById("sheetBg");
+  const was=bg.classList.contains("on")||sh.classList.contains("on");
+  sh.classList.remove("on"); bg.classList.remove("on");
+  sh.setAttribute("aria-hidden","true"); sh.setAttribute("inert",""); bgInert(false);
+  const g=++sheetGen, op=sheetOpener; sheetOpener=null;
+  if(was){ const a=document.activeElement; if(a&&sh.contains(a)&&a.blur) a.blur();
+    if(op&&op.isConnected&&!/^(INPUT|TEXTAREA|SELECT)$/.test(op.tagName)){ try{ op.focus({preventScroll:true}); }catch(e){} } }
+  /* camera off and sheet state dropped on every close path (Escape too). Deferred one tick so a close handler that
+     still reads the sheet's state runs first; skipped when another sheet opened meanwhile. */
+  setTimeout(()=>{ if(g!==sheetGen) return; if(window.M&&M.ui&&typeof M.ui.cleanup==="function"){ try{ M.ui.cleanup(); }catch(e){} } },0);
+  setTimeout(()=>{ if(g!==sheetGen) return; document.getElementById("sheetB").innerHTML=""; },260);
+}
 function exerciseList(action, extra, curId, focus, inDay){
   const ids=Object.keys(LIB).concat(Object.keys(S.custom)); const have=new Set(inDay||[]);
-  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp ${focus&&focus.includes(m)?"foc":""}">${m}</div>`+list.map(id=>{ const L=getEx(id), E=S.ex[id]; return `<button class="opt ${id===curId?"cur":""}" data-a="${action}" data-ex="${id}" ${extra}><span>${esc(L.n)}${have.has(id)?` <span class="tag">in today</span>`:""}</span><span class="m">${E&&E.w!=null?fmtW(E.w)+" lb":TYPE_LABEL[L.t]}</span></button>`; }).join(""); };
+  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp ${focus&&focus.includes(m)?"foc":""}">${m}</div>`+list.map(id=>{ const L=getEx(id), E=S.ex[id]; return `<button class="opt ${id===curId?"cur":""}" data-a="${action}" data-ex="${esc(id)}" ${extra}><span>${esc(L.n)}${have.has(id)?` <span class="tag">in today</span>`:""}</span><span class="m">${E&&E.w!=null?fmtW(E.w)+" lb":TYPE_LABEL[L.t]}</span></button>`; }).join(""); };
   const all=MUSCLES.concat(["Other"]); let h="";
   if(focus&&focus.length){ h+=all.filter(m=>focus.includes(m)).map(grp).join(""); const rest=all.filter(m=>!focus.includes(m)); h+=`<button class="opt" data-a="more"><span>All other muscle groups</span><span class="m">show</span></button><div hidden>${rest.map(grp).join("")}</div>`; }
   else h+=all.map(grp).join("");
@@ -1636,14 +1743,14 @@ function exerciseList(action, extra, curId, focus, inDay){
   return h;
 }
 function openSummary(rec,results){
-  const rows=results.map(r=>{ if(!r.ex){ const cls=r.kind==="up"?"tag acc":"tag"; return `<div class="row"><span>${esc(r.block)}</span><span class="chg"><span class="${cls}">${r.note}</span> ${esc(r.chg)}</span></div>`; }
+  const rows=results.map(r=>{ if(!r.ex){ const cls=r.kind==="up"?"tag acc":"tag"; return `<div class="row"><span>${esc(r.block)}</span><span class="chg"><span class="${cls}">${esc(r.note)}</span> ${esc(r.chg)}</span></div>`; }
     const L=getEx(r.ex); let chg="", cls=""; const fw=v=>NOLOAD(L.t)&&v===0?"BW":fmtW(v);
     if(r.kind==="up") { chg=r.range?`${r.range.lo}–${r.range.hi} reps`:(r.from===r.to?"":`${fw(r.from)} → ${fw(r.to)}`); cls="tag acc"; }
     else if(r.kind==="down"){ chg=`${fw(r.from)} → ${fw(r.to)}`; cls="tag warn"; }
     else if(r.kind==="retry"){ chg=`${fw(r.from)} again`; cls="tag"; }
     else { chg=`${fw(r.from)} again`; cls="tag"; }
     if(r.dsets<0) chg=(chg?chg+" · ":"")+"−1 set";
-    return `<div class="row"><span>${esc(L.n)}${r.pr?` <span class="tag ok">PR</span>`:""}</span><span class="chg"><span class="${cls}">${r.note}</span> ${chg}</span></div>`; }).join("");
+    return `<div class="row"><span>${esc(L.n)}${r.pr?` <span class="tag ok">PR</span>`:""}</span><span class="chg"><span class="${cls}">${esc(r.note)}</span> ${esc(chg)}</span></div>`; }).join("");
   openSheet("Next time",`<div class="summary">${rows}</div><p class="hint">${(rec.blocks&&rec.blocks.length)?"Blocks: finish every round and it adds a round, then shortens rest (clock) or raises the weight (reps). ":""}${results.some(r=>r.ex)?"Lifts: Up = top of the rep range on every set. Retry = missed the bottom once. Deload = missed twice, weight drops 10%. ":""}${absOn()?(rec.abs?"Abs done — next workout skips them.":"No abs today — they're on next workout."):""}</p><button class="btn primary block" data-a="sheet-close" style="margin-top:8px">Done</button>`);
 }
 function newExerciseForm(action,extra){
@@ -1677,6 +1784,9 @@ document.addEventListener("input",e=>{
     clearTimeout(saveT); saveT=setTimeout(save,400); }
 });
 document.addEventListener("change",e=>{ const el=e.target; if(!el.dataset) return; if(el.dataset.f==="progEx"){ progEx=el.value; render(); }
+  else if(el.dataset.f==="imp-file"){ const f=el.files&&el.files[0], st=document.getElementById("impF"); if(!f) return; impText=null;
+    const rd=f.text?f.text():new Promise((ok,no)=>{ const r=new FileReader(); r.onload=()=>ok(String(r.result||"")); r.onerror=no; r.readAsText(f); });
+    rd.then(t=>{ impText=t; if(st) st.textContent="File ready: "+fmtSize(t.length)+". Tap Restore."; }).catch(()=>{ if(st) st.textContent="Couldn't read that file."; }); }
   else if(el.dataset.bi!=null&&/^b[wrn]$/.test(el.dataset.f||"")&&S.active&&S.active.items&&S.active.items[+el.dataset.bi]){ const blk=S.active.items[+el.dataset.bi]; el.value=blk[{bw:"work",br:"rest",bn:"rounds"}[el.dataset.f]]; } });
 document.addEventListener("click",e=>{
   const b=e.target.closest("[data-a]"); if(!b) return;
@@ -1684,7 +1794,7 @@ document.addEventListener("click",e=>{
   const A=S.active;
   switch(a){
     case "start": startWorkout(b.dataset.wid); break;
-    case "pick-workout": openSheet("Which workout?",S.program.order.map(w=>{ const W=S.program.workouts[w]; return `<button class="opt ${w===nextWorkoutId()?"cur":""}" data-a="pick" data-wid="${w}"><span>${esc(W.name)}</span><span class="m">${esc(W.sub||W.items.slice(0,3).map(it=>it.t==="block"?it.name:getEx(it.ex).n).join(", "))}</span></button>`; }).join("")); break;
+    case "pick-workout": openSheet("Which workout?",S.program.order.map(w=>{ const W=S.program.workouts[w]; return `<button class="opt ${w===nextWorkoutId()?"cur":""}" data-a="pick" data-wid="${esc(w)}"><span>${esc(W.name)}</span><span class="m">${esc(W.sub||W.items.slice(0,3).map(it=>it.t==="block"?it.name:getEx(it.ex).n).join(", "))}</span></button>`; }).join("")); break;
     case "pick": S.pick=b.dataset.wid; save(); closeSheet(); render(); break;
     case "show-summary": if(S.lastSummary) openSummary(S.lastSummary.rec,S.lastSummary.results); break;
     case "scope": scope=b.dataset.v; document.querySelectorAll(".seg.scope button").forEach(x=>x.classList.toggle("on",x.dataset.v===scope)); break;
@@ -1729,9 +1839,10 @@ document.addEventListener("click",e=>{
     case "rest-add": if(T){ T.end+=30000; T.total+=30; T.fired=false; document.getElementById("restL").textContent="Rest"; document.getElementById("rest").classList.remove("go"); tickRest(); } break;
     case "rest-skip": stopRest(); break;
     case "sheet-close": closeSheet(); break;
+    case "upd-reload": location.reload(); break;
     case "hist": histOpen=histOpen===b.dataset.id?null:b.dataset.id; render(); break;
     case "hist-more": histN+=40; render(); break;
-    case "del-log": openSheet("Delete workout?",`<p class="hint">Removes it from history. Current weights stay as they are.</p><button class="btn block danger" data-a="del-log-do" data-id="${b.dataset.id}" style="margin-top:8px">Delete</button>`); break;
+    case "del-log": openSheet("Delete workout?",`<p class="hint">Removes it from history. Current weights stay as they are.</p><button class="btn block danger" data-a="del-log-do" data-id="${esc(b.dataset.id)}" style="margin-top:8px">Delete</button>`); break;
     case "del-log-do": { const id=b.dataset.id; S.log=S.log.filter(r=>r.id!==id); S.gone=(S.gone||[]).filter(g=>g!==id).concat(id).slice(-300); if(S.lastSummary&&S.lastSummary.rec&&S.lastSummary.rec.id===id) delete S.lastSummary; dbDelete(id); histOpen=null; save(); closeSheet(); render(); break; }
     case "set": { const f=b.dataset.f; S.settings[f]=f==="theme"?b.dataset.v:+b.dataset.v; if(f==="theme") applyTheme(); save(); render(); break; }
     case "tog": S.settings[b.dataset.f]=!S.settings[b.dataset.f]; save(); render(); break;
@@ -1743,15 +1854,30 @@ document.addEventListener("click",e=>{
     case "prog-up": case "prog-down": { const W=S.program.workouts[b.dataset.wid]; const j=a==="prog-up"?i-1:i+1; if(j<0||j>=W.items.length) break; [W.items[i],W.items[j]]=[W.items[j],W.items[i]]; bumpDay(b.dataset.wid); save(); render(); break; }
     case "prog-add": openAdd({where:"prog",wid:b.dataset.wid,i:b.dataset.i!=null?i:null}); break;
     case "prog-add-block": { S.program.workouts[b.dataset.wid].items.push(defaultBlock()); bumpDay(b.dataset.wid); save(); render(); toast("Block added — swap the moves as you like"); break; }
-    case "export": { const txt=JSON.stringify({...S, __macros:(window.M&&M.export)?M.export():undefined}); const done=()=>toast("Copied. Paste it into Notes."); const show=()=>openSheet("Backup",`<textarea readonly>${esc(txt)}</textarea>`);
-      const copy=()=>{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done).catch(show); } else show(); };
-      if(navigator.share){ try{ navigator.share({title:"Chalk backup",text:txt}).then(()=>toast("Backup shared")).catch(e=>{ if(e&&e.name==="AbortError") return; copy(); }); }catch(e){ copy(); } }
+    case "export": { const txt=JSON.stringify({...S, __macros:(window.M&&M.export)?M.export():undefined}); const done=()=>toast("Copied. Paste it into Notes.");
+      /* a big backup goes out as a file: multi-MB text in a text box or the share sheet freezes the phone */
+      const name="chalk-backup-"+new Date().toISOString().slice(0,10)+".json", big=txt.length>150000;
+      const show=()=>{ if(!big){ openSheet("Backup",`<textarea readonly aria-label="Backup text">${esc(txt)}</textarea>`); return; }
+        let url=""; try{ url=URL.createObjectURL(new Blob([txt],{type:"application/json"})); setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} },300000); }catch(e){}
+        openSheet("Backup",`<p class="hint">Your backup is ${fmtSize(txt.length)}. That's too big to show here, so save it as a file.</p>${url?`<a class="btn primary block" style="margin-top:10px" href="${esc(url)}" download="${esc(name)}">Save file</a>`:""}`); };
+      const copy=()=>{ if(!big&&navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done).catch(show); } else show(); };
+      let file=null; try{ file=new File([txt],name,{type:"application/json"}); }catch(e){}
+      let canFile=false; try{ canFile=!!(file&&navigator.canShare&&navigator.canShare({files:[file]})); }catch(e){}
+      const shared=p=>p.then(()=>toast("Backup shared")).catch(e=>{ if(e&&e.name==="AbortError") return; copy(); });
+      if(canFile){ try{ shared(navigator.share({files:[file],title:"Chalk backup"})); }catch(e){ copy(); } }
+      else if(navigator.share&&!big){ try{ shared(navigator.share({title:"Chalk backup",text:txt})); }catch(e){ copy(); } }
       else copy(); break; }
-    case "import": openSheet("Restore",`<p class="hint">Paste a Chalk backup. It replaces what's on this phone.</p><textarea id="impT" placeholder="{...}" aria-label="Backup text"></textarea><button class="btn primary block" data-a="import-do" style="margin-top:10px">Restore</button>`); break;
-    case "import-do": { const prev=S; try{ const s=JSON.parse(document.getElementById("impT").value); const mac=s&&typeof s==="object"?s.__macros:null; if(s&&typeof s==="object") delete s.__macros; if(s&&s.v===1&&s.program&&s.program.workouts&&Array.isArray(s.log)&&s.settings&&s.ex){ if(mac&&window.M&&M.import) M.import(mac); S=s; upgrade(S); save(); applyTheme(); closeSheet(); render(); toast("Restored"); } else toast("That's not a Chalk backup"); }catch(e){ S=prev; save(); applyTheme(); render(); toast("That's not a Chalk backup"); } break; }
+    case "import": impText=null; openSheet("Restore",`<p class="hint">Paste a Chalk backup, or pick the backup file. Workouts are replaced. Food logs and meals from the backup are added back; newer changes on this phone stay.</p><label class="btn block m-file" style="margin:10px 0">Pick a backup file<input type="file" accept=".json,application/json,text/plain" data-f="imp-file" aria-label="Backup file"></label><p class="hint" id="impF" role="status"></p><textarea id="impT" placeholder="Or paste the backup text here" aria-label="Backup text"></textarea><button class="btn primary block" data-a="import-do" style="margin-top:10px">Restore</button>`); break;
+    case "import-do": { const prev=S; try{ const ta=document.getElementById("impT"); const s=JSON.parse(ta&&ta.value.trim()?ta.value:(impText||"")); const mac=s&&typeof s==="object"?s.__macros:null; if(s&&typeof s==="object") delete s.__macros; if(s&&s.v===1&&s.program&&s.program.workouts&&Array.isArray(s.log)&&s.settings&&s.ex){
+        /* the food part is merged on its own: if it can't be read, the workouts still come back */
+        let macOk=true; if(mac!=null&&window.M&&M.import){ try{ macOk=M.import(mac)!==false; }catch(e2){ macOk=false; } }
+        S=s; upgrade(S); save(); applyTheme(); closeSheet(); render(); toast(macOk?"Restored":"Workouts restored. The food part couldn't be read."); } else toast("That's not a Chalk backup"); }catch(e){ S=prev; save(); applyTheme(); render(); toast("That's not a Chalk backup"); } break; }
     case "reset-prog": regen(); bumpProg(); save(); render(); toast("Program rebuilt"); break;
-    case "switch-profile": S.profile=null; S.lastSummary=null; tab="today"; save(); render(); break;
-    case "pick-profile": { const k=b.dataset.v, pr=PRESETS[k]; S.profile=k; S.mix=cp(pr.mix); S.goal={mode:pr.goal,setAt:Date.now()}; S.block=0; S.cyc={}; regen(); save(); render(); break; }
+    case "switch-profile": if(S.active){ toast("Finish your workout first"); break; } if(S.profile) S.switchFrom=S.profile; S.profile=null; tab="today"; save(); render(); break;
+    case "switch-cancel": if(!S.profile&&S.switchFrom&&PRESETS[S.switchFrom]) S.profile=S.switchFrom; delete S.switchFrom; save(); render(); break;
+    /* the same person picked again keeps their goal, mix, 45-day clock and program; someone else gets their own start */
+    case "pick-profile": { const k=b.dataset.v, pr=PRESETS[k]; if(!pr) break; const same=!!S.switchFrom&&S.switchFrom===k; delete S.switchFrom; S.profile=k;
+      if(!same){ S.lastSummary=null; S.mix=cp(pr.mix); S.goal={mode:pr.goal,setAt:Date.now()}; S.block=0; S.cyc={}; regen(); } save(); render(); break; }
     case "checkin": CI=null; openCheckin(); break;
     case "ci-goal": ciDraft().mode=b.dataset.v; openCheckin(); break;
     case "ci-mix": ciDraft().mix[b.dataset.k]=+b.dataset.v; openCheckin(); break;
@@ -1791,12 +1917,18 @@ document.addEventListener("click",e=>{
       if(id==="__create"){ id=createCustom(); if(!id) break; }
       A.items[bi].moves.push(newMove(id)); save(); closeSheet(); render(); break; }
     case "badd-block": { const d=defaultBlock(); const at=insertBeforeAbs(A.items,{...d,moves:d.moves.map(m=>newMove(m.ex)),done:0,status:"idle",skipped:false}); save(); render(); setTimeout(()=>{ const el=document.getElementById("blk"+at); el&&el.scrollIntoView({behavior:"smooth",block:"nearest"}); },50); break; }
-    case "wipe": openSheet("Erase everything?",`<p class="hint">History, weights, program — all gone from this phone. Copy a backup first.</p><button class="btn block danger" data-a="wipe-do" style="margin-top:8px">Erase</button>`); break;
-    case "wipe-do": (S.log||[]).forEach(r=>dbDelete(r.id)); clearInterval(ctTick); CT=null; wakeOff(); S=fresh(); stopRest(); tab="today"; save(); if(window.M&&M.reset) M.reset(); applyTheme(); closeSheet(); render(); break;
+    case "wipe": openSheet("Erase everything?",`<p class="hint">This deletes everything on this phone: workouts, weights, program, food logs, saved meals, your foods, weigh-ins and your Claude key. Copy a backup first.</p><button class="btn block danger" data-a="wipe-do" style="margin-top:8px">Erase</button>`); break;
+    case "wipe-do": (S.log||[]).forEach(r=>dbDelete(r.id)); clearInterval(ctTick); CT=null; wakeOff(); S=fresh(); stopRest(); tab="today"; save(); if(window.M&&M.reset) M.reset(); try{ localStorage.removeItem("chalk.ai.key"); }catch(e){} applyTheme(); closeSheet(); render(); break;
   }
 });
 let toastT=null;
-function toast(m){ const t=document.getElementById("toast"); t.textContent=m; const tabs=document.getElementById("tabs"), cta=document.getElementById("cta"); t.style.bottom=((tabs?tabs.offsetHeight:0)+(cta?cta.offsetHeight:0)+12)+"px"; t.classList.add("on"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("on"),1800); }
+let impText=null;
+function fmtSize(n){ return n>=1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB"; }
+/* Shows at the bottom, above the tabs; at the top while a sheet covers the bottom. Longer text stays longer: 1.5 s + 60 ms a letter, 6 s at most. */
+function toastMs(m){ return Math.min(6000,1500+60*String(m==null?"":m).length); }
+function toast(m){ const t=document.getElementById("toast"); m=m==null?"":String(m); t.textContent=m; const top=sheetOn(); t.classList.toggle("top",top);
+  if(!top){ const tabs=document.getElementById("tabs"), cta=document.getElementById("cta"); t.style.bottom=((tabs?tabs.offsetHeight:0)+(cta?cta.offsetHeight:0)+12)+"px"; }
+  t.classList.add("on"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("on"),toastMs(m)); }
 function applyTheme(){ const t=S.settings.theme||"system"; if(t==="system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme",t); }
 
 /* ================= OPTIONAL CLOUD SYNC (only inside claude.ai) ================= */
@@ -1838,8 +1970,25 @@ function dbDelete(id){ if(!db) return; try{ db.doc("workouts/"+id).delete().catc
 window.TRAIN_TABS=document.getElementById("tabs").innerHTML; if(window.M&&M.ui&&M.ui.bind) M.ui.bind(); if(window.M&&M.sync&&M.sync.init) M.sync.init(); if(window.M&&M.cloud&&M.cloud.start) M.cloud.start();
 applyTheme(); render();
 if(S.active) wakeOn();
-if(S.flash){ const f=S.flash; delete S.flash; save(); setTimeout(()=>openSheet("Program updated",`<p class="hint" style="font-size:15px">${esc(f)}</p><button class="btn primary block" data-a="sheet-close" style="margin-top:12px">Got it</button>`),400); }
-if("serviceWorker" in navigator && location.protocol==="https:"){ navigator.serviceWorker.register("sw.js").catch(()=>{}); }
+/* ================= UPDATES =================
+   sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
+   launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
+   says "Updated. Tap to reload". APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
+const APP_VERSION=16, BOOT_AT=Date.now();
+let updReady=false, updCheckAt=0;
+function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){} return true; }
+function updateReady(){
+  if(updReady) return; updReady=true;
+  if(quietNow()&&Date.now()-BOOT_AT<10000){ location.reload(); return; }
+  const u=document.getElementById("upd"); if(!u) return; const tabs=document.getElementById("tabs"), cta=document.getElementById("cta");
+  u.style.bottom=((tabs?tabs.offsetHeight:0)+(cta?cta.offsetHeight:0)+12)+"px"; u.hidden=false;
+}
+function checkUpdate(){ if(!("serviceWorker" in navigator)||Date.now()-updCheckAt<15*60000) return; updCheckAt=Date.now(); try{ navigator.serviceWorker.getRegistration().then(r=>r&&r.update()).catch(()=>{}); }catch(e){} }
+if("serviceWorker" in navigator && location.protocol==="https:"){
+  navigator.serviceWorker.addEventListener("message",e=>{ const d=e.data||{}; if(d.type==="chalk-updated"&&d.cache&&d.cache!=="chalk-v"+APP_VERSION) updateReady(); });
+  navigator.serviceWorker.register("sw.js").then(()=>{ updCheckAt=Date.now(); }).catch(()=>{});
+  document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"){ if(updReady&&quietNow()) location.reload(); } else checkUpdate(); });
+}
 </script>
 </body>
 </html>

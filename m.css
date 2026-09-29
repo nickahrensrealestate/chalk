@@ -225,3 +225,67 @@
 }
 
 .m-warnline{color:var(--warn);margin:6px 0 0}
+
+/* ---- F2a ---- */
+/* Log food: one compact row of tools; while the search box is in use the tools and the
+   Recent / Meals / Foods row step aside so results sit above the keyboard */
+.m-tools{display:flex;grid-template-columns:none;gap:6px;overflow-x:auto;margin:8px -2px 8px;padding:0 2px 2px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.m-tools::-webkit-scrollbar{display:none}
+.m-tools button{flex:none;flex-direction:row;gap:6px;min-height:44px;padding:0 12px;border-radius:22px;font-size:13px;color:var(--ink);white-space:nowrap}
+.m-tools button span{font-size:16px}
+.m-add.m-typing .m-tools,.m-add.m-typing .m-seg{display:none}
+.m-searchbox{position:relative}
+.m-searchbox .m-search{padding-right:48px}
+.m-clear{position:absolute;right:2px;top:50%;transform:translateY(-50%);width:44px;height:44px;font-size:22px;color:var(--mut);border-radius:22px}
+.m-clear[hidden]{display:none}
+.m-pills .chip{min-height:44px;padding:0 14px}
+.m-seg button{min-height:44px}
+.m-keepcase,.btn.m-keepcase{text-transform:none;letter-spacing:0}
+.m-results .n,.m-det-name,.ex-row .n{overflow-wrap:anywhere}
+.m-offstate{padding:12px 4px}
+/* servings screen: unit on its own full-width row, then the amount, then one amount line */
+.m-det-u .sel,.m-det-u .m-useg{width:100%;min-height:52px}
+.m-det-q{margin-top:10px}
+.m-det-u .lbl,.m-det-q .lbl{display:block;margin-bottom:4px}
+.m-det-amt{margin:10px 2px 0}
+.m-back{min-height:44px;padding:0 6px;margin:-6px 0 4px -6px;font-size:16px;font-weight:600;color:var(--acc)}
+.m-move[hidden],.m-cookrow[hidden]{display:none}
+.m-inline{min-height:36px;padding:0 12px;margin-left:6px;vertical-align:middle}
+#m-det-msg:empty,#m-qa-msg:empty{display:none}
+/* Diary */
+.m-backtoday{display:flex;justify-content:center;padding:4px 14px 0}
+.m-backtoday .btn{min-height:44px;font-size:14px}
+.m-morebtn .btn{min-height:44px}
+.m-water-b .btn{min-width:0;padding:0 12px;white-space:nowrap}
+.m-slot .icon,.m-dayhd .icon{min-width:44px;min-height:44px}
+/* Train → Today summary: labels shrink before they overflow */
+.m-ts-k{overflow:hidden;text-overflow:ellipsis;text-transform:none;letter-spacing:0;font-size:12px}
+.m-quick .m-f3{grid-template-columns:repeat(3,minmax(0,1fr))}
+/* short phones: the slot cards have their own + Add, so the big bottom button steps aside */
+@media (max-height:700px){ #cta:has([data-m="add"]){display:none} }
+/* light theme: a darker fat color reads on white */
+:root:not([data-theme="dark"]){ --fat:#A85A16; }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --fat:#F0A25C; } }
+
+/* ---- F2b ---- */
+/* parts hidden with the hidden attribute (a display rule would otherwise keep them on screen) */
+.m-cookf[hidden],.m-cookopen[hidden],#m-label-type[hidden],#m-ff-gwarn[hidden],#m-ff-msg[hidden],#m-mb-warn[hidden],#m-mb-msg[hidden],#m-meal-msg[hidden]{display:none}
+/* food form: "Does the weight change when cooked?" */
+.m-cookseg{display:flex;width:100%}
+.m-cookseg button{flex:1 1 0;min-height:52px;line-height:1.2;padding:6px 4px}
+.m-cookseg button small{display:block;font-size:12px;font-weight:500;opacity:.85;margin-top:2px}
+.btn.m-cookopen{font-size:14px;text-transform:none;letter-spacing:0;color:var(--acc)}
+#m-ff-msg,#m-mb-msg,#m-meal-msg{font-size:14px;font-weight:600}
+/* an item set to 0 */
+.m-zero{color:var(--warn);font-weight:600}
+/* meal builder: a draft from before, and the batch tip */
+.m-resume{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 6px 6px 12px;border:1px dashed var(--line);border-radius:12px;font-size:14px;font-weight:600}
+.m-resume .btn{min-height:44px;padding:0 12px;flex:none}
+.m-batchtip{font-size:14px;color:var(--ink);line-height:1.35;margin:6px 0 10px}
+.m-mbsm>span{white-space:nowrap}
+/* meal sheet: "What's in it" under the amount of a batch */
+.m-inlbl{margin:14px 2px 0;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
+/* armed Delete / Cancel / Start over take the whole row so "Tap again to …" fits */
+.m-btnrow>.btn.m-armed[data-m="meal-del"],.m-btnrow>.btn.m-armed[data-m="ff-del"]{flex:1 1 100%}
+.btn.m-armed[data-m="mb-cancel"],.btn.m-armed[data-m="mb-fresh"],.btn.m-armed[data-m="mb-save"],.btn.m-armed[data-m="ff-save"],.btn.m-armed[data-m="ff-save-add"],.btn.m-armed[data-m="ff-log"]{text-transform:none;letter-spacing:0}
+.m-resume .btn.m-armed{flex:1 1 auto;white-space:normal}

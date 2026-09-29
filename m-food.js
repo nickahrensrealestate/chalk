@@ -38,6 +38,9 @@ window.M = window.M || {};
   const now = () => Date.now();
   const isOffline = () => { try { return nav().onLine === false; } catch (e) { return false; } };
   const toList = v => (v == null ? [] : Array.isArray(v) ? v.filter(Boolean) : typeof v === "object" && typeof v.length === "number" ? Array.prototype.slice.call(v).filter(Boolean) : [v]);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  /* Names and brands from Open Food Facts, labels and Claude: one line, at most 120 letters. */
+  const cap = (s, n) => { s = String(s == null ? "" : s).replace(/\s+/g, " ").trim(); n = n || 120; return s.length > n ? s.slice(0, n).trim() : s; };
 
   /* One error shape everywhere: a plain object, never an Error subclass. */
   function E(code, message, extra) {
@@ -65,7 +68,10 @@ window.M = window.M || {};
     const outer = opts.signal || null; delete opts.signal;
     const ctl = typeof AbortController === "function" ? new AbortController() : null;
     let t = 0, timedOut = false;
-    const timer = new Promise((_, rej) => { t = setTimeout(() => { timedOut = true; try { if (ctl) ctl.abort(); } catch (e) {} rej(E("timeout", "Reaching " + what + " took too long. Check your connection and try again.")); }, ms || 8000); });
+    /* Online but no answer: the other side is slow or down (a CORS-blocked 503 looks like a
+       network error). Only an offline phone is told to check its connection. */
+    const slowMsg = "Reaching " + what + " took too long. Try again in a minute.";
+    const timer = new Promise((_, rej) => { t = setTimeout(() => { timedOut = true; try { if (ctl) ctl.abort(); } catch (e) {} rej(E("timeout", slowMsg)); }, ms || 8000); });
     const onOuter = () => { try { if (ctl) ctl.abort(); } catch (e) {} };
     if (outer && typeof outer.addEventListener === "function") { if (outer.aborted) onOuter(); else outer.addEventListener("abort", onOuter); }
     try {
@@ -73,13 +79,13 @@ window.M = window.M || {};
       try { res = await Promise.race([fetch(url, Object.assign(opts, ctl ? { signal: ctl.signal } : {})), timer]); }
       catch (e) {
         if (outer && outer.aborted) throw E("cancelled", "Stopped.");
-        if (timedOut || (isE(e) && e.code === "timeout")) throw E("timeout", "Reaching " + what + " took too long. Check your connection and try again.");
+        if (timedOut || (isE(e) && e.code === "timeout")) throw E("timeout", slowMsg);
         if (isOffline()) throw E("offline", "You're offline. Check your connection and try again.");
-        throw E("network", "Couldn't reach " + what + ". Check your connection and try again.");
+        throw E("network", what + " isn't answering right now. Try again in a minute.");
       }
       let body = null;
       try { body = await Promise.race([Promise.resolve().then(() => res.json()).catch(() => null), timer]); }
-      catch (e) { throw E("timeout", "Reaching " + what + " took too long. Check your connection and try again."); }
+      catch (e) { throw E("timeout", slowMsg); }
       return { ok: !!res.ok, status: num(res.status), body };
     } finally {
       clearTimeout(t);
@@ -196,10 +202,10 @@ window.M = window.M || {};
     forbidden: "Your Anthropic key isn't allowed to do this. Check your Anthropic account.",
     rate_limited: "Too many requests. Try again in a minute.",
     overloaded: "Claude is overloaded right now. Try again in a minute.",
-    server: "Claude had a problem on its end. Try again.",
+    server: "Claude had a problem. Try again.",
     timeout: "Claude took too long to answer. Try again.",
     offline: "You're offline. Check your connection and try again.",
-    network: "Couldn't reach Claude. Check your connection and try again.",
+    network: "Claude isn't answering right now. Try again in a minute.",
     model: "That Claude model isn't available on your key. Pick another model in You → AI.",
     billing: "Your Anthropic account is out of credits. Add credits at console.anthropic.com.",
     bad_json: "Claude's answer couldn't be read. Try again."
@@ -321,12 +327,12 @@ window.M = window.M || {};
       if (r.status === 429 || etype === "rate_limit_error") throw E("rate_limited", AI_MSG.rate_limited);
       if (r.status === 529 || etype === "overloaded_error") throw E("overloaded", AI_MSG.overloaded);
       if (r.status === 404 || etype === "not_found_error") throw E("model", AI_MSG.model);
-      if (r.status === 413 || etype === "request_too_large") throw E("too_large", "That photo is too big to send. Try a smaller one.");
+      if (r.status === 413 || etype === "request_too_large") throw E("too_large", "That photo is too big. Try a smaller one.");
       if (/credit balance/i.test(emsg)) throw E("billing", AI_MSG.billing);
-      if (r.status === 400 || etype === "invalid_request_error") throw E("bad_request", "Claude couldn't use that request." + (emsg ? " (" + emsg.slice(0, 140) + ")" : ""));
+      if (r.status === 400 || etype === "invalid_request_error") throw E("bad_request", "Claude couldn't take that request. Try again.");
       if (r.status === 503) throw E("overloaded", AI_MSG.overloaded);
       if (r.status >= 500 || etype === "api_error") throw E("server", AI_MSG.server);
-      throw E("network", "Claude answered with an error (" + r.status + "). Try again.");
+      throw E("server", AI_MSG.server);
     }
   }
 
@@ -586,10 +592,37 @@ window.M = window.M || {};
   const OFF_FIELDS = "code,product_name,product_name_en,generic_name,generic_name_en,abbreviated_product_name,brands,serving_size,serving_quantity,serving_quantity_unit,quantity,nutrition_data_per,nutriments";
   const OFF_MSG = {
     busy: "Open Food Facts is busy. Try again in a minute, or scan the label.",
-    down: "Open Food Facts isn't answering right now. Try again soon, or scan the label.",
+    down: "Open Food Facts isn't answering right now. Try again in a minute, or scan the label.",
+    slow: "Open Food Facts is slow right now. Try again in a minute, or scan the label.",
     notFound: "This barcode isn't in Open Food Facts yet. Scan the label to add it.",
+    store: "This is a store price sticker. Scan the label or type it in once. After that, this sticker finds it.",
     noNutrition: "Open Food Facts knows this item but has no nutrition numbers for it. Scan the label to add them."
   };
+  /* GET from Open Food Facts. When OFF is overloaded it answers 503 without CORS headers, which
+     the browser reports as a network error. So while the phone is online, a failed request or a
+     5xx is tried again after ~0.8 s (retries times), then reported as OFF being down — never as
+     the person's connection. Slow requests are not repeated. → {ok, status, body} */
+  async function offGet(url, ms, retries, deadline) {
+    let last = null;
+    for (let i = 0; i <= retries; i++) {
+      if (i) {
+        if (deadline && deadline - now() < 800 + 1500) break;
+        await sleep(800 * i);
+      }
+      let r;
+      try { r = await fetchJSON(url, { method: "GET", headers: { accept: "application/json" } }, deadline ? Math.min(ms, Math.max(1000, deadline - now())) : ms, "Open Food Facts"); }
+      catch (e) {
+        if (e.code === "offline" || e.code === "cancelled") throw e;
+        if (e.code === "timeout") throw E("timeout", OFF_MSG.slow);
+        if (isOffline()) throw E("offline", "You're offline. Check your connection and try again.");
+        last = E("off_down", OFF_MSG.down);
+        continue;
+      }
+      if (r.status >= 500) { last = E("off_down", OFF_MSG.down); continue; }
+      return r;
+    }
+    throw last || E("off_down", OFF_MSG.down);
+  }
 
   /* OFF's serving_quantity is grams (or ml, treated as grams); a few products store oz / lb / fl oz. */
   function servingGrams(sq, unit) {
@@ -663,21 +696,34 @@ window.M = window.M || {};
   }
   const SMALL_WORD = /^(a|an|and|as|at|by|for|in|of|on|or|the|to|with|oz|lb|lbs|g|kg|mg|ml|l|fl|ct|pk)$/i;
   function tidyText(s) { return String(s == null ? "" : s).replace(/[®™©]/g, "").replace(/\s+/g, " ").replace(/^[\s\-–—,;:.]+|[\s\-–—,;:]+$/g, "").trim(); }
+  const allCaps = s => { const l = String(s).replace(/[^A-Za-z]/g, ""); return l.length >= 3 && l.replace(/[^A-Z]/g, "").length / l.length >= 0.8; };
   function tidyCase(s) {
+    s = String(s == null ? "" : s);
     const letters = s.replace(/[^A-Za-z]/g, "");
     if (letters.length < 3) return s;
-    const up = letters.replace(/[^A-Z]/g, "").length;
-    if (up / letters.length >= 0.8) {
-      return s.split(" ").map((w, i) => w.split("-").map((p, j) => (!p ? p : /\d/.test(p) ? p.toLowerCase() : (i + j > 0 && SMALL_WORD.test(p)) ? p.toLowerCase() : p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())).join("-")).join(" ");
+    if (allCaps(s)) {
+      /* word by word, also inside "COCA-COLA", "SA/NV", "ST.JOHN" */
+      let n = 0;
+      return s.replace(/[A-Za-z0-9']+/g, (w, at) => {
+        const first = n++ === 0;
+        if (/\d/.test(w)) return w.toLowerCase();
+        if (!first && SMALL_WORD.test(w) && /[\s-]/.test(s.charAt(at - 1))) return w.toLowerCase();
+        return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      });
     }
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
-  function offBrand(p) { return tidyCase(tidyText(String((p && p.brands) || "").split(",")[0])); }
+  function offBrand(p) { return cap(tidyCase(tidyText(String((p && p.brands) || "").split(",")[0]))); }
+  /* English names first. A name that is only the brand ("Nutella") is swapped for the generic
+     name only when that one reads as English ("Greek yogurt, vanilla", not "Pâte à tartiner"). */
   function offName(p, brand) {
-    const cands = ["product_name", "product_name_en", "generic_name", "generic_name_en", "abbreviated_product_name"].map(k => tidyText(p && p[k])).filter(Boolean);
-    let name = cands[0] || "";
-    if (name && brand && lc(name) === lc(brand)) { const better = cands.find(c => lc(c) !== lc(brand)); if (better) name = better; }
-    return tidyCase(name);
+    const get = k => tidyText(p && p[k]);
+    const english = x => !!x && /^[\x20-\x7E]*$/.test(x);
+    let name = get("product_name_en") || get("product_name") || get("abbreviated_product_name");
+    const generic = get("generic_name_en") || (english(get("generic_name")) ? get("generic_name") : "");
+    if (!name) name = get("generic_name_en") || get("generic_name");
+    else if (brand && lc(name) === lc(brand) && generic && lc(generic) !== lc(brand)) name = generic;
+    return cap(tidyCase(name));
   }
 
   /* Pure: OFF product JSON → Food | null (null = no nutrition numbers, or nothing to call it). */
@@ -736,8 +782,9 @@ window.M = window.M || {};
     }
     const alts = [];
     if (per100g) { alts.push({ label: "100 g", g: 100 }); alts.push({ label: "1 oz", g: 28.35 }); }
+    /* "1 package" only for a package someone eats in a sitting or two (not a 144 fl oz case) */
     const pg = packageGrams(product.quantity);
-    if (pg && per100g && !(serving.g > 0 && Math.abs(pg - serving.g) <= 5)) alts.push({ label: "1 package", g: r1(pg) });
+    if (pg && per100g && pg <= 1000 && !(serving.g > 0 && (Math.abs(pg - serving.g) <= 5 || pg > serving.g * 8))) alts.push({ label: "1 package", g: r1(pg) });
     const t = now();
     return {
       id: code ? "off_" + code : uid(), name, brand, barcode: code, source: "off",
@@ -749,8 +796,58 @@ window.M = window.M || {};
   function localByCode(code) {
     try { return M.foods && typeof M.foods.findByBarcode === "function" ? M.foods.findByBarcode(code) : null; } catch (e) { return null; }
   }
+  /* "2" + 5-digit item number (+ price + check digits) → the first 6 digits, else "". */
+  function priceItem(code) {
+    let c = digitsOf(code);
+    if (c.length === 13 && c[0] === "0") c = c.slice(1);
+    return c.length === 12 && c[0] === "2" && gtinOk(c) ? c.slice(0, 6) : "";
+  }
+  function storeFood(item) {
+    try {
+      const list = M.foods && typeof M.foods.list === "function" ? M.foods.list() : [];
+      return list.filter(f => f && priceItem(f.barcode) === item).sort((a, b) => num(b.lastUsed) - num(a.lastUsed) || num(b.updatedAt) - num(a.updatedAt))[0] || null;
+    } catch (e) { return null; }
+  }
+  /* Scanned raw meat / fish or dry rice / pasta takes the cook info (y, raw|dry) of the matching
+     built-in food, so the servings screen offers raw AND cooked amounts. Its own label is the
+     raw (or dry) profile; cooked = raw ÷ y. Already-cooked products are left alone. */
+  const COOK_RULES = [
+    [/\bchicken\b.*\b(breasts?|tenders?|tenderloins?|cutlets?)\b|\b(breasts?|tenders?|tenderloins?)\b.*\bchicken\b/, "chicken_breast"],
+    [/\bchicken\b.*\bthighs?\b|\bthighs?\b.*\bchicken\b/, "chicken_thigh"],
+    [/\bground\b.*\bturkey\b|\bturkey\b.*\bground\b/, "ground_turkey_93"],
+    [/\b(ground|minced?)\b.*\bbeef\b|\bbeef\b.*\bground\b|\bhamburger\b/, "ground_beef"],
+    [/\bpork\b.*\b(tenderloins?|loins?|chops?)\b/, "pork_tenderloin"],
+    [/\bsalmon\b/, "salmon"],
+    [/\brice\b/, "white_rice"],
+    [/\b(pasta|spaghetti|penne|rotini|macaroni|fettuccine|linguine|rigatoni|farfalle|fusilli|ziti|orzo|angel hair|lasagna|egg noodles|bowties?|elbows?)\b/, "pasta"]
+  ];
+  const NOT_RAW = /\b(cooked|precooked|pre-cooked|grilled|roasted|rotisserie|smoked|deli|sliced|lunch|jerky|canned|pouch|nuggets?|breaded|fried|crispy|sausages?|meatballs?|patty|patties|burgers?|broth|stock|soup|salad|sauce|dip|spread|bites|snacks?|chips|crackers?|cakes?|cereal|flour|milk|vinegar|pudding|krispies|bran|ramen|instant|ready|microwav\w*|minute|steamed|bowls?|meals?|dinner|entree|kit|mix|helper|cheese|strips|popcorn|stuffed|ravioli|tortellini|gnocchi|oil|cauliflower|broccoli|veggie|vegetable)\b/;
+  function cookFor(food) {
+    try {
+      if (!isObj(food) || !isObj(food.per100g) || !(num(food.per100g.cal) > 0)) return null;
+      if (M.cook && typeof M.cook.of === "function" && M.cook.of(food)) return null;
+      const name = lc(food.name).replace(/&/g, " and ");
+      if (NOT_RAW.test(name)) return null;
+      const rule = COOK_RULES.find(r => r[0].test(name)); if (!rule) return null;
+      let slug = rule[1];
+      if (slug === "ground_beef") { const m = /\b(\d{2})\s*(%|\/)/.exec(name); const lean = m ? num(m[1]) : 80; slug = lean >= 93 ? "ground_beef_93" : lean >= 90 ? "ground_beef_90" : lean >= 85 ? "ground_beef_85" : "ground_beef_80"; }
+      const base = builtInFoods().find(f => f.id === "g_" + slug);
+      const bc = base && isObj(base.cook) ? base.cook : null;
+      const y = bc ? num(bc.y) : 0;
+      if (!(y > 0.05 && y < 20)) return null;
+      /* "Ready rice" and friends: the label already reads like the cooked food */
+      const rawCal = num(base.per100g && base.per100g.cal), ckCal = num(bc.per100gCooked && bc.per100gCooked.cal), cal = num(food.per100g.cal);
+      if (rawCal > 0 && ckCal > 0 && Math.abs(cal - ckCal) < Math.abs(cal - rawCal) * 0.6) return null;
+      const per100gCooked = {}; NUT.forEach(k => { per100gCooked[k] = r2(num(food.per100g[k]) / y); });
+      const cook = { y, word: bc.word === "dry" ? "dry" : "raw", per100gCooked };
+      if (cook.word === "dry" && Array.isArray(bc.alts) && bc.alts.length) cook.alts = bc.alts.map(a => Object.assign({}, a));
+      return cook;
+    } catch (e) { return null; }
+  }
+  M.food.cookFor = cookFor;
   function saveFound(f) {
     try {
+      if (!f.cook) { const c = cookFor(f); if (c) f.cook = c; }
       if (!M.foods || typeof M.foods.add !== "function") return f;
       const have = f.barcode ? localByCode(f.barcode) : null;
       if (have) return have;
@@ -773,16 +870,23 @@ window.M = window.M || {};
       if ([8, 12, 13].indexOf(raw.length) >= 0 && !gtinOk(raw) && !(raw.length === 8 && upceToUpca(raw))) throw E("barcode", "Those numbers don't match a real barcode. Check them and try again.");
       const vars = codeVariants(raw);
       for (const v of vars) { const f = localByCode(v); if (f) return (M.food.lastLookup = { status: "found", code: raw, food: f, saved: true }); }
+      /* A store's own price sticker (UPC-A starting with 2: item number, then the price). Open
+         Food Facts can't know it; the same item keeps its first 6 digits whatever it costs. */
+      const item = priceItem(raw);
+      if (item) {
+        const f = storeFood(item);
+        if (f) return (M.food.lastLookup = { status: "found", code: raw, food: f, saved: true });
+        return (M.food.lastLookup = { status: "not_found", code: raw, store: true, message: OFF_MSG.store });
+      }
       const deadline = now() + Math.max(15000, reqMs * 2);
       let noNut = null, lastErr = null;
       for (const v of vars.slice(0, 3)) {
         const left = deadline - now(); if (left < Math.min(1500, reqMs)) break;
         let r;
         try {
-          r = await fetchJSON(OFF_BASE + "/api/v2/product/" + encodeURIComponent(v) + ".json?fields=" + OFF_FIELDS, { method: "GET", headers: { accept: "application/json" } }, Math.min(reqMs, left), "Open Food Facts");
-        } catch (e) { lastErr = e; if (e.code === "offline" || e.code === "timeout") break; continue; }
+          r = await offGet(OFF_BASE + "/api/v2/product/" + encodeURIComponent(v) + ".json?fields=" + OFF_FIELDS, Math.min(reqMs, left), 1, deadline);
+        } catch (e) { lastErr = e; break; }
         if (r.status === 429) { lastErr = E("busy", OFF_MSG.busy); break; }
-        if (r.status >= 500) { lastErr = E("off_down", OFF_MSG.down); break; }
         lastErr = null;
         const p = r.body && isObj(r.body.product) ? r.body.product : null;
         if (!p || r.body.status === 0 || r.status === 404) continue;
@@ -811,9 +915,9 @@ window.M = window.M || {};
       const url = OFF_BASE + "/cgi/search.pl?search_terms=" + encodeURIComponent(s) +
         "&search_simple=1&action=process&json=1&page_size=15&fields=" + OFF_FIELDS +
         "&tagtype_0=countries&tag_contains_0=contains&tag_0=united-states";
-      const r = await fetchJSON(url, { method: "GET", headers: { accept: "application/json" } }, 8000, "Open Food Facts");
+      const r = await offGet(url, 8000, 2, now() + 20000);
       if (r.status === 429) throw E("busy", "Open Food Facts is busy. Try again in a minute.");
-      if (!r.ok || !r.body) throw E("off_down", "Open Food Facts search isn't answering. Try again, or scan the barcode.");
+      if (!r.ok || !r.body) throw E("off_down", OFF_MSG.down);
       const list = Array.isArray(r.body.products) ? r.body.products : [];
       const out = [], seen = new Set();
       list.forEach(p => {
@@ -837,11 +941,15 @@ window.M = window.M || {};
     frameMs: 80,       /* ≈12 frames a second */
     agreeMs: 1500,     /* the second matching read must come this soon */
     dedupeMs: 3000,
-    maxBandW: 1280
+    maxBandW: 1280,
+    pageAfterMs: 3000, /* worker not ready by then → start the page engine as well */
+    loadMs: 10000      /* give up loading the engine after this long */
   };
   const CAM = { audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } };
   const SCAN_MSG = {
-    load: "The scanner couldn't load. Check your connection, or type the numbers under the bars.",
+    load: "The scanner couldn't load. Try again, or type the numbers under the bars.",
+    loadOffline: "The scanner can't load while you're offline. Type the numbers under the bars.",
+    loading: "Loading the scanner…",
     insecure: "The camera only works on a secure (https) page. Take a photo of the barcode or type the numbers.",
     noCamera: "This browser can't open the camera. Take a photo of the barcode or type the numbers.",
     blocked: "Camera is blocked. Allow it when your phone asks, or in Settings → Safari → Camera. You can also take a photo of the barcode.",
@@ -860,7 +968,7 @@ window.M = window.M || {};
   }
 
   /* ---- engines: {kind, detect(src) → Promise<[{rawValue, format}]>, close()} ---- */
-  let enginePromise = null, engineKind = null;
+  let enginePromise = null, engineKind = null, engineState = "none";
   const mapCodes = rs => (Array.isArray(rs) ? rs : []).map(r => ({ rawValue: String((r && r.rawValue) || ""), format: String((r && r.format) || "") }));
   function nativeEngine() {
     const BD = win().BarcodeDetector;
@@ -940,12 +1048,32 @@ window.M = window.M || {};
         .then(() => ({ kind: "wasm", detect: src => Promise.resolve().then(() => det.detect(src)).then(mapCodes, () => []), close() {} }));
     });
   }
+  const loadErr = () => E("scanner_load", isOffline() ? SCAN_MSG.loadOffline : SCAN_MSG.load);
+  /* The worker engine starts at once; if it isn't ready after ~3 s (or fails) the page engine
+     starts too. The first one ready wins, a late one is closed. Everything is given up after
+     ~10 s. No offline check here: a cached copy (service worker) loads fine without a network,
+     and the timeouts cover a dead one. */
+  function raceEngines() {
+    return new Promise((resolve, reject) => {
+      let done = false, running = 0, pageOn = false, tPage = 0, tCap = 0;
+      const finish = e => {
+        if (done) { if (e) { try { e.close(); } catch (x) {} } return; }
+        done = true; clearTimeout(tPage); clearTimeout(tCap);
+        if (e) resolve(e); else reject(loadErr());
+      };
+      const failed = () => { running--; if (!pageOn) startPage(); else if (running <= 0) finish(null); };
+      const startPage = () => { if (pageOn || done) return; pageOn = true; running++; mainEngine().then(finish, failed); };
+      running++;
+      workerEngine().then(e => (e ? finish(e) : failed()), failed);
+      tPage = setTimeout(startPage, SCAN.pageAfterMs);
+      tCap = setTimeout(() => finish(null), SCAN.loadMs);
+    });
+  }
   function getEngine() {
     if (!enginePromise) {
-      enginePromise = Promise.resolve().then(async () => {
-        if (isOffline() && typeof win().BarcodeDetector !== "function") throw E("scanner_load", SCAN_MSG.load);
-        return (await nativeEngine()) || (await workerEngine()) || mainEngine();
-      }).then(e => { engineKind = e.kind; return e; }, err => { enginePromise = null; throw isE(err) ? err : E("scanner_load", SCAN_MSG.load); });
+      engineState = "loading";
+      enginePromise = Promise.resolve().then(async () => (await nativeEngine()) || raceEngines())
+        .then(e => { engineKind = e.kind; engineState = "ready"; return e; }, err => { enginePromise = null; engineState = "failed"; throw isE(err) ? err : loadErr(); });
     }
     return enginePromise;
   }
@@ -1193,6 +1321,10 @@ window.M = window.M || {};
     running() { return !!(cur && cur.live && !cur.stopped); },
     /* "native" | "worker" | "wasm" | null (not loaded yet) */
     engine() { return engineKind; },
+    /* The decoder: "none" (not asked for yet) | "loading" | "ready" | "failed". While it is
+       "loading" the camera box itself shows "Loading the scanner…" (start's opt.onState gets
+       "loading" then "ready" too). */
+    state() { return engineState; },
     /* Load the decoder ahead of time (e.g. when the Add sheet opens). → kind | null */
     preload() { return getEngine().then(e => e.kind, () => null); },
     /* start(containerEl, onCode, {zoom?:false}) → true once the camera is live and decoding
@@ -1219,10 +1351,16 @@ window.M = window.M || {};
         catch (e) { await stopSession(s); throw cameraErr(e); }
         if (!alive()) { stopTracks(stream); await stopSession(s); return false; }
         attach(s, stream);
+        if (engineState !== "ready") {
+          setMsg(s, SCAN_MSG.loading);
+          try { if (typeof opt.onState === "function") opt.onState("loading"); } catch (e) {}
+        }
         let engine;
         try { engine = await eng; }
-        catch (e) { await stopSession(s); throw isE(e) ? e : E("scanner_load", SCAN_MSG.load); }
+        catch (e) { await stopSession(s); throw isE(e) ? e : loadErr(); }
         if (!alive()) { await stopSession(s); return false; }
+        setMsg(s, "");
+        try { if (typeof opt.onState === "function") opt.onState("ready"); } catch (e) {}
         s.engine = engine; s.live = true; s.started = now();
         await autoZoom(s);
         paintControls(s);
@@ -1274,8 +1412,8 @@ window.M = window.M || {};
     },
     /* test hooks */
     _setEngine(e) {
-      if (e && typeof e.then === "function") { enginePromise = e; engineKind = null; return; }
-      enginePromise = e ? Promise.resolve(e) : null; engineKind = e ? e.kind : null;
+      if (e && typeof e.then === "function") { enginePromise = e; engineKind = null; engineState = "loading"; e.then(x => { engineKind = x && x.kind; engineState = "ready"; }, () => { engineState = "failed"; }); return; }
+      enginePromise = e ? Promise.resolve(e) : null; engineKind = e ? e.kind : null; engineState = e ? "ready" : "none";
     },
     _grab: null,
     _cur() { return cur; }
@@ -1286,43 +1424,47 @@ window.M = window.M || {};
   /* ======================================================================== */
   /* OCR digit confusions inside a number: O→0 l/I/|→1 S→5 B→8 Z→2 */
   const OCR_DIGITS = "0-9OoDQlIi|!SsBZz";
+  const ocrDigits = tok => String(tok || "").trim().replace(/[OoDQ]/g, "0").replace(/[lIi|!]/g, "1").replace(/[Ss]/g, "5").replace(/[B]/g, "8").replace(/[Zz]/g, "2");
   function fixNum(tok) {
-    let s = String(tok || "").trim();
-    s = s.replace(/[OoDQ]/g, "0").replace(/[lIi|!]/g, "1").replace(/[Ss]/g, "5").replace(/[B]/g, "8").replace(/[Zz]/g, "2");
+    let s = ocrDigits(tok);
     if (/^\d{1,3},\d{3}$/.test(s)) s = s.replace(",", "");        /* 1,020 mg */
     s = s.replace(/,/g, ".").replace(/[^\d.\/]/g, "");
     if (s.includes("/")) { const [a, b] = s.split("/"); const d = num(b); return d ? num(a) / d : num(a, NaN); }
     const v = parseFloat(s);
     return isNum(v) ? v : NaN;
   }
-  /* A value token as OCR writes it: real digits with O/l/I/S/B confusions (≥1 real digit,
-     or a lone O / o before a unit, as in "Trans Fat Og"), an optional decimal, then a unit. */
-  const VALUE_RE = new RegExp("(<\\s*|less\\s+than\\s+)?((?:\\d[" + OCR_DIGITS + "]*|[" + OCR_DIGITS + "]*\\d[" + OCR_DIGITS + "]*|[OolI|](?=\\s*m?g\\b))(?:[.,]\\d+)?)\\s*(mg|mcg|µg|kcal|kj|cal|g|9|q)?(?![a-z0-9])", "gi");
+  /* A value token as OCR writes it: real digits with O/l/I/S/B confusions (≥1 real digit, or a
+     lone O / l / S standing before a unit, as in "Trans Fat Og" or "Protein Sg"), an optional
+     decimal, then a unit ("mq" and "rng" are a misread "mg"). */
+  const VALUE_RE = new RegExp("(<\\s*|less\\s+than\\s+)?((?:\\d[" + OCR_DIGITS + "]*|[" + OCR_DIGITS + "]*\\d[" + OCR_DIGITS + "]*|[OolI|S](?=\\s*m?g\\b))(?:[.,]\\d+)?)\\s*(mg|mcg|µg|mq|rng|rnq|kcal|kj|cal|g|9|q)?(?![a-z0-9])", "gi");
   function valuesIn(tail) {
     const out = []; let m;
     VALUE_RE.lastIndex = 0;
     while ((m = VALUE_RE.exec(tail))) {
       if (!m[2]) { VALUE_RE.lastIndex++; continue; }
+      if (!/\d/.test(m[2]) && m.index > 0 && !/[\s(:]/.test(tail[m.index - 1])) continue;   /* a lone letter must stand alone */
       const after = tail.slice(m.index + m[0].length).replace(/^\s+/, "");
       if (after[0] === "%" && !m[3]) continue;                           /* a % Daily Value */
       const v = m[1] ? 0.5 : fixNum(m[2]);
       if (!isNum(v)) continue;
-      out.push({ v, unit: lc(m[3] || ""), raw: m[2], lt: !!m[1] });
+      let unit = lc(m[3] || ""); if (/^(mq|rng|rnq)$/.test(unit)) unit = "mg";
+      out.push({ v, unit, raw: m[2], lt: !!m[1] });
     }
     return out;
   }
   /* Label words end at "not followed by a letter" (not \b) so OCR that drops the space
-     ("TotalFat8g", "Sodium160mg", "Protein3g") still matches. */
-  const T = "t[o0]ta[l1I|]", NL = "(?![a-z])";
+     ("TotalFat8g", "Sodium160mg", "Protein3g") still matches. "rn" is a misread "m". */
+  const T = "t[o0]ta[l1I|]", NL = "(?![a-z])", SOD = "s[o0]d[i1l|]u(?:m|rn)";
   const LINE = {
     footnote: /daily\s*value|daily\s*diet|a\s*day\s*is|calories\s*a\s*day|\bdiet\b|per\s*gram|nutrition\s*advice|contributes|percent\s*daily|not\s*a\s*significant/i,
     cal: new RegExp("\\b(ca[l1I|][o0]r[i1l|]e?s|calor[i1l|]es|energy|[eé]nergie|kcal)" + NL, "i"),
     fat: new RegExp("\\b" + T + "\\s*fat" + NL + "|^\\s*(fat|lipides|l[i1]pids)" + NL, "i"),
-    sodium: new RegExp("\\bs[o0]d[i1l|]um" + NL, "i"),
+    sodium: new RegExp("\\b" + SOD + NL, "i"),
     carb: new RegExp("\\b" + T + "\\s*carb[a-z]*\\.?|^\\s*(carbohydrates?|carbs?|glucides)" + NL, "i"),
     fiber: new RegExp("\\b(dietary\\s*)?f[i1l|]b(er|re)s?" + NL, "i"),
-    sugar: new RegExp("\\b" + T + "\\s*sugars?" + NL + "|^\\s*(sugars?|sucres)" + NL, "i"),
-    protein: new RegExp("\\bpr[o0]te[i1l|]ns?" + NL + "|\\bprot[eé]ines" + NL, "i")
+    sugar: new RegExp("\\b" + T + "\\s*sugars?" + NL + "|^\\s*(sugars?|sucres)" + NL + "|\\bof\\s*which\\s*sugars?" + NL, "i"),
+    protein: new RegExp("\\bpr[o0]te[i1l|]ns?" + NL + "|\\bprot[eé]ines" + NL, "i"),
+    salt: /^\s*salt(?![a-z])/i
   };
   const KEYS = { cal: "cal", fat: "f", sodium: "sodium", carb: "c", fiber: "fiber", sugar: "sugar", protein: "p" };
   const SUBLINE = { fat: /saturated|trans|sat\.|poly|mono|calories\s*from/i, carb: /net\s*carb|sugar/i, fiber: /soluble|insoluble/i, sugar: /added|includes|alcohol|incl\./i, cal: /from\s*fat|per\s*gram/i, protein: /%\s*dv\s*$/i, sodium: /^$/ };
@@ -1330,12 +1472,16 @@ window.M = window.M || {};
   const LABEL_WORD = {
     cal: new RegExp("^.*?\\b(ca[l1I|][o0]r[i1l|]e?s|calor[i1l|]es|energy|[eé]nergie|kcal)" + NL + "(\\s*/\\s*calories" + NL + ")?", "i"),
     fat: new RegExp("^.*?(" + T + "\\s*fat|fat|lipides|l[i1]pids)" + NL + "(\\s*/\\s*lipides" + NL + ")?", "i"),
-    sodium: new RegExp("^.*?\\bs[o0]d[i1l|]um" + NL + "(\\s*/\\s*sodium" + NL + ")?", "i"),
+    sodium: new RegExp("^.*?\\b" + SOD + NL + "(\\s*/\\s*sodium" + NL + ")?", "i"),
     carb: new RegExp("^.*?(" + T + "\\s*carb[a-z]*\\.?|carbohydrates?|carbs?)(\\s*/\\s*glucides" + NL + ")?|^\\s*glucides" + NL, "i"),
     fiber: new RegExp("^.*?\\b(dietary\\s*)?f[i1l|]b(er|re)s?" + NL + "(\\s*/\\s*fibres?" + NL + ")?", "i"),
     sugar: new RegExp("^.*?(" + T + "\\s*sugars?|sugars?|sucres)" + NL + "(\\s*/\\s*sucres" + NL + ")?", "i"),
     protein: new RegExp("^.*?\\b(pr[o0]te[i1l|]ns?|prot[eé]ines)" + NL + "(\\s*/\\s*prot[eé]ines" + NL + ")?", "i")
   };
+  const NUTR_WORD = /calories|\bfat\b|cholest|s[o0]d[i1l|]u(m|rn)|carb|f[i1l|]b(er|re)|sugars?|pr[o0]te[i1l|]n|vitamin|calcium|iron|potassium|\bsalt\b/i;
+  const NUTR_COUNT = /calories|total\s*fat|sat(urated|\.)?\s*fat|trans\s*fat|cholest|s[o0]d[i1l|]u(m|rn)|carb|f[i1l|]ber|sugars|pr[o0]te[i1l|]n/gi;
+  /* words printed on packages that are not the product's name */
+  const PACKAGE = /keep\s*(refrigerated|frozen|cold)|refrigerat|perishable|net\s*w(t|eight)|ingredients|contains|distributed|manufactured|best\s*(by|before)|use\s*by|sell\s*by|product\s*of|thaw|safe\s*handling|cook\s*thoroughly|serving|calories|amount/i;
   function pickValue(field, vals) {
     if (!vals.length) return null;
     if (field === "cal") {
@@ -1348,6 +1494,27 @@ window.M = window.M || {};
     if (field === "sodium") return vals.find(v => v.unit === "mg" || v.unit === "g") || vals[0];
     return vals.find(v => v.unit !== "mg" && v.unit !== "kcal" && v.unit !== "kj") || null;
   }
+  /* Big bold digits OCR'd apart ("Calories 1 9 0"); a fat value that lost its point ("4 5g"). */
+  function tidyTail(field, tail) {
+    let t = String(tail);
+    if (field === "cal") t = t.replace(/^(\s*)(\d)((?:\s\d){1,3})(?!\d)(?!\s*%)/, (m0, sp, a, rest) => sp + a + rest.replace(/\s/g, ""));
+    if (field === "fat") t = t.replace(/^(\s*)([0-4])\s(5)\s*g(?![a-z])/i, "$1$2.$3g");
+    return t;
+  }
+  /* A column split by OCR: nutrient names on consecutive lines, then their values on the lines
+     after ("Total Fat / Sodium / Protein / 8g / 160mg / 3g"). → {labelLineIndex: valueLineIndex} */
+  function columnPairs(lines, numberish) {
+    const map = {};
+    const label = l => NUTR_WORD.test(l) && !/\d/.test(l) && !LINE.footnote.test(l);
+    for (let i = 0; i < lines.length;) {
+      if (!label(lines[i])) { i++; continue; }
+      let j = i; while (j < lines.length && label(lines[j])) j++;
+      let k = j; while (k < lines.length && numberish(lines[k])) k++;
+      if (j - i >= 2 && k - j >= j - i) for (let x = 0; x < j - i; x++) map[i + x] = j + x;
+      i = j;
+    }
+    return map;
+  }
   function servingPart(text) {
     const lines = String(text).split("\n").map(l => l.replace(/\s+/g, " ").trim());
     const looks = l => /(\d|[½¼¾⅓⅔])\s*[a-zA-Z(]|\(\s*[\dOolI|.,]+\s*(g|9|ml|mL)\b/i.test(l) && !/calories|servings?\s*per|per\s*container|amount\s*per|%/i.test(l);
@@ -1358,6 +1525,12 @@ window.M = window.M || {};
       if (same && looks(same)) cand = same;
       if (!cand && si + 1 < lines.length && looks(lines[si + 1])) cand = lines[si + 1];
       if (!cand && si > 0 && looks(lines[si - 1])) cand = lines[si - 1];
+    }
+    if (!cand) {
+      /* "1 tortilla (45g)" anywhere: OCR can move the right half of the row away from "Serving size" */
+      const any = /^(?:about\s*)?(\d+\s+\d\/\d|\d+\/\d+|\d+(?:[.,]\d+)?|[½¼¾⅓⅔])\s*[a-zA-Z][a-zA-Z .-]{0,24}\(\s*[\dOolI|.,]+\s*(g|9|q|ml)\s*\)/i;
+      const l = lines.find(x => any.test(x) && !/calories|servings?\s*per|per\s*container|amount\s*per|%/i.test(x));
+      if (l) cand = any.exec(l)[0];
     }
     if (!cand) return null;
     return cand.replace(/\s*\/\s*(pour|par|por)\b.*$/i, "").replace(/\s*(about|approx\.?)\s*/gi, " ").trim();
@@ -1371,42 +1544,99 @@ window.M = window.M || {};
     if (!sv || (!sv.g && sv.unit === "serving")) return null;
     return { qty: sv.qty, unit: sv.unit, g: sv.g };
   }
+  const SPC = "serv[i1l|]ngs?\\s+per\\s+c[o0]nta[i1l|]ner";
   function servingsPerContainer(text) {
     const s = String(text);
-    let m = /(?:about|approx\.?|abt\.?)?\s*([\d.,]+)\s+servings?\s+per\s+container/i.exec(s);
+    let m = new RegExp("(?:about|approx\\.?|abt\\.?)?\\s*([\\d.,]+)\\s+" + SPC, "i").exec(s);
     if (m) return num(m[1], null);
-    m = /servings?\s+per\s+container[:\s]*(?:about|approx\.?|abt\.?)?\s*([\d.,]+)/i.exec(s);
+    m = new RegExp(SPC + "[:\\s]*(?:about|approx\\.?|abt\\.?)?\\s*([\\d.,]+)", "i").exec(s);
     return m ? num(m[1], null) : null;
   }
-  /* "39" read for "3g": the 9 is a misread g. Try dropping it on suspects when that makes
-     4p + 4c + 9f land much closer to the label's calories. */
-  function fixGlued9(per, found, cal) {
-    const sus = ["p", "c", "f"].filter(k => found[k] && found[k].glued);
-    if (sus.length && cal > 0) {
+  /* "39" read for "3g" (the 9 is a misread g), "30g" for "3g": each such protein / carb / fat
+     number also has a ÷10 reading. The mix of readings whose 4p + 4c + 9f lands close to the
+     label's calories wins, but only when the numbers as read are clearly off. Sugar and fiber
+     can't be more than the carbs. Every number changed here goes into `check`. */
+  function fixGlued(per, found, check, polyols) {
+    const cal = num(per.cal);
+    const sus = ["p", "c", "f"].filter(k => found[k] && found[k].alt !== null && !(k === "c" && polyols));
+    if (sus.length && found.cal && cal >= 20) {
       const kcal = o => num(o.p) * 4 + num(o.c) * 4 + num(o.f) * 9;
       const err = o => Math.abs(kcal(o) - cal) / cal;
-      let best = null, bestErr = err(per);
-      for (let mask = 1; mask < (1 << sus.length); mask++) {
-        const o = Object.assign({}, per);
-        sus.forEach((k, i) => { if (mask & (1 << i)) o[k] = Math.floor(per[k] / 10); });
-        const e = err(o);
-        if (e < bestErr - 0.15) { best = o; bestErr = e; }
+      const e0 = err(per);
+      let best = null, bestErr = Infinity, bestKeys = [];
+      if (e0 > 0.3) {
+        for (let mask = 1; mask < (1 << sus.length); mask++) {
+          const o = Object.assign({}, per), keys = [];
+          let weak = false;
+          sus.forEach((k, i) => { if (mask & (1 << i)) { o[k] = found[k].alt; keys.push(k); if (found[k].weak) weak = true; } });
+          const e = err(o);
+          const ok = weak ? e0 > 0.5 && e <= 0.12 : e <= 0.2;
+          if (ok && (e < bestErr - 1e-9 || (Math.abs(e - bestErr) <= 1e-9 && keys.length < bestKeys.length))) { best = o; bestErr = e; bestKeys = keys; }
+        }
       }
-      if (best && err(per) > 0.3) Object.assign(per, best);
+      if (best) { Object.assign(per, best); bestKeys.forEach(k => { check.push(k); }); }
     }
-    ["fiber", "sugar"].forEach(k => { if (found[k] && found[k].glued && per[k] > num(per.c) + 1 && Math.floor(per[k] / 10) <= num(per.c) + 1) per[k] = Math.floor(per[k] / 10); });
+    ["fiber", "sugar"].forEach(k => {
+      if (!found[k] || !found.c || !(num(per[k]) > num(per.c) + 0.5)) return;
+      const alt = found[k].alt;
+      per[k] = alt !== null && alt <= num(per.c) + 0.5 ? alt : num(per.c);
+      check.push(k);
+    });
+  }
+  /* Serving grams that can't be right: more calories than pure fat, one tortilla = 459 g, or a
+     solid food lighter than lettuce. A trailing 9 is often a misread g ("(459g)" for "(45g)").
+     → null (fine) | {g, was} (g = what to use) */
+  const COUNT_UNIT = /^(tortillas?|slices?|bars?|pieces?|pcs?|cookies?|crackers?|eggs?|muffins?|waffles?|pancakes?|links?|sticks?|biscuits?|rolls?|buns?|pitas?|wraps?|patty|patties|nuggets?|pretzels?|scoops?|pouch(es)?|packets?|envelopes?|squares?|cakes?)$/i;
+  const SPOON_G = { tbsp: 45, tablespoon: 45, tablespoons: 45, tsp: 15, teaspoon: 15, teaspoons: 15 };
+  const LIQUID_UNIT = /(ml|fl|cup|can|bottle|carton|container|jar|glass|drink|box|pint|quart|gallon|lit(er|re))/i;
+  function servingCheck(sv, cal) {
+    if (!sv || !(num(sv.g) > 0)) return null;
+    const unit = lc(sv.unit).trim(), qty = num(sv.qty, 1) > 0 ? num(sv.qty, 1) : 1;
+    const bad = g => {
+      const d = cal > 0 ? cal / g : null;
+      if (d !== null && d > 9.5) return true;
+      const lim = SPOON_G[unit] || (COUNT_UNIT.test(unit) ? 250 : 0);
+      if (lim && g / qty > lim) return true;
+      return d !== null && cal >= 60 && d < 0.3 && !LIQUID_UNIT.test(unit);
+    };
+    const g = num(sv.g);
+    if (!bad(g)) return null;
+    const alt = Number.isInteger(g) && g >= 20 && g % 10 === 9 ? Math.floor(g / 10) : null;
+    return alt && !bad(alt) ? { g: alt, was: g } : { g, was: g };
+  }
+  const FIELD_WORD = { cal: "calories", p: "protein", c: "carbs", f: "fat", fiber: "fiber", sugar: "sugar", sodium: "sodium" };
+  const andList = a => (a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]);
+  function parseWarning(out, gFix) {
+    const parts = [];
+    const sv = out.serving || {};
+    const qu = String(+num(sv.qty, 1).toFixed(2)) + " " + (sv.unit || "serving");
+    if (gFix) parts.push(gFix.g !== gFix.was ? "Check the grams. We read " + gFix.was + " g for " + qu + " and used " + gFix.g + " g." : "Check the grams: " + qu + " = " + gFix.g + " g?");
+    const odd = out.check.filter(k => FIELD_WORD[k]).map(k => FIELD_WORD[k]);
+    if (odd.length) parts.push("Check " + andList(odd) + ". " + (odd.length > 1 ? "They" : "It") + " may be wrong.");
+    const miss = out.missing.map(k => FIELD_WORD[k]);
+    if (miss.length && miss.length < NUT.length) parts.push("Couldn't read " + andList(miss) + ". Type " + (miss.length > 1 ? "them" : "it") + " in.");
+    return parts.join(" ");
   }
 
   M.food.label = M.food.label || {};
   /* parse(text) → {serving:{qty,unit,g}, per:{cal,p,c,f,fiber,sugar,sodium}, fields:[…found keys, "serving"],
-     servingsPerContainer?, name?, source:"label"} — pure, never throws. First column = per serving. */
+     check:[keys that look off, "g" = serving grams], missing:[keys not found], warning?: plain words,
+     servingsPerContainer?, name?, source:"label"} — pure, never throws. First column = per serving.
+     Keys in `missing` are 0 in per; show them empty, not as 0. */
   M.food.label.parse = function (text) {
     const raw = String(text == null ? "" : text);
     const per = { cal: 0, p: 0, c: 0, f: 0, fiber: 0, sugar: 0, sodium: 0 };
-    const fields = [], found = {};
-    const lines = raw.replace(/\r/g, "").replace(/[‘’`´]/g, "'").replace(/[–—]/g, "-").split("\n")
+    const fields = [], found = {}, check = [];
+    let lines = raw.replace(/\r/g, "").replace(/[‘’`´]/g, "'").replace(/[–—]/g, "-").split("\n")
       .map(l => l.replace(/[*†‡]+/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
-    const numberish = l => /^[<]?\s*[\dOolI|.,]+\s*(mg|g|9|kcal|kj|cal)?\s*(\d+\s*%)?$/i.test(l);
+    /* a linear label ("Calories 150, Total Fat 2.5g (3% DV), Sodium 90mg, …"): one nutrient per line */
+    lines = [].concat.apply([], lines.map(l => ((l.match(NUTR_COUNT) || []).length >= 2 ? l.split(/[,;]\s+(?=[A-Za-z(])/) : [l])))
+      .map(l => l.trim()).filter(Boolean);
+    /* a footnote run onto a nutrient ("Protein 1g. Not a significant source of …") is cut off */
+    lines = lines.map(l => { const m = LINE.footnote.exec(l); if (!m || m.index === 0) return l; const head = l.slice(0, m.index); return /\d/.test(head) && NUTR_WORD.test(head) ? head.replace(/[\s.,;:(]+$/, "") : l; });
+    const numberish = l => /^[<]?\s*[\dOolI|.,]+\s*(mg|mq|g|9|kcal|kj|cal)?\s*(\d+\s*%)?$/i.test(l);
+    const col = columnPairs(lines, numberish);
+    const polyols = /sugar\s*alcohol|erythritol|allulose|maltitol|xylitol|sorbitol|isomalt|glycerin|polyols?|net\s*carb/i.test(raw);
     const order = ["cal", "fat", "sodium", "carb", "fiber", "sugar", "protein"];
     for (const field of order) {
       const key = KEYS[field];
@@ -1421,34 +1651,53 @@ window.M = window.M || {};
       for (const i of idxs) {
         const line = lines[i];
         if (LINE.footnote.test(line)) continue;
-        const tail = line.replace(LABEL_WORD[field], " ");
+        const tail = tidyTail(field, line.replace(LABEL_WORD[field], " "));
         if (field === "cal" ? /^\s*from\b/i.test(tail) || /per\s*gram/i.test(line) : SUBLINE[field].test(line) && i !== pref) continue;
         let hit = pickValue(field, valuesIn(tail));
-        if (!hit && i + 1 < lines.length && numberish(lines[i + 1])) hit = pickValue(field, valuesIn(lines[i + 1]));
+        if (!hit && col[i] !== undefined) hit = pickValue(field, valuesIn(tidyTail(field, lines[col[i]])));
+        else if (!hit && i + 1 < lines.length && numberish(lines[i + 1])) hit = pickValue(field, valuesIn(tidyTail(field, lines[i + 1])));
         if (!hit && field === "cal" && i > 0 && numberish(lines[i - 1]) && /^\s*[\dOolI|]{2,4}\s*$/.test(lines[i - 1])) hit = pickValue(field, valuesIn(lines[i - 1]));
         if (!hit) continue;
         let v = hit.v;
+        const dig = ocrDigits(hit.raw), gField = field !== "cal" && field !== "sodium";
         if (field === "sodium" && hit.unit === "g") v = v * 1000;
         if (field === "cal" && v > 2000 && v % 10 === 0 && String(hit.raw).length >= 4) v = Math.floor(v / 10);
-        if (!isNum(v) || v < 0 || (field !== "sodium" && field !== "cal" && v > 300) || (field === "cal" && v > 3000)) continue;
-        const glued = !hit.unit && !hit.lt && /9$/.test(String(hit.raw)) && String(hit.raw).replace(/\D/g, "").length >= 2 && field !== "cal" && field !== "sodium";
-        found[key] = { v, glued };
+        let alt = null, odd = false;
+        if (gField && !hit.lt) {
+          if (hit.unit === "g" && /^0\d$/.test(dig)) v = num("0." + dig[1]);                 /* "05g": the point was lost */
+          else if (/^\d{2,}$/.test(dig) && /[09]$/.test(dig)) alt = Math.floor(v / 10);      /* "39", "30g": maybe a misread g */
+          if (v > 300 && /^\d{3,}$/.test(dig)) { v = Math.floor(v / 10); alt = null; odd = true; }   /* "379g" → 37 */
+        }
+        if (!isNum(v) || v < 0 || (gField && v > 300) || (field === "cal" && v > 3000)) continue;
+        found[key] = { v, alt, weak: hit.unit === "g" && /0$/.test(dig) };
         per[key] = key === "cal" || key === "sodium" ? r0(v) : r1(v);
+        if (odd) check.push(key);
         fields.push(key);
         break;
       }
     }
-    fixGlued9(per, found, per.cal);
+    /* EU labels give salt instead of sodium: sodium mg = salt g × 400 */
+    if (!found.sodium) {
+      const si = lines.findIndex(l => LINE.salt.test(l) && !LINE.footnote.test(l));
+      const h = si >= 0 ? pickValue("fat", valuesIn(lines[si].replace(LINE.salt, " "))) : null;
+      if (h && h.v >= 0 && h.v < 50) { found.sodium = { v: h.v * 400, alt: null }; per.sodium = r0(h.v * 400); fields.push("sodium"); }
+    }
+    fixGlued(per, found, check, polyols);
     NUT.forEach(k => { per[k] = k === "cal" || k === "sodium" ? r0(per[k]) : r1(per[k]); });
-    if (found.cal === undefined && (found.p || found.c || found.f)) per.cal = r0(num(per.p) * 4 + num(per.c) * 4 + num(per.f) * 9);
-    const sv = parseServingLine(raw);
+    let calGuess = false;
+    if (found.cal === undefined && (found.p || found.c || found.f)) { per.cal = r0(num(per.p) * 4 + num(per.c) * 4 + num(per.f) * 9); calGuess = true; check.push("cal"); }
+    const sv = parseServingLine(lines.join("\n"));
     const serving = sv || { qty: 1, unit: "serving", g: null };
     if (sv) fields.push("serving");
-    const out = { serving, per, fields, source: "label" };
+    const gFix = sv ? servingCheck(serving, found.cal ? per.cal : 0) : null;
+    if (gFix) { serving.g = gFix.g; check.push("g"); }
+    const uniq = a => a.filter((k, i) => a.indexOf(k) === i);
+    const out = { serving, per, fields, check: uniq(check), missing: NUT.filter(k => fields.indexOf(k) < 0 && !(k === "cal" && calGuess)), source: "label" };
     const spc = servingsPerContainer(raw);
     if (spc && spc > 0) out.servingsPerContainer = spc;
     const nfIdx = lines.findIndex(l => /nutr[i1l|]t[i1l|]on\s*facts|valeur\s*nutritive/i.test(l));
-    for (let i = 0; i < (nfIdx > 0 ? nfIdx : 0); i++) { const l = lines[i]; if (/^[A-Za-z][A-Za-z '&-]{2,40}$/.test(l) && !/serving|calories|amount/i.test(l)) { out.name = tidyCase(l); break; } }
+    for (let i = 0; i < (nfIdx > 0 ? nfIdx : 0); i++) { const l = lines[i]; if (/^[A-Za-z][A-Za-z '&-]{2,40}$/.test(l) && !PACKAGE.test(l)) { out.name = cap(tidyCase(l)); break; } }
+    if (fields.length) { const w = parseWarning(out, gFix); if (w) out.warning = w; }
     return out;
   };
 
@@ -1520,7 +1769,7 @@ window.M = window.M || {};
       if (serving.g > 0 && !(serving.unit === "g" && serving.qty === 100)) { const k = serving.g / 100; per = {}; NUT.forEach(key => { const v = per100g[key] * k; per[key] = key === "cal" || key === "sodium" ? r0(v) : r1(v); }); }
       else { serving.qty = 100; serving.unit = "g"; serving.g = 100; per = Object.assign({}, per100g); }
     } else if (serving.g) per100g = scaleTo100(per, serving.g);
-    const food = { name: tidyText(o.name), brand: tidyText(o.brand), serving, per, per100g, alts: serving.g ? [{ label: "100 g", g: 100 }] : [], source: "label" };
+    const food = { name: cap(tidyText(o.name)), brand: cap(tidyText(o.brand)), serving, per, per100g, alts: serving.g ? [{ label: "100 g", g: 100 }] : [], source: "label" };
     if (num(o.servingsPerContainer) > 0) food.servingsPerContainer = num(o.servingsPerContainer);
     return food;
   }
@@ -1554,10 +1803,15 @@ window.M = window.M || {};
       const rawText = await ocrText(file, say);
       const parsed = M.food.label.parse(rawText);
       if (!parsed.fields.length || (!parsed.per.cal && !parsed.per.p && !parsed.per.c && !parsed.per.f)) throw E("ocr", "Couldn't find the numbers on that label. Try a closer, brighter photo, or type them in.", rawText);
-      const food = { name: parsed.name || "", brand: "", serving: parsed.serving, per: parsed.per, per100g: parsed.serving.g ? scaleTo100(parsed.per, parsed.serving.g) : null, alts: parsed.serving.g ? [{ label: "100 g", g: 100 }] : [], source: "label" };
+      /* numbers the reader couldn't find stay empty (null) in food.per, so the form shows a blank
+         box to fill in, not a 0 that looks read */
+      const per = Object.assign({}, parsed.per);
+      (parsed.missing || []).forEach(k => { per[k] = null; });
+      const food = { name: parsed.name || "", brand: "", serving: parsed.serving, per, per100g: parsed.serving.g ? scaleTo100(parsed.per, parsed.serving.g) : null, alts: parsed.serving.g ? [{ label: "100 g", g: 100 }] : [], source: "label" };
       if (parsed.servingsPerContainer) food.servingsPerContainer = parsed.servingsPerContainer;
-      const out = { food, method: "ocr", rawText, fields: parsed.fields };
-      const warning = labelWarning(parsed.per);
+      const out = { food, method: "ocr", rawText, fields: parsed.fields, check: parsed.check || [], missing: parsed.missing || [] };
+      const flagged = out.check.some(k => k === "p" || k === "c" || k === "f" || k === "cal");
+      const warning = [parsed.warning, flagged ? "" : labelWarning(parsed.per)].filter(Boolean).join(" ");
       if (warning) out.warning = warning;
       return out;
     });
@@ -1728,21 +1982,57 @@ window.M = window.M || {};
   }
 
   const WORD_SPLIT = /[^\p{L}\p{N}%]+/u;
-  const DESCRIPTOR = /^(large|medium|small|whole|plain|old|fashioned|style|cooked|raw|dry|fresh|frozen|canned|drained|boneless|skinless|lean|light|reduced|fat|free|low|nonfat|unsweetened|sweetened|creamy|crunchy|organic|regular|original|classic|with|no|in|water|oil|and|of|the|a|an|per|kirkland|kroger|signature|brand|slice|slices|cup|oz|g|lb|chopped|sliced|diced|grilled|baked|roasted|steamed|boiled|sauteed|salted|unsalted|natural|pure|simple|fat-free)$/i;
+  /* Words that describe a food rather than name it: a name word like this costs little when the
+     person didn't say it ("Chicken breast, boneless skinless" for "chicken breast"). Foods' main
+     words (oil, water, bacon, seasoning …) are NOT here. */
+  const DESCRIPTOR = /^(large|medium|small|whole|plain|old|fashioned|style|cooked|raw|dry|fresh|frozen|canned|drained|boneless|skinless|lean|light|reduced|fat|free|low|nonfat|unsweetened|sweetened|creamy|crunchy|organic|regular|original|classic|with|no|in|and|of|the|a|an|per|kirkland|kroger|signature|brand|slice|slices|cup|oz|g|lb|chopped|sliced|diced|grilled|baked|roasted|steamed|boiled|sauteed|salted|unsalted|natural|pure|simple|fat-free)$/i;
+  /* A food whose main word is one of these is a different food ("Avocado oil" is not an avocado,
+     "Turkey bacon" is not turkey) unless the person said that word. */
+  const OTHER_FOOD = /^(oil|water|bacon|seasoning|sauce|dressing|powder|milk|juice|butter|flour|syrup|spread|dip|jerky|sausage|broth|soup|mix|chip|cracker|cake|bar|cereal|vinegar|paste|jam|jelly|candy|cooky|cookie|creamer|stock|shake|drink|smoothie)$/i;
+  const PACK_WORD = /^(packet|package|pack|can|bottle|jar|bag|box|pouch|container|tub|carton|piece|slice)$/i;
+  /* How it was served, not what it is ("2 eggs over easy", "a bowl of rice", "big salad"). */
+  const STYLE = /^(over|easy|scrambled|hard|soft|sunny|side|up|big|little|hot|cold|iced|warm|homemade|bowl|plate|glass|mug|handful|portion|bit|chunk|bunch)$/i;
   const STOP = /^(of|the|some|with|and|a|an|my|plain|cooked|fresh|whole)$/i;
-  const toks = s => lc(s).split(WORD_SPLIT).filter(w => w && (w.length > 1 || /\d/.test(w)) && !STOP.test(w));
   const singular = w => (w.length > 3 && /s$/.test(w) && !/ss$/.test(w) ? w.replace(/(ie)s$/, "y").replace(/(o|ch|sh|x)es$/, "$1").replace(/s$/, "") : w);
-  const wordsOf = s => lc(s).split(WORD_SPLIT).filter(w => w && (w.length > 1 || /\d/.test(w))).map(singular);
+  /* Words of a name or a phrase: M.searchTokens (m-core) when it is there, so describe and search
+     read words the same way; numbers ("2%", "93", "80/20") are kept for the scoring. */
+  const wordsOf = s => {
+    const own = lc(s).replace(/['’]/g, "").split(WORD_SPLIT).filter(w => w && (w.length > 1 || /\d/.test(w)));
+    if (typeof M.searchTokens === "function") {
+      try {
+        const t = M.searchTokens(String(s == null ? "" : s));
+        if (Array.isArray(t)) { const out = t.map(w => singular(lc(w))).filter(w => w && (w.length > 1 || /\d/.test(w))); own.forEach(w => { if (/\d/.test(w) && out.indexOf(w) < 0) out.push(w); }); return out; }
+      } catch (e) {}
+    }
+    return own.map(singular);
+  };
+  const toks = s => wordsOf(s).filter(w => !STOP.test(w));
   function nameParts(food) {
     const full = lc(food.name), main = full.replace(/\([^)]*\)/g, " "), head = main.split(/[,(]/)[0];
     const mw = main.split(WORD_SPLIT).filter(Boolean);
     const optional = new Set();
     mw.forEach((w, i) => { if (w === "or") { if (mw[i - 1]) optional.add(singular(mw[i - 1])); if (mw[i + 1]) optional.add(singular(mw[i + 1])); } });
-    return { full, all: wordsOf(full), main: wordsOf(main), head: wordsOf(head), brand: wordsOf(food.brand || ""), optional };
+    const hw = wordsOf(head);
+    /* the food's main word: the last word before the first comma that isn't a number, a
+       describing word or a package word ("Taco seasoning packet" → seasoning) */
+    let noun = "";
+    for (let i = hw.length - 1; i >= 0; i--) { const w = hw[i]; if (/\d/.test(w) || DESCRIPTOR.test(w) || PACK_WORD.test(w)) continue; noun = w; break; }
+    return { full, all: wordsOf(full), main: wordsOf(main), head: hw, noun, brand: wordsOf(food.brand || ""), optional };
   }
-  /* -1 = no word matches; higher is better. */
+  /* Name words of the food the person didn't say (describing words and numbers don't count). */
+  function unsaid(qWords, food) {
+    const n = nameParts(food), qs = qWords.map(singular);
+    return n.main.filter(w => qs.indexOf(w) < 0 && !DESCRIPTOR.test(w) && !/^\d/.test(w) && !n.optional.has(w) && w !== "or" && n.brand.indexOf(w) < 0).length;
+  }
+  /* -1 = not this food; higher is better. The last word they said (the thing they ate:
+     "chicken veggie bake" → bake) must be in the name or brand, and a food whose own main
+     word is a different food ("Avocado oil") needs that word said. */
   function nameScore(qWords, food) {
-    const n = nameParts(food), qs = qWords.map(singular), brandStr = lc(food.brand || "");
+    const n = nameParts(food), qs = qWords.map(singular), brandStr = lc(food.brand || "").replace(/['’]/g, "");
+    const inFood = w => n.all.indexOf(w) >= 0 || n.brand.indexOf(w) >= 0 || (w.length >= 3 && (n.all.some(x => x.startsWith(w) || (w.startsWith(x) && x.length > 3)) || brandStr.indexOf(w) >= 0));
+    const words = qs.filter(w => !/\d/.test(w));
+    const qHead = words.length ? words[words.length - 1] : "";
+    if (qHead && !inFood(qHead)) return -1;
     let s = 0, hits = 0;
     for (const w of qs) {
       if (n.all.indexOf(w) >= 0) { hits++; s += 20; if (n.head.indexOf(w) >= 0) s += 6; }
@@ -1751,13 +2041,14 @@ window.M = window.M || {};
       else s -= 8;
     }
     if (!hits) return -1;
+    if (n.noun && qs.indexOf(n.noun) < 0 && !n.optional.has(n.noun)) { if (OTHER_FOOD.test(n.noun)) return -1; s -= 6; }
     let pen = 0;
     n.main.forEach(w => { if (qs.indexOf(w) >= 0 || w === "or" || n.optional.has(w) || n.brand.indexOf(w) >= 0) return; pen += DESCRIPTOR.test(w) || /^\d/.test(w) ? 0.5 : 4; });
     s -= Math.min(10, pen);
     if (n.head.length && n.head.every(w => qs.indexOf(w) >= 0 || DESCRIPTOR.test(w) || n.optional.has(w) || n.brand.indexOf(w) >= 0)) s += 12;
     if (/\braw\b|uncooked|\bdry\b/.test(n.full) && !qs.some(w => /^(raw|dry|uncooked)$/.test(w))) s -= 6;
     if (/\bcooked\b/.test(n.full)) s += 2;
-    return s;
+    return Math.max(0, s);
   }
   /* How a saved food answers the words: 2 = every query word is in its name/brand AND every
      real word of its name was asked for ("chicken breast" → "Organic Chicken Breast");
@@ -1765,7 +2056,7 @@ window.M = window.M || {};
      the product by brand ("dave's bread" → their Dave's Killer Bread loaf); 0 = neither
      (a bare "rice" must not pick their "Rice cakes"). */
   function savedTier(qWords, food) {
-    const n = nameParts(food), qs = qWords.map(singular), brandStr = lc(food.brand || "");
+    const n = nameParts(food), qs = qWords.map(singular), brandStr = lc(food.brand || "").replace(/['’]/g, "");
     const inName = w => n.all.indexOf(w) >= 0 || (w.length >= 3 && n.all.some(x => x.startsWith(w)));
     const inBrand = w => n.brand.indexOf(w) >= 0 || (w.length >= 3 && brandStr.indexOf(w) >= 0);
     if (!qs.every(w => inName(w) || inBrand(w))) return 0;
@@ -1774,13 +2065,14 @@ window.M = window.M || {};
   }
   function myFoods() { try { return M.foods && M.foods.list ? M.foods.list().filter(f => f && f.name) : []; } catch (e) { return []; } }
   function builtInFoods() { try { const g = M.DB && M.DB.generic; return Array.isArray(g) ? g.filter(f => f && f.name) : []; } catch (e) { return []; } }
-  /* The person's own saved foods first (a full name match wins outright), then everything
-     with a small bonus for saved foods; near-ties go to the food listed first. */
+  function myMeals() { try { return M.meals && M.meals.list ? M.meals.list().filter(m => m && m.id && m.name && Array.isArray(m.items) && m.items.length) : []; } catch (e) { return []; } }
   const STATE_WORD = /^(raw|uncooked|dry|cooked|grilled|baked|roasted|boiled|steamed|fried|sauteed|sautéed|seared|broiled|poached|smoked|leftover|leftovers)$/i;
+  const coreWords = words => { let qw = toks(words); const core = qw.filter(w => !STATE_WORD.test(w) && !STYLE.test(w)); if (core.length) qw = core; return qw; };
+  /* The person's own saved foods first (a full name match wins outright), then everything
+     with a small bonus for saved foods; near-ties go to the food with fewer name words they
+     didn't say, then to the food listed first. */
   M.food.matchLocal = function (words) {
-    let qw = toks(words);
-    const core = qw.filter(w => !STATE_WORD.test(w));
-    if (core.length) qw = core;          /* "grilled chicken breast" matches "Chicken breast" */
+    const qw = coreWords(words);
     if (!qw.length) return null;
     const mine = myFoods();
     let bestMine = null, bestMineS = -Infinity;
@@ -1792,9 +2084,54 @@ window.M = window.M || {};
     if (!scored.length) return null;
     const top = Math.max.apply(null, scored.map(x => x.s));
     if (top < 8) return null;
-    const near = scored.filter(x => x.s >= top - 3).sort((a, b) => a.i - b.i);
+    const near = scored.filter(x => x.s >= top - 3).map(x => Object.assign(x, { u: unsaid(qw, x.f) })).sort((a, b) => a.u - b.u || a.i - b.i);
     return near[0].f;
   };
+  /* A saved meal named in the words: every word they said is in its name (two words or more,
+     "chicken bake" → "Chicken veggie bake"), or every real word of its name was said. */
+  M.food.matchMeal = function (words, strict) {
+    const qs = coreWords(words).filter(w => !/\d/.test(w));
+    if (!qs.length) return null;
+    const near = (a, b) => a === b || (a.length > 3 && b.length > 3 && (a.startsWith(b) || b.startsWith(a)));
+    let best = null, bestS = 0;
+    myMeals().forEach(m => {
+      const mw = wordsOf(m.name).filter(w => !STOP.test(w) && !/\d/.test(w));
+      if (!mw.length) return;
+      const allQuery = qs.every(q => mw.some(w => near(q, w)));
+      const allName = mw.every(w => DESCRIPTOR.test(w) || qs.some(q => near(q, w)));
+      if (!((allQuery && allName) || (!strict && ((allQuery && qs.length >= 2) || (allName && mw.length >= 2))))) return;
+      const s = (allQuery && allName ? 300 : allName ? 200 : 100) + mw.length * 10 + Math.min(9, num(m.uses));
+      if (s > bestS) { bestS = s; best = m; }
+    });
+    return best;
+  };
+  /* A saved meal as a describe item. Batch meals are logged by cooked weight ("9 oz chicken
+     veggie bake"); others by servings. */
+  function mealItem(m, q, part) {
+    const base = { name: m.name, brand: "", mealId: m.id, source: "meal", text: part };
+    const b = isObj(m.batch) ? m.batch : null, cg = b ? num(b.cookedG) : 0;
+    if (cg > 0) {
+      const metric = (() => { try { const p = M.person ? M.person() : null; return !!(p && p.units === "metric"); } catch (e) { return false; } })();
+      const u = q.unit === "g" || q.unit === "oz" || q.unit === "lb" ? q.unit : metric ? "g" : "oz";
+      const ug = GRAMS_PER[u];
+      const made = num(m.servingsMade, 1) > 1 ? num(m.servingsMade, 1) : 0;
+      const grams = q.unit === u && q.explicitQty ? q.qty * ug : made ? cg / made : Math.min(cg, 227);
+      const per = {}; NUT.forEach(k => { per[k] = r2(num(m.per && m.per[k]) * ug / cg); });
+      let cook = null; try { cook = M.cook && typeof M.cook.batchCook === "function" ? M.cook.batchCook(m) : null; } catch (e) { cook = null; }
+      const it = Object.assign(base, { servings: Math.max(0.05, r2(grams / ug)), servingLabel: "1 " + u + " cooked", g: r2(ug), per, state: "cooked", batch: true });
+      if (cook) it.cook = cook;
+      return it;
+    }
+    let servings = 1;
+    if (q.explicitQty && (!q.unit || q.unit === "serving")) servings = q.qty;
+    else if (q.explicitQty && GRAMS_PER[q.unit] && q.unit !== "ml" && q.unit !== "fl oz") {
+      const made = num(m.servingsMade, 1) > 0 ? num(m.servingsMade, 1) : 1;
+      const gs = m.items.map(x => num(x && x.g) * (num(x && x.servings, 1) || 0));
+      const one = gs.every(g => g > 0) ? gs.reduce((a, g) => a + g, 0) / made : 0;
+      if (one > 0) servings = (q.qty * GRAMS_PER[q.unit]) / one;
+    }
+    return Object.assign(base, { servings: Math.max(0.05, r2(servings)), servingLabel: "1 serving", g: null, per: Object.assign({}, m.per || {}) });
+  }
   function splitDescribe(text) {
     return String(text == null ? "" : text)
       .split(/\n|,|;|\s+(?:and|plus|with|w\/)\s+|\s*\+\s*|\s+&\s+/i)
@@ -1802,12 +2139,14 @@ window.M = window.M || {};
   }
   /* Meat, fish, rice and pasta can carry a cooked profile (food.cook, read through M.cook when
      m-core has it). What people describe is what was on the plate, so amounts are cooked
-     unless they say raw / dry. The item then says which weight it is (state + cook). */
+     unless they say raw / dry. The item then says which weight it is (state + cook). A saved
+     scanned meat / rice from before cook info existed borrows it here (cookFor). */
   const SAYS_RAW = /\b(raw|uncooked|dry)\b/i;
   const SAYS_COOKED = /\b(cooked|grilled|baked|roasted|boiled|steamed|fried|sauteed|sautéed|seared|broiled|poached|smoked|leftovers?)\b/i;
   function plateView(food, part) {
     let c = null;
     try { c = M.cook && typeof M.cook.of === "function" ? M.cook.of(food) : null; } catch (e) { c = null; }
+    if (!c && M.cook && typeof M.cook.of === "function") { const cf = cookFor(food); if (cf) { food = Object.assign({}, food, { cook: cf }); c = cf; } }
     if (!c) return { food, extra: null };
     const cook = { y: num(c.y), word: c.word === "dry" ? "dry" : "raw" };
     if (SAYS_RAW.test(part) && !SAYS_COOKED.test(part)) return { food, extra: { state: "raw", cook } };
@@ -1818,9 +2157,24 @@ window.M = window.M || {};
   }
   M.food.describeLocal = function (text) {
     const items = [], unmatched = [];
-    splitDescribe(text).forEach(part => {
+    const parts = splitDescribe(text);
+    for (let i = 0; i < parts.length; i++) {
+      /* a saved meal whose name the split cut apart ("eggs and toast"): exact names only */
+      let took = 0;
+      for (let j = parts.length - 1; j > i && !took; j--) {
+        const joined = parts.slice(i, j + 1).join(" and "), q = M.food.parseQuantity(joined);
+        const m = M.food.matchMeal(q.words || joined, true);
+        if (m) { items.push(mealItem(m, q, joined)); took = j - i + 1; }
+      }
+      if (took) { i += took - 1; continue; }
+      one(parts[i]);
+    }
+    return { items, unmatched };
+    function one(part) {
       const q = M.food.parseQuantity(part);
       const words = q.words;
+      const meal = M.food.matchMeal(words || part);
+      if (meal) { items.push(mealItem(meal, q, part)); return; }
       let food = words ? M.food.matchLocal(words) : null;
       /* "2 tacos" / "a scoop of whey": the unit word may be the food itself */
       if (!food && q.unit && !/^(g|oz|lb|ml|fl oz|cup|tbsp|tsp|small|medium|large|serving|piece)$/.test(q.unit)) { food = M.food.matchLocal(q.unit + " " + words); if (food) q.unit = null; }
@@ -1834,8 +2188,7 @@ window.M = window.M || {};
       const it = { name: food.name, brand: food.brand || "", servings, servingLabel: sc.servingLabel, g: sc.g != null ? r1(sc.g) : null, per, foodId: food.id, source: food.source === "generic" ? "generic" : "custom", text: part };
       if (pv.extra) Object.assign(it, pv.extra);
       items.push(it);
-    });
-    return { items, unmatched };
+    }
   };
 
   M.food.describe = function (text, opt) {

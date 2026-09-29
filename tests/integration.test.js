@@ -123,17 +123,20 @@ function t(name, fn) {
 /* --------------------------------------------------- static / syntax checks */
 console.log("static");
 t("inline Chalk script parses (node vm)", () => { new vm.Script(inlineScript(HTML), { filename: "index.inline.js" }); });
+const APPV = +((HTML.match(/const APP_VERSION=(\d+)/) || [])[1] || 0);
+const VQ = "?v=" + APPV;
 t("head links m.css and m-trends.css after Google Fonts", () => {
   const i = HTML.indexOf('href="https://fonts.googleapis.com');
-  const a = HTML.indexOf('<link rel="stylesheet" href="m.css">');
-  const b = HTML.indexOf('<link rel="stylesheet" href="m-trends.css">');
+  const a = HTML.indexOf('<link rel="stylesheet" href="m.css' + VQ + '">');
+  const b = HTML.indexOf('<link rel="stylesheet" href="m-trends.css' + VQ + '">');
   assert.ok(i > 0 && a > i && b > a, "order: fonts < m.css < m-trends.css");
   assert.ok(a < HTML.indexOf("<style>"), "links before <style>");
 });
 t("six module scripts in order (m-sync.js right after m-trends.js), before the inline script", () => {
-  const order = ["m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js", "m-sync.js"].map(f => HTML.indexOf('<script src="' + f + '"></script>'));
+  assert.ok(APPV >= 16, "APP_VERSION set");
+  const order = ["m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js", "m-sync.js"].map(f => HTML.indexOf('<script src="' + f + VQ + '"></script>'));
   order.forEach((p, i) => assert.ok(p > 0 && (i === 0 || p > order[i - 1]), "script " + i + " position"));
-  assert.ok(/<script src="m-trends\.js"><\/script>\s*<script src="m-sync\.js"><\/script>/.test(HTML), "m-sync.js directly after m-trends.js");
+  assert.ok(/<script src="m-trends\.js\?v=\d+"><\/script>\s*<script src="m-sync\.js\?v=\d+"><\/script>/.test(HTML), "m-sync.js directly after m-trends.js");
   assert.ok(order[5] < HTML.indexOf("<script>\n/* ================= EXERCISE LIBRARY"), "before Chalk's inline script");
 });
 t("boot starts cloud sync right after M.sync.init(), before the first render", () => {
@@ -142,11 +145,12 @@ t("boot starts cloud sync right after M.sync.init(), before the first render", (
   assert.ok(init > 0 && start > init && first > start, "order: M.sync.init → M.cloud.start → render");
   assert.ok(/if\(window\.M&&M\.cloud&&M\.cloud\.start\) M\.cloud\.start\(\);/.test(js), "guarded call");
 });
-t("Train Today adds the Macros summary row right after the check-in banner, only when it exists", () => {
+t("Train Today: Chalk's check-in card, then the Macros banner, then the summary row (TRN-18)", () => {
   const js = inlineScript(HTML);
-  const i = js.indexOf("let h=(window.M&&M.ui&&M.ui.bannerHTML?M.ui.bannerHTML():\"\");");
+  const c = js.indexOf("if(checkinDue()) h+=`<div class=\"card first\">");
+  const i = js.indexOf('if(window.M&&M.ui&&M.ui.bannerHTML){ try{ h+=M.ui.bannerHTML()||""; }catch(e){} }');
   const j = js.indexOf('if(window.M&&M.ui&&typeof M.ui.trainSummaryHTML==="function"){ try{ h+=M.ui.trainSummaryHTML()||""; }catch(e){} }');
-  assert.ok(i > 0 && j > i && j - i < 120, "summary line follows the banner line");
+  assert.ok(c > 0 && i > c && j > i && j - i < 120, "check-in < banner < summary row");
 });
 t("modebar sits between .top and #scroll", () => {
   const top = HTML.indexOf('<div class="top">'), mb = HTML.indexOf('<div class="modebar" id="modebar">'), sc = HTML.indexOf('<div id="scroll">');
@@ -158,24 +162,86 @@ t("modebar fallback CSS present inside <style>", () => {
   assert.ok(/\.modebar button\.on\{background:var\(--acc\);color:var\(--acc-ink\)\}/.test(css));
   assert.ok(/\.modebar svg\{width:22px;height:22px;fill:none;stroke:currentColor/.test(css));
 });
-t("sw.js: cache bumped, CORE lists the macro files, other origins not intercepted", () => {
-  const sw = read("sw.js");
-  const ver = +((sw.match(/const CACHE = "chalk-v(\d+)"/) || [])[1] || 0);
-  assert.ok(ver >= 15, "cache bumped for m-sync.js (got v" + ver + ")");
-  ["m.css", "m-trends.css", "m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js", "m-sync.js"].forEach(f => assert.ok(sw.includes('"' + f + '"'), "CORE has " + f));
-  new vm.Script(sw, { filename: "sw.js" });
-  /* behavior: run the worker with a fake `self` and check which requests it takes over */
+/* ------------------------------------------------------------ sw.js checks */
+const SWSRC = read("sw.js");
+const SWV = +((SWSRC.match(/const VERSION = (\d+);/) || [])[1] || 0);
+/* Runs sw.js in a vm with an in-memory CacheStorage and a scripted fetch. NET_MS is shortened so timeouts are quick. */
+function swRig(opts) {
+  opts = opts || {};
+  const BASE = "https://nickahrensrealestate.github.io/chalk/";
+  const abs = u => new URL(typeof u === "string" ? u : u.url, BASE).href;
+  const stores = new Map(opts.caches || []);
+  const mk = name => { if (!stores.has(name)) stores.set(name, new Map()); return stores.get(name); };
+  const cacheObj = name => ({
+    match: async (r) => { const m = stores.get(name); return m && m.has(abs(r)) ? m.get(abs(r)).clone() : undefined; },
+    put: async (r, res) => { if (opts.putFails) throw new Error("quota"); const buf = await res.arrayBuffer(); mk(name).set(abs(r), new Response(buf, { status: res.status, headers: res.headers })); },
+    keys: async () => [...mk(name).keys()]
+  });
+  const caches = {
+    open: async n => { mk(n); return cacheObj(n); },
+    keys: async () => [...stores.keys()],
+    delete: async n => stores.delete(n),
+    match: async r => { for (const n of stores.keys()) { const h = await cacheObj(n).match(r); if (h) return h; } return undefined; }
+  };
+  const fetched = [], posted = [];
+  let updates = 0;
+  const net = opts.net || (() => "ok");
+  const fetch = (input, init) => {
+    const url = abs(input), signal = (init && init.signal) || (input && input.signal);
+    fetched.push({ url, mode: (init && init.mode) || (input && input.mode) || "", cache: (input && input.cache) || "" });
+    const how = net(url);
+    if (how === "hang") return new Promise((res, rej) => { if (signal) signal.addEventListener("abort", () => rej(new Error("aborted"))); });
+    if (how === "down") return Promise.reject(new TypeError("Failed to fetch"));
+    if (how === "cut") {
+      const body = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode("half of the fi")); setTimeout(() => c.error(new Error("connection reset")), 5); } });
+      return Promise.resolve(new Response(body, { status: 200 }));
+    }
+    if (how === "opaque") return Promise.resolve({ ok: false, status: 0, type: "opaque", clone() { return this; }, arrayBuffer: async () => new ArrayBuffer(0) });
+    if (typeof how === "number") return Promise.resolve(new Response("error " + how, { status: how }));
+    return Promise.resolve(new Response("NET " + url, { status: 200, headers: { "content-type": "text/plain" } }));
+  };
+  class R extends Request { constructor(u, init) { super(typeof u === "string" ? new URL(u, BASE + "sw.js").href : u, init); } }
   const listeners = {};
-  const fakeSelf = { addEventListener: (type, fn) => { listeners[type] = fn; }, skipWaiting() {}, clients: { claim() {} }, location: { origin: "https://nickahrensrealestate.github.io" } };
-  vm.runInNewContext(sw, { self: fakeSelf, location: fakeSelf.location, caches: { open: () => Promise.resolve({ match: () => Promise.resolve(null), put: () => Promise.resolve() }), keys: () => Promise.resolve([]), match: () => Promise.resolve(null) }, fetch: () => Promise.reject(new Error("offline")), URL, Request: function (u) { this.url = u; }, setTimeout, Promise });
-  assert.strictEqual(typeof listeners.fetch, "function", "fetch listener registered");
-  const takes = (u, method) => { let took = false; listeners.fetch({ request: { url: u, method: method || "GET", mode: "cors" }, respondWith: p => { took = true; if (p && p.catch) p.catch(() => {}); } }); return took; };
-  assert.ok(takes("https://nickahrensrealestate.github.io/chalk/m-core.js"), "same-origin app files are served by the worker");
-  assert.ok(takes("https://fonts.gstatic.com/s/barlow/v1/x.woff2"), "fonts are cached");
-  ["https://world.openfoodfacts.org/api/v2/product/1.json", "https://api.anthropic.com/v1/messages",
-    "https://abcdefgh.supabase.co/rest/v1/chalk_sync?select=kind,id&household=eq.X"].forEach(u => assert.ok(!takes(u), "not intercepted: " + u));
-  assert.ok(!takes("https://abcdefgh.supabase.co/rest/v1/chalk_sync?on_conflict=household,kind,id", "POST"), "sync uploads pass through");
-  assert.ok(!takes("https://nickahrensrealestate.github.io/chalk/index.html", "POST"), "non-GET passes through");
+  const self = {
+    addEventListener: (t, f) => { listeners[t] = f; }, skipWaiting: async () => {},
+    location: { href: BASE + "sw.js", origin: new URL(BASE).origin },
+    registration: { scope: BASE, update: async () => { updates++; } },
+    clients: { claim: async () => {}, matchAll: async () => [{ postMessage: m => posted.push(m) }] }
+  };
+  const src = SWSRC.replace("const NET_MS = 8000;", "const NET_MS = " + (opts.netMs || 120) + ";");
+  vm.runInNewContext(src, { self, caches, fetch, Request: R, Response, Headers, URL, AbortController, ReadableStream, TextEncoder, setTimeout, clearTimeout, Promise, console });
+  const fire = (url, o) => {
+    o = o || {};
+    const request = o.mode === "navigate" ? { url: abs(url), method: "GET", mode: "navigate", headers: new Headers() } : new R(url, { method: o.method || "GET" });
+    let p = null; const waits = [];
+    listeners.fetch({ request, respondWith: x => { p = Promise.resolve(x); }, waitUntil: w => waits.push(w) });
+    return { took: !!p, res: p, waits };
+  };
+  const ext = type => new Promise((res, rej) => { const waits = []; listeners[type]({ waitUntil: w => waits.push(w) }); Promise.all(waits).then(res, rej); });
+  return { BASE, abs, stores, fetched, posted, fire, install: () => ext("install"), activate: () => ext("activate"), updates: () => updates };
+}
+const coreOf = src => { const m = src.match(/const CORE = \[([\s\S]*?)\];/); return m ? m[1] : ""; };
+t("sw.js: one version everywhere — CACHE, CORE ?v=, index.html's files and APP_VERSION agree", () => {
+  new vm.Script(SWSRC, { filename: "sw.js" });
+  assert.ok(SWV >= 16, "VERSION constant (got " + SWV + ")");
+  assert.ok(/const CACHE = "chalk-v" \+ VERSION;/.test(SWSRC), "CACHE is built from VERSION");
+  assert.strictEqual(APPV, SWV, "index.html APP_VERSION matches sw.js VERSION");
+  /* every same-origin file index.html loads is in CORE with the same ?v= */
+  const loads = [...HTML.matchAll(/<(?:script src|link rel="stylesheet" href)="([^":]+)"/g)].map(m => m[1]);
+  assert.deepStrictEqual(loads.sort(), ["m-core.js", "m-data.js", "m-food.js", "m-sync.js", "m-trends.css", "m-trends.js", "m-ui.js", "m.css"].map(f => f + "?v=" + SWV).sort());
+  const core = coreOf(SWSRC);
+  ["index.html", "manifest.json", "icon-180.png", "icon-192.png", "icon-512.png"].forEach(f => assert.ok(core.includes('"' + f + '"'), "CORE has " + f));
+  ["m.css", "m-trends.css", "m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js", "m-sync.js"].forEach(f => assert.ok(core.includes('"' + f + '" + V'), "CORE has " + f + "?v="));
+});
+t("sw.js: CACHE changes whenever a CORE file changed since the last commit (OFL-13)", () => {
+  const { execFileSync } = require("child_process");
+  let headSw = null;
+  try { headSw = execFileSync("git", ["show", "HEAD:sw.js"], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch (e) { console.log("       (no git history here, check skipped)"); return; }
+  const cacheOfSrc = src => { const v = src.match(/const VERSION = (\d+);/); if (v) return "chalk-v" + v[1]; const c = src.match(/const CACHE = "([^"]+)"/); return c ? c[1] : null; };
+  const headCache = cacheOfSrc(headSw), nowCache = cacheOfSrc(SWSRC);
+  const files = ["index.html", "manifest.json", "icon-180.png", "icon-192.png", "icon-512.png", "m.css", "m-trends.css", "m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js", "m-sync.js"];
+  const changed = files.filter(f => { let old = null; try { old = execFileSync("git", ["show", "HEAD:" + f], { cwd: ROOT, stdio: ["ignore", "pipe", "ignore"] }); } catch (e) { return true; } return !old.equals(fs.readFileSync(path.join(ROOT, f))); });
+  if (changed.length) assert.notStrictEqual(nowCache, headCache, "these app files changed but sw.js still says " + nowCache + " — bump VERSION in sw.js, APP_VERSION and ?v= in index.html: " + changed.join(", "));
 });
 t("manifest.json description", () => {
   const m = JSON.parse(read("manifest.json"));
@@ -338,6 +404,97 @@ function runPass(label, real) {
   } finally { dom.window.close(); }
 }
 
+/* ------------------------------------------------ sw.js behavior (async) */
+async function runSwPass() {
+  console.log("sw.js behavior (in-memory caches, scripted network)");
+  const V = "?v=" + SWV;
+  await ta("install fills chalk-vN with every CORE file, fetched past the HTTP cache", async () => {
+    const rig = swRig(); await rig.install();
+    const keys = [...rig.stores.get("chalk-v" + SWV).keys()].map(k => k.replace(rig.BASE, "")).sort();
+    assert.deepStrictEqual(keys, ["icon-180.png", "icon-192.png", "icon-512.png", "index.html", "m-core.js" + V, "m-data.js" + V, "m-food.js" + V, "m-sync.js" + V, "m-trends.css" + V, "m-trends.js" + V, "m-ui.js" + V, "m.css" + V, "manifest.json"].sort());
+    assert.ok(rig.fetched.every(f => f.cache === "reload"), "cache: reload");
+  });
+  await ta("install is all or nothing: one failed file stores nothing and fails the install", async () => {
+    const rig = swRig({ net: u => (/m-ui\.js/.test(u) ? 503 : "ok") });
+    await assert.rejects(rig.install());
+    assert.strictEqual((rig.stores.get("chalk-v" + SWV) || new Map()).size, 0);
+    const cut = swRig({ net: u => (/m-food\.js/.test(u) ? "cut" : "ok") });
+    await assert.rejects(cut.install());
+    assert.strictEqual((cut.stores.get("chalk-v" + SWV) || new Map()).size, 0, "a body cut off halfway is never stored");
+  });
+  await ta("activate deletes only old chalk-* caches, keeps the CDN/font caches and other apps' caches, tells open pages", async () => {
+    const m = () => new Map([["x", new Response("x")]]);
+    const rig = swRig({ caches: [["chalk-v15", m()], ["chalk-v" + SWV, m()], ["chalk-cdn", m()], ["chalk-fonts", m()], ["apollo-tracker-v3", m()], ["workbox-precache", m()]] });
+    await rig.activate();
+    assert.deepStrictEqual([...rig.stores.keys()].sort(), ["apollo-tracker-v3", "chalk-cdn", "chalk-fonts", "chalk-v" + SWV, "workbox-precache"].sort());
+    assert.strictEqual(JSON.stringify(rig.posted), JSON.stringify([{ type: "chalk-updated", cache: "chalk-v" + SWV }]));
+  });
+  await ta("app shell is cache first: opens instantly from the cache while the network hangs, and checks for an update", async () => {
+    const rig = swRig({ net: () => "hang", netMs: 5000 });
+    rig.stores.set("chalk-v" + SWV, new Map([[rig.abs("index.html"), new Response("CACHED PAGE")], [rig.abs("m-core.js" + V), new Response("CACHED CORE")]]));
+    const t0 = Date.now();
+    const nav = rig.fire(rig.BASE, { mode: "navigate" });
+    assert.ok(nav.took);
+    assert.strictEqual(await (await nav.res).text(), "CACHED PAGE");
+    const core = rig.fire("m-core.js" + V);
+    assert.strictEqual(await (await core.res).text(), "CACHED CORE");
+    assert.ok(Date.now() - t0 < 400, "no waiting on the network");
+    await Promise.all(nav.waits);
+    assert.strictEqual(rig.updates(), 1, "registration.update() in the background");
+    const again = rig.fire(rig.BASE + "index.html", { mode: "navigate" }); await again.res; await Promise.all(again.waits);
+    assert.strictEqual(rig.updates(), 1, "update checks are throttled");
+  });
+  await ta("nothing cached: network with a hard budget → 504 page, never a cut-off file", async () => {
+    const hang = swRig({ net: () => "hang" });
+    const t0 = Date.now();
+    const r1 = await hang.fire("m-ui.js" + V).res;
+    assert.strictEqual(r1.status, 504); assert.ok(Date.now() - t0 < 1500, "gave up at the budget");
+    const nav = await hang.fire(hang.BASE, { mode: "navigate" }).res;
+    assert.strictEqual(nav.status, 504); assert.ok(/Try again/.test(await nav.text()), "a page that says what happened");
+    const cut = swRig({ net: () => "cut" });
+    assert.strictEqual((await cut.fire("m-food.js" + V).res).status, 504, "half a file is a 504, not a broken script");
+    const ok = swRig();
+    const r = await ok.fire("SPEC-MACROS.md").res;
+    assert.strictEqual(r.status, 200); assert.ok(/NET /.test(await r.text()));
+    assert.strictEqual((ok.stores.get("chalk-v" + SWV) || new Map()).size, 0, "only install fills the shell cache");
+  });
+  await ta("routing: in-scope same-origin, fonts and pinned jsdelivr files only", async () => {
+    const rig = swRig();
+    const takes = (u, o) => rig.fire(u, o).took;
+    assert.ok(takes(rig.BASE + "m-core.js" + V));
+    assert.ok(!takes("https://nickahrensrealestate.github.io/apollo-tracker/app.js"), "other apps on the origin pass through");
+    assert.ok(takes("https://fonts.gstatic.com/s/barlow/v1/x.woff2") && takes("https://fonts.googleapis.com/css2?family=Barlow"));
+    assert.ok(takes("https://cdn.jsdelivr.net/npm/barcode-detector@3.2.2/dist/iife/ponyfill.js"));
+    assert.ok(takes("https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1/tesseract-core-simd-lstm.wasm.js"));
+    assert.ok(!takes("https://cdn.jsdelivr.net/npm/some-lib/dist/x.js"), "unpinned CDN files pass through");
+    ["https://world.openfoodfacts.org/api/v2/product/1.json", "https://api.anthropic.com/v1/messages", "https://abcdefgh.supabase.co/rest/v1/chalk_sync?select=kind,id"].forEach(u => assert.ok(!takes(u), "not intercepted: " + u));
+    assert.ok(!takes(rig.BASE + "index.html", { method: "POST" }), "non-GET passes through");
+  });
+  await ta("pinned CDN files: kept after the first good download (fetched as CORS), served offline; errors and opaque never kept", async () => {
+    let mode = "ok";
+    const rig = swRig({ net: () => mode });
+    const U = "https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.3/dist/reader/zxing_reader.wasm";
+    assert.strictEqual((await rig.fire(U).res).status, 200);
+    assert.strictEqual(rig.fetched[0].mode, "cors");
+    await new Promise(r => setTimeout(r, 10));
+    assert.ok(rig.stores.get("chalk-cdn").has(U), "stored");
+    mode = "down";
+    assert.ok(/NET /.test(await (await rig.fire(U).res).text()), "offline: served from the cache");
+    const bad = swRig({ net: () => 503 });
+    const B = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js";
+    assert.strictEqual((await bad.fire(B).res).status, 503);
+    assert.ok(!(bad.stores.get("chalk-cdn") || new Map()).has(B), "a 503 is not kept");
+    const op = swRig({ net: () => "opaque" });
+    await op.fire("https://fonts.googleapis.com/css2?family=Barlow").res;
+    assert.strictEqual((op.stores.get("chalk-fonts") || new Map()).size, 0, "opaque answers are not kept");
+    const font = swRig({ net: () => 503 });
+    await font.fire("https://fonts.gstatic.com/s/barlow/v12/a.woff2").res;
+    assert.strictEqual((font.stores.get("chalk-fonts") || new Map()).size, 0, "a failed font is not kept (it used to stick)");
+    const full = swRig({ putFails: true });
+    assert.strictEqual((await full.fire(U).res).status, 200, "a full disk still serves the file");
+  });
+}
+
 /* ------------------------------------------- pass 3: m-sync.js configured */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function ta(name, fn) {
@@ -356,14 +513,16 @@ async function runSyncPass() {
       assert.strictEqual(w.M.cloud.status().on, true);
     });
     for (let i = 0; i < 50 && !fetches.length; i++) await sleep(10);
-    t("boot pulls: GET chalk_sync for this household with apikey + x-household", () => {
-      const g = fetches[0];
-      assert.ok(g && g.method === "GET", "a pull happened at boot");
-      assert.ok(g.url.startsWith(URL0 + "/rest/v1/chalk_sync?select=kind,id,data,deleted,client_updated,updated_at&household=eq." + CODE + "&updated_at=gt."), g.url);
-      assert.ok(/&order=updated_at\.asc&limit=500$/.test(g.url));
-      assert.strictEqual(g.headers.apikey, KEY0);
-      assert.strictEqual(g.headers["x-household"], CODE);
-      assert.ok(!("Authorization" in g.headers), "no Bearer for a publishable key");
+    t("boot talks to chalk_sync for this household with apikey + x-household", () => {
+      /* m-sync may check the household's meta row first, and may send the household only in the header (SEC) */
+      const gets = fetches.filter(f => f.method === "GET" && f.url.startsWith(URL0 + "/rest/v1/chalk_sync?"));
+      assert.ok(gets.length, "a request happened at boot: " + fetches.map(f => f.url).join(" | "));
+      gets.forEach(g => {
+        assert.strictEqual(g.headers.apikey, KEY0);
+        assert.strictEqual(g.headers["x-household"], CODE);
+        assert.ok(!("Authorization" in g.headers), "no Bearer for a publishable key");
+        const hh = g.url.match(/[?&]household=eq\.([^&]*)/); if (hh) assert.strictEqual(hh[1], CODE, "household filter is this household");
+      });
     });
     await sleep(20);
     t("You tab: Sync & backup card shows the code in groups of 4", () => {
@@ -410,6 +569,7 @@ if (realFiles.length) runPass("pass 2: real " + realFiles.join(" + ") + (realFil
 else console.log("pass 2 skipped: m-ui.js / m-trends.js not present yet");
 
 (async () => {
+  await runSwPass();
   if (realFiles.length === 2 && exists("m-sync.js")) await runSyncPass();
   else console.log("pass 3 skipped: needs m-ui.js, m-trends.js and m-sync.js");
   console.log("\n" + pass + " passed, " + fail + " failed");

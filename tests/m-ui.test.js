@@ -159,13 +159,14 @@ t("add flow (cook food): Lunch + Add → 'chicken' → Chicken breast → units 
   assert.ok(/6 oz raw \(4\.4 oz cooked\)/.test(drow.textContent), "diary row: " + drow.textContent);
 });
 
-t("entry sheet (cook): oz cooked keeps the amount (6 oz raw → 4.4 oz cooked); 5 oz cooked uses the cooked profile; grams read in grams", () => {
+t("entry sheet (cook): raw → cooked keeps the typed number (6 oz raw → 6 oz cooked); 5 oz cooked uses the cooked profile; grams read in grams", () => {
   click(q('[data-m="entry"][data-id="' + addedEntry.id + '"]'));
   assert.strictEqual($("m-det-go").textContent, "Save");
   assert.strictEqual(q('[data-m="det-unit"]').value, "oz-raw");
   assert.strictEqual(q('[data-m="det-qty"]').value, "6");
   change(q('[data-m="det-unit"]'), "oz-cooked");
-  assert.strictEqual(q('[data-m="det-qty"]').value, "4.4", "same chicken, cooked weight");
+  assert.strictEqual(q('[data-m="det-qty"]').value, "6", "raw → cooked only says how it was weighed: the number stays");
+  assert.strictEqual($("m-det-amt").textContent, "8.3 oz raw (6 oz cooked)");
   input(q('[data-m="det-qty"]'), "5");
   assert.strictEqual($("m-det-amt").textContent, "6.9 oz raw (5 oz cooked)");
   click($("m-det-go"));
@@ -197,7 +198,7 @@ t("plain food: servings 2 → totals doubled; grams unit converts", async () => 
   const row = qa('#m-results [data-m="pick"]').find(r => /Greek yogurt, plain nonfat/.test(r.textContent));
   click(row);
   assert.ok(qa('[data-m="det-unit"] option').map(o => o.value).includes("g"), "g unit offered");
-  assert.ok(!$("m-det-amt"), "no raw/cooked line for plain foods");
+  assert.ok($("m-det-amt") && !/raw|cooked/.test($("m-det-amt").textContent), "plain amount line, no raw/cooked: " + ($("m-det-amt") || {}).textContent);
   click($("m-det-go"));
   const y = M.log.slotEntries(M.today(), "Snacks")[0];
   const before = M.log.slotTotals(M.today(), "Snacks");
@@ -336,12 +337,13 @@ t("meal builder: + Add item goes through the add flow in pick mode and returns",
   assert.strictEqual($("sheetT").textContent, "New meal", "back in builder");
   assert.strictEqual(q('[data-m="mb"][data-k="name"]').value, "Egg plate", "draft name kept");
   assert.strictEqual(M.ui.draft.items.length, 1);
-  assert.strictEqual(M.ui.draft.items[0].servings, 1.25);
+  assert.strictEqual(M.ui.draft.items[0].servings, /large|white|slice/i.test(M.ui.draft.items[0].servingLabel) ? 2 : 1.25, "servings screen: counted units step by 1");
   /* tap item → edit servings / remove */
   click(q('[data-m="mb-item"]'));
   assert.ok(!$("m-mb-edit").hidden);
+  const was = M.ui.draft.items[0].servings;
   click(q('[data-m="mb-step"][data-v="1"]'));
-  assert.strictEqual(M.ui.draft.items[0].servings, 1.5);
+  assert.strictEqual(M.ui.draft.items[0].servings, Math.floor(was) + 1, "eggs step by whole eggs in the builder too");
   click(q('[data-m="mb-remove"]'));
   assert.strictEqual(M.ui.draft.items.length, 0);
   /* closing the add sheet with × while picking returns to the builder */
@@ -392,7 +394,7 @@ t("ring goes .over past target; bars mark over", () => {
 t("suggest sheet: remaining + built-in suggestions, Log it and Save as meal", async () => {
   click(q('[data-m="suggest"]'));
   assert.ok(sheetOn());
-  assert.ok(/Left today/.test($("sheetB").textContent));
+  assert.ok(/Left for today/.test($("sheetB").textContent));
   await sleep(50);
   const cards = qa(".m-sug");
   assert.ok(cards.length > 0, "built-in suggestions");
@@ -462,9 +464,9 @@ t("new food not in the app: search → '+ Add as a new food' (name prefilled) �
   input(q('[data-m="ff"][data-k="unit"]'), "bowl");
   input(q('[data-m="ff"][data-k="cal"]'), "320"); input(q('[data-m="ff"][data-k="p"]'), "24"); input(q('[data-m="ff"][data-k="c"]'), "30"); input(q('[data-m="ff"][data-k="f"]'), "10");
   assert.ok(/Save & add to Dinner/.test(q('[data-m="ff-save-add"]').textContent));
-  click(q('[data-m="ff-save-add"]'));
-  assert.strictEqual($("m-det-go").textContent, "Add to Dinner");
-  click($("m-det-go"));
+  click(q('[data-m="ff-save-add"]'));   /* F2b UX1-07: saves and logs one serving right away */
+  assert.ok(!sheetOn(), "logged right away, no second screen");
+  assert.strictEqual(ctx.toasts[ctx.toasts.length - 1], "Added to Dinner");
   const saved = M.foods.list().find(f => f.name === "Green chile stew");
   assert.ok(saved && saved.source === "custom" && saved.per.cal === 320 && saved.serving.unit === "bowl", JSON.stringify(saved));
   assert.ok(M.log.slotEntries(M.today(), "Dinner").some(e => e.name === "Green chile stew"), "logged to Dinner");
@@ -495,7 +497,7 @@ t("rice: 1/4 cup dry by default; log by cooked cups, then by cooked grams", asyn
   assert.ok(keys.includes("cup-raw") && keys.includes("cup-cooked") && keys.includes("oz-raw") && keys.includes("g-cooked"), keys.join(","));
   assert.deepStrictEqual([q('[data-m="det-unit"]').value, q('[data-m="det-qty"]').value], ["cup-raw", "0.25"]);
   change(q('[data-m="det-unit"]'), "cup-cooked");
-  assert.strictEqual(q('[data-m="det-qty"]').value, "0.75", "same rice, cooked cups (to the nearest 1/4)");
+  assert.strictEqual(q('[data-m="det-qty"]').value, "0.25", "dry → cooked keeps the typed number");
   input(q('[data-m="det-qty"]'), "1");
   assert.strictEqual($("m-det-amt").textContent, "2 oz dry (1 cup cooked)");
   assert.ok(/205kcal/.test($("m-live").textContent.replace(/\s/g, "")), $("m-live").textContent);
@@ -524,7 +526,7 @@ t("entries saved before the merge read raw first and reopen in their old weight"
   const before = M.log.totals(M.today()).cal;
   click(row);
   assert.strictEqual(q('[data-m="det-unit"]').value, "oz-cooked");
-  assert.strictEqual(q('[data-m="det-qty"]').value, "5.98");
+  assert.strictEqual(q('[data-m="det-qty"]').value, "6", "shown rounded; the exact amount stays inside");
   click($("m-det-go"));
   const e = M.log.slotEntries(M.today(), "Snacks").find(x => x.id === "legacy1");
   assert.deepStrictEqual([e.foodId, e.state], ["g_chicken_breast", "cooked"]);
@@ -533,6 +535,10 @@ t("entries saved before the merge read raw first and reopen in their old weight"
 });
 
 t("recents: the row shows last time's raw (cooked) amount and reopens with it; My foods reads raw first", async () => {
+  if (!M.recents("nick").some(x => x.name === "Chicken breast, boneless skinless")) {
+    const cf = M.foods.get("g_chicken_breast"), o = M.cook.unitsFor(cf, "us").find(x => x.key === "oz-raw");
+    M.log.add(M.addDays(M.today(), -1), { slot: "Lunch", name: cf.name, foodId: cf.id, servings: 6, servingLabel: "1 oz raw", g: o.g, per: o.per, state: "raw", cook: { y: cf.cook.y, word: cf.cook.word } });
+  }
   const rc = M.recents("nick").find(x => x.name === "Chicken breast, boneless skinless");
   const info = M.cook.entryInfo(rc), label = M.cook.entryLabel(rc, "us");
   assert.ok(rc && info && /oz raw \(/.test(label), label);
@@ -560,23 +566,24 @@ t("recents: the row shows last time's raw (cooked) amount and reopens with it; M
   M.ui.tab = "diary"; M.ui.render();
 });
 
-t("new / edit food form: 'Weighs less after cooking?' → cook units; rice × dry; needs grams", () => {
+t("new / edit food form: 'Does the weight change when cooked?' → cook units; rice times dry; needs grams", () => {
   M.ui.tab = "foods"; M.ui.foodsSeg = "foods"; M.ui.render();
   click(q('[data-m="food-new"]'));
-  assert.ok(/Weighs less after cooking\?/.test($("sheetB").textContent));
+  assert.ok(/Does the weight change when cooked\?/.test($("sheetB").textContent));
   assert.ok(q('[data-m="ff-cook"][data-v="none"]').classList.contains("on"));
   assert.ok($("m-ff-cookrow").hidden);
   input(q('[data-m="ff"][data-k="name"]'), "Chicken breast (Costco bag)");
+  assert.ok(!$("m-ff-cook").hidden, "a meat name shows the question");
   input(q('[data-m="ff"][data-k="qty"]'), "4"); input(q('[data-m="ff"][data-k="unit"]'), "oz");
   input(q('[data-m="ff"][data-k="cal"]'), "110"); input(q('[data-m="ff"][data-k="p"]'), "23"); input(q('[data-m="ff"][data-k="f"]'), "1.5");
   click(q('[data-m="ff-cook"][data-v="meat"]'));
   assert.ok(!$("m-ff-cookrow").hidden);
   const ci = q('[data-m="ff"][data-k="cook"]');
-  assert.strictEqual(ci.getAttribute("placeholder"), "75");
+  assert.strictEqual(ci.value, "75", "the usual number is filled in");
   assert.ok(/Cooked weight is about/.test($("m-ff-cookrow").textContent) && /% of raw/.test($("m-ff-cookrow").textContent));
   input(ci, "250");
   click(q('[data-m="ff-save"]'));
-  assert.ok(sheetOn() && /10 to 100%/.test(ctx.toasts[ctx.toasts.length - 1]), "out of range is refused");
+  assert.ok(sheetOn() && /10 to 100%/.test($("m-ff-msg").textContent), "out of range is refused");
   input(q('[data-m="ff"][data-k="cook"]'), "");
   click(q('[data-m="ff-save"]'));
   const f = M.foods.list().find(x => x.name === "Chicken breast (Costco bag)");
@@ -588,8 +595,8 @@ t("new / edit food form: 'Weighs less after cooking?' → cook units; rice × dr
   assert.ok(q('[data-m="ff-cook"][data-v="meat"]').classList.contains("on"));
   assert.strictEqual(q('[data-m="ff"][data-k="cook"]').value, "75");
   click(q('[data-m="ff-cook"][data-v="grain"]'));
-  assert.strictEqual(q('[data-m="ff"][data-k="cook"]').getAttribute("placeholder"), "2.8");
-  assert.ok(/× dry/.test($("m-ff-cookrow").textContent));
+  assert.strictEqual(q('[data-m="ff"][data-k="cook"]').value, "2.8");
+  assert.ok(/times the dry weight/.test($("m-ff-cookrow").textContent));
   input(q('[data-m="ff"][data-k="cook"]'), "3");
   click(q('[data-m="ff-log"]'));
   assert.ok(qa('[data-m="det-unit"] option').some(o => o.value === "oz-cooked" && o.textContent === "oz cooked"), "saved and logging offers cooked units");
@@ -602,10 +609,12 @@ t("new / edit food form: 'Weighs less after cooking?' → cook units; rice × dr
   input(q('[data-m="ff"][data-k="name"]'), "Mystery meat"); input(q('[data-m="ff"][data-k="unit"]'), "piece");
   click(q('[data-m="ff-cook"][data-v="meat"]'));
   click(q('[data-m="ff-save"]'));
-  assert.ok(sheetOn() && /grams per serving/.test(ctx.toasts[ctx.toasts.length - 1]));
+  assert.ok(sheetOn() && /grams in one serving/.test($("m-ff-msg").textContent));
   click(q('[data-m="ff-cook"][data-v="none"]'));
   click(q('[data-m="ff-save"]'));
-  assert.ok(!sheetOn(), "without cooking info it saves as before");
+  assert.ok(sheetOn() && /Type the calories/.test($("m-ff-msg").textContent), "no numbers at all: asks for calories first");
+  click(q('[data-m="ff-save"]'));
+  assert.ok(!sheetOn(), "a second tap saves it anyway (without cooking info, as before)");
   M.foods.list().forEach(x => { if (/Mystery|Costco bag/.test(x.name)) M.foods.remove(x.id); });
   M.ui.tab = "diary"; M.ui.render();
 });
@@ -631,7 +640,7 @@ t("batch meal: switch on, total cooked weight, raw total, per 4 oz; saved row sa
   assert.ok(/64 oz raw \(46\.5 oz cooked\)/.test($("m-mb-items").textContent), $("m-mb-items").textContent);
   assert.ok(/6 oz dry \(16\.8 oz cooked\)/.test($("m-mb-items").textContent));
   const sw = q('[data-m="mb-batch"]');
-  assert.ok(/Cooked as a batch — log by weight/.test(sw.textContent));
+  assert.ok(/Cooked a big batch\? Log it by weight/.test(sw.textContent));
   assert.ok($("m-mb-batch").hidden);
   click(sw);
   assert.ok(!$("m-mb-batch").hidden && sw.getAttribute("aria-checked") === "true");
@@ -639,7 +648,7 @@ t("batch meal: switch on, total cooked weight, raw total, per 4 oz; saved row sa
   assert.strictEqual($("m-mb-raw").textContent, "The raw items weigh 70 oz.");
   assert.ok(/Whole batch/.test($("m-mb-live").textContent));
   click(q('[data-m="mb-save"]'));
-  assert.ok(sheetOn() && /total cooked weight/.test(ctx.toasts[ctx.toasts.length - 1]), "cooked weight required");
+  assert.ok(sheetOn() && /cooked weight/.test($("m-mb-msg").textContent), "cooked weight required");
   input(q('[data-m="mb-cooked"]'), "51");
   assert.ok(/Per 4 oz cooked/.test($("m-mb-live").textContent), $("m-mb-live").textContent);
   click(q('[data-m="mb-cunit"][data-v="g"]'));
@@ -703,7 +712,7 @@ t("batch meal: 'How much did you eat?' of 51 oz cooked → 12 oz → '16.5 oz ra
   M.log.remove(M.today(), e.id); M.meals.remove(batchId); M.ui.render();
 });
 
-t("suggestion cards list items with amounts, cook items raw first; Log it keeps state", async () => {
+t("suggestion cards list items with amounts, cook items raw first; Log it logs one entry whose items keep state", async () => {
   M.ui.tab = "diary"; M.ui.render();
   click(q('[data-m="suggest"]'));
   click(q('[data-m="sug-slot"][data-v="Dinner"]'));
@@ -717,7 +726,8 @@ t("suggestion cards list items with amounts, cook items raw first; Log it keeps 
   const n = M.log.slotEntries(M.today(), "Dinner").length;
   click(cards[i].querySelector('[data-m="sug-log"]'));
   const added = M.log.slotEntries(M.today(), "Dinner").slice(n);
-  assert.ok(added.some(e => e.state && e.cook), "cook items logged with their state");
+  assert.strictEqual(added.length, 1, "a meal idea logs as ONE entry (F2b UX1-13)");
+  assert.ok(Array.isArray(added[0].items) && added[0].items.some(it => it.state && it.cook), "its cook items keep their state");
   added.forEach(e => M.log.remove(M.today(), e.id)); M.ui.render();
 });
 
@@ -865,6 +875,326 @@ t("all user strings escaped", () => {
   M.ui.render();
   assert.ok(!q("#app img[src='x']"), "no injected element");
   assert.ok(/&lt;img/.test($("app").innerHTML));
+});
+
+/* ---------------------------------------------------------------- F2a regressions */
+const openLog = () => { if (M.ui.sheetOpen()) M.ui.close(); M.ui.tab = "diary"; M.ui.render(); click(q('#cta [data-m="add"]')); };
+const realNow = M.now;
+const DAYMS = 86400000;
+
+t("midnight: a Diary left on today follows the clock when the app comes back (visibilitychange / pageshow)", () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  M.ui.tab = "diary"; M.ui.date = M.today(); M.ui.render();
+  const d0 = M.today();
+  try {
+    M.now = () => realNow() + DAYMS;   /* the next morning, app never reloaded */
+    const d1 = M.today(); assert.notStrictEqual(d1, d0);
+    doc.dispatchEvent(new w.Event("visibilitychange"));
+    assert.strictEqual(M.ui.date, d1, "rolled to the new day");
+    assert.ok(/Nick · Today/.test($("subtitle").textContent), $("subtitle").textContent);
+    click(q('#cta [data-m="add"]'));
+    assert.strictEqual($("sheetT").textContent, "Log food");
+    assert.strictEqual(M.ui._.state().add.date, d1, "Log food logs to the new day");
+    M.ui.close();
+    /* a day picked on purpose stays */
+    click(q('[data-m="day-prev"]'));
+    const picked = M.ui.date;
+    M.now = () => realNow() + 2 * DAYMS;
+    w.dispatchEvent(new w.Event("pageshow"));
+    assert.strictEqual(M.ui.date, picked, "a chosen day is kept");
+  } finally { M.now = realNow; M.ui.date = M.today(); M.ui.render(); }
+});
+
+t("midnight: an open Log food sheet also moves to the new day; render() rolls too", () => {
+  openLog();
+  const d0 = M.today();
+  try {
+    M.now = () => realNow() + DAYMS;
+    doc.dispatchEvent(new w.Event("visibilitychange"));
+    assert.strictEqual(M.ui._.state().add.date, M.today(), "sheet date rolled");
+    assert.strictEqual($("sheetT").textContent, "Log food");
+  } finally { M.now = realNow; M.ui.close(); }
+  M.ui.date = d0; M.ui.render();
+  try { M.now = () => realNow() + DAYMS; M.ui.render(); assert.strictEqual(M.ui.date, M.today(), "render rolls a stale today"); }
+  finally { M.now = realNow; M.ui.date = M.today(); M.ui.render(); }
+});
+
+t("another day: titles and the toast name the day; Back to today button; slot copy label", async () => {
+  M.ui.close(); M.ui.tab = "diary"; M.ui.date = M.today(); M.ui.render();
+  assert.ok(!q('.m-backtoday'), "no Back to today on today");
+  click(q('[data-m="day-prev"]'));
+  assert.ok(q('.m-backtoday [data-m="day-today"]') && /Back to today/.test(q('.m-backtoday').textContent));
+  assert.ok(!/\btoday\b/.test(q('.m-daylbl').textContent), "no 'today' pill in the label");
+  click(q('[data-m="slot-menu"][data-slot="Dinner"]'));
+  assert.ok(/Copy Dinner from /.test(q('[data-m="slot-copy"]').textContent), q('[data-m="slot-copy"]').textContent);
+  assert.ok(/Empty/.test(q('[data-m="slot-savemeal"]').textContent));
+  M.ui.close();
+  click(q('[data-m="add"][data-slot="Breakfast"]'));
+  assert.strictEqual($("sheetT").textContent, "Log food · Yesterday");
+  input($("m-search"), "banana"); await sleep(220);
+  click(q('[data-m="add-seg"][data-v="foods"]'));
+  click(qa('#m-results [data-m="pick"]').find(r => /banana/i.test(r.textContent)));
+  assert.strictEqual($("sheetT").textContent, "Add · Yesterday");
+  const n = ctx.toasts.length;
+  click($("m-det-go"));
+  assert.strictEqual(ctx.toasts[n], "Added to Breakfast · Yesterday");
+  const y = M.log.slotEntries(M.addDays(M.today(), -1), "Breakfast").find(e => /banana/i.test(e.name));
+  assert.ok(y, "logged to yesterday");
+  M.log.remove(M.addDays(M.today(), -1), y.id);
+  click(q('.m-backtoday [data-m="day-today"]'));
+  assert.strictEqual(M.ui.date, M.today());
+});
+
+t("amount 0 is never saved as 1: 'Enter an amount' (edit offers Delete)", async () => {
+  openLog();
+  input($("m-search"), "banana"); await sleep(220);
+  click(q('[data-m="add-seg"][data-v="foods"]'));
+  click(qa('#m-results [data-m="pick"]').find(r => /banana/i.test(r.textContent)));
+  input(q('[data-m="det-qty"]'), "0");
+  const before = M.log.slotEntries(M.today(), M.ui._.state().det.slot).length;
+  click($("m-det-go"));
+  assert.ok(sheetOn(), "stays open");
+  assert.strictEqual($("m-det-msg").textContent, "Enter an amount.");
+  assert.strictEqual(M.log.slotEntries(M.today(), M.ui._.state().det.slot).length, before, "nothing logged");
+  input(q('[data-m="det-qty"]'), "");
+  click($("m-det-go"));
+  assert.ok(sheetOn(), "an empty box is refused too");
+  input(q('[data-m="det-qty"]'), "2");
+  assert.strictEqual($("m-det-msg").textContent, "", "message clears when an amount is typed");
+  click($("m-det-go"));
+  const e = M.dayOf(M.today()).entries.filter(x => /banana/i.test(x.name)).sort((a, b) => b.at - a.at)[0];
+  assert.strictEqual(e.servings, 2);
+  M.ui.render();
+  click(q('[data-m="entry"][data-id="' + e.id + '"]'));
+  input(q('[data-m="det-qty"]'), "0");
+  click($("m-det-go"));
+  assert.ok(sheetOn() && /Enter an amount/.test($("m-det-msg").textContent) && q('#m-det-msg [data-m="det-del"]'), "edit: message + Delete");
+  assert.strictEqual(M.log.slotEntries(M.today(), e.slot).find(x => x.id === e.id).servings, 2, "not changed to 1");
+  click(q('#m-det-msg [data-m="det-del"]')); click(q('#m-det-msg [data-m="det-del"]'));
+  assert.ok(!M.log.slotEntries(M.today(), e.slot).some(x => x.id === e.id), "deleted");
+});
+
+t("recents log with the live food's numbers in last time's unit (UID-02 / UID-03)", async () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const f = M.foods.add({ name: "Protein yogurt cup", source: "label", serving: { qty: 1, unit: "container", g: 150 }, per: { cal: 900, p: 15, c: 7, f: 0 }, per100g: { cal: 600, p: 10, c: 4.7, f: 0 }, alts: [{ label: "1 cup", g: 227 }] });
+  const m = M.meals.add({ name: "Oats bowl test", desc: "", slot: "Breakfast", servingsMade: 1, items: [{ name: "Oats", servings: 1, servingLabel: "1/2 cup (40 g)", g: 40, per: { cal: 150, p: 5, c: 27, f: 3 } }] });
+  const yd = M.addDays(M.today(), -1);
+  M.log.add(yd, { slot: "Snacks", name: f.name, servings: 2, servingLabel: "1 cup", g: 227, per: M.foodMath.fromPer100(f.per100g, 227), foodId: f.id });
+  M.log.addMeal(yd, m.id, 1.5, "Breakfast");
+  /* fixed later: 900 → 90 kcal per container; the meal gets whey */
+  M.foods.update(f.id, { per: { cal: 90, p: 15, c: 7, f: 0 }, per100g: { cal: 60, p: 10, c: 4.7, f: 0 } });
+  M.meals.update(m.id, { items: M.meals.get(m.id).items.concat([{ name: "Whey", servings: 1, servingLabel: "1 scoop (31 g)", g: 31, per: { cal: 120, p: 24, c: 3, f: 1.5 } }]) });
+  openLog();
+  await sleep(20);
+  let row = qa('#m-results [data-m="pick"]').find(r => /Protein yogurt cup/.test(r.textContent));
+  click(row);
+  assert.strictEqual(q('[data-m="det-unit"] option:checked').textContent.replace(/\s*\(.*$/, ""), "1 cup", "same unit as last time");
+  assert.strictEqual(q('[data-m="det-qty"]').value, "2");
+  near(M.ui._.state().det && Number($("m-live").querySelector(".v").firstChild.textContent), Math.round(60 * 2.27 * 2), 1, "today's numbers (60 kcal / 100 g)");
+  click($("m-det-go"));
+  const e = M.log.slotEntries(M.today(), M.defaultSlot()).find(x => x.name === "Protein yogurt cup");
+  assert.ok(e && e.servingLabel === "1 cup" && e.servings === 2, JSON.stringify(e));
+  near(e.per.cal * e.servings, 272, 1, "2 cups at the fixed numbers");
+  openLog(); await sleep(20);
+  row = qa('#m-results [data-m="pick"]').find(r => /Oats bowl test/.test(r.textContent));
+  click(row);
+  assert.strictEqual(q('[data-m="det-qty"]').value, "1.5", "same servings as last time");
+  click($("m-det-go"));
+  const me = M.log.slotEntries(M.today(), M.defaultSlot()).find(x => x.mealId === m.id);
+  near(me.per.cal, 270, 0.5, "the meal's current numbers");
+  [e, me].forEach(x => M.log.remove(M.today(), x.id));
+  Object.values(M.MS.days).forEach(d => { if (d.date === yd) d.entries = d.entries.filter(x => x.foodId !== f.id && x.mealId !== m.id); });
+  M.foods.remove(f.id); M.meals.remove(m.id); M.ui.render();
+});
+
+t("entry edit offers the food's own serving too (UID-12)", () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const f = M.foods.add({ name: "Skyr cup", source: "custom", serving: { qty: 1, unit: "container", g: 170 }, per: { cal: 100, p: 17, c: 6, f: 0 }, alts: [] });
+  const e = M.log.add(M.today(), { slot: "Snacks", name: f.name, servings: 200, servingLabel: "1 g", g: 1, per: { cal: 100 / 170, p: 0.1, c: 0.035, f: 0 }, foodId: f.id });
+  M.ui.render();
+  click(q('[data-m="entry"][data-id="' + e.id + '"]'));
+  const labels = qa('[data-m="det-unit"] option').map(o => o.textContent);
+  assert.ok(labels.some(l => /^1 container/.test(l)), labels.join(" | "));
+  assert.ok(labels.includes("grams"), "bare g reads 'grams'");
+  M.ui.close(); M.log.remove(M.today(), e.id); M.foods.remove(f.id); M.ui.render();
+});
+
+t("Log food: no auto-focus, no scanner preload; tools step aside while searching; Searching online… with the add-new button; error line with no matches", async () => {
+  const sc = M.food.scanner, realPre = sc.preload, realOFF = M.food.searchOFF;
+  let pre = 0; sc.preload = () => { pre++; };
+  let rej = null; M.food.searchOFF = () => new Promise((res, rj) => { rej = rj; });
+  try {
+    openLog();
+    assert.notStrictEqual(doc.activeElement, $("m-search"), "search not focused on open");
+    assert.strictEqual(pre, 0, "scanner not preloaded");
+    assert.ok(!q(".m-add").classList.contains("m-typing"));
+    $("m-search").focus();
+    assert.ok(q(".m-add").classList.contains("m-typing"), "typing mode while focused");
+    input($("m-search"), "zzqxv");
+    await sleep(200);
+    assert.ok(/Searching online…/.test($("m-results").textContent), $("m-results").textContent);
+    assert.ok(q('#m-results .m-addnew[data-m="open-form"]'), "add-new button already there");
+    assert.ok(q('#m-results [role="status"]'));
+    await sleep(450);
+    assert.ok(typeof rej === "function", "online search started");
+    rej({ code: "http", message: "Open Food Facts isn't answering right now." });
+    await sleep(20);
+    assert.ok(/isn't answering/.test($("m-results").textContent), "error shown with no local matches: " + $("m-results").textContent);
+    assert.ok(/Not in the app yet/.test($("m-results").textContent));
+    assert.ok(/Add “zzqxv” as a new food/.test(q('#m-results [data-m="open-form"]').textContent));
+    assert.ok(q('#m-results .m-keepcase'), "typed text keeps its case");
+    /* clear button */
+    click(q('[data-m="search-clear"]'));
+    assert.strictEqual($("m-search").value, "");
+    $("m-search").blur(); await sleep(10);
+    assert.ok(!q(".m-add").classList.contains("m-typing"), "tools back after clearing");
+  } finally { sc.preload = realPre; M.food.searchOFF = realOFF; M.ui.close(); }
+});
+
+t("‹ Back from the servings screen returns to the same results", async () => {
+  openLog();
+  input($("m-search"), "banana"); await sleep(220);
+  click(q('[data-m="add-seg"][data-v="foods"]'));
+  click(qa('#m-results [data-m="pick"]').find(r => /banana/i.test(r.textContent)));
+  click(q('[data-m="det-back"]'));
+  assert.strictEqual($("sheetT").textContent, "Log food");
+  assert.strictEqual($("m-search").value, "banana");
+  assert.ok(q('[data-m="add-seg"][data-v="foods"]').classList.contains("on"));
+  assert.ok(qa('#m-results [data-m="pick"]').some(r => /banana/i.test(r.textContent)));
+  M.ui.close();
+});
+
+t("stepper: whole steps for counted units (eggs), ¼ for cups; amount line folds ('3 large · 150 g')", async () => {
+  openLog();
+  input($("m-search"), "egg"); await sleep(220);
+  click(q('[data-m="add-seg"][data-v="foods"]'));
+  const row = qa('#m-results [data-m="pick"]').find(r => /large/.test(r.textContent) && /egg/i.test(r.querySelector(".n").textContent) && !/white|boiled/i.test(r.querySelector(".n").textContent));
+  assert.ok(row, "an egg with a 'large' serving");
+  click(row);
+  const opt = q('[data-m="det-unit"] option:checked').textContent;
+  assert.ok(/large/.test(opt), opt);
+  click(q('[data-m="det-step"][data-v="1"]'));
+  assert.strictEqual(q('[data-m="det-qty"]').value, "2", "eggs step by 1");
+  click(q('[data-m="det-step"][data-v="1"]'));
+  assert.ok(/^3 large eggs · 150 g$/.test($("m-det-amt").textContent), $("m-det-amt").textContent);
+  M.ui.close();
+  assert.strictEqual(M.ui._.amountLabel({ servings: 1.5, servingLabel: "1 cup (240 g)" }), "1.5 cups (360 g)");
+  assert.strictEqual(M.ui._.amountLabel({ servings: 2, servingLabel: "1 slice (38 g)" }), "2 slices (76 g)");
+  assert.strictEqual(M.ui._.amountLabel({ servings: 1, servingLabel: "1 cup (240 g)" }), "1 cup (240 g)", "no '1 ×'");
+  assert.strictEqual(M.ui._.amountLabel({ servings: 150, servingLabel: "1 g" }), "150 g");
+  assert.strictEqual(M.ui._.amountLabel({ servings: 2, servingLabel: "1 bowl" }), "2 × 1 bowl");
+});
+
+t("entry sheet: 'Move to Lunch' labels, hidden list, and a day move (today → yesterday)", () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const e = M.log.add(M.today(), { slot: "Snacks", name: "Day move test", servings: 1, servingLabel: "1 serving", per: { cal: 100, p: 5, c: 10, f: 3 } });
+  M.ui.tab = "diary"; M.ui.date = M.today(); M.ui.render();
+  click(q('[data-m="entry"][data-id="' + e.id + '"]'));
+  assert.ok($("m-move").hidden);
+  click(q('[data-m="det-move"]'));
+  assert.ok(!$("m-move").hidden);
+  assert.deepStrictEqual(qa('[data-m="det-moveto"]').map(b => b.textContent), ["Move to Breakfast", "Move to Lunch", "Move to Dinner"]);
+  const dm = q('[data-m="det-moveday"]');
+  assert.strictEqual(dm.textContent, "Move to yesterday");
+  click(dm);
+  assert.ok(!M.log.slotEntries(M.today(), "Snacks").some(x => x.name === "Day move test"));
+  const y = M.log.slotEntries(M.addDays(M.today(), -1), "Snacks").find(x => x.name === "Day move test");
+  assert.ok(y, "now on yesterday");
+  M.log.remove(M.addDays(M.today(), -1), y.id); M.ui.render();
+});
+
+t("protein left on the Diary bar and the Train summary; More reads 'Fiber, sugar, water'", () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const bars = M.ui.bars({ p: 143, c: 10, f: 5 }, { p: 187, c: 200, f: 60 });
+  assert.ok(/143 \/ 187 g · 44 left/.test(bars), bars);
+  assert.ok(/193 \/ 187 g · 6 over/.test(M.ui.bars({ p: 193 }, { p: 187 })));
+  const t0 = M.log.totals(M.today()), tg = M.person().targets;
+  const h = M.ui.trainSummaryHTML();
+  assert.ok(h.includes("Protein · " + (Math.round(tg.p) - Math.round(t0.p) >= 0 ? (Math.round(tg.p) - Math.round(t0.p)) + " left" : (Math.round(t0.p) - Math.round(tg.p)) + " over")), h);
+  M.ui.tab = "diary"; M.ui.render();
+  assert.ok(/Fiber, sugar, water/.test(q('[data-m="more"]').textContent));
+});
+
+t("water shows ml and steps by 250 ml for metric", () => {
+  const p = M.person(); p.units = "metric";
+  try {
+    M.ui.render();
+    assert.ok(/\+ 250 ml/.test(q('[data-m="water"][aria-label="Plus 250 ml"]').textContent));
+    const w0 = num0(M.dayOf(M.today()) && M.dayOf(M.today()).water);
+    click(q('[data-m="water"][aria-label="Plus 250 ml"]'));
+    near(M.dayOf(M.today()).water - w0, 8, 0.01, "stored in whole oz");
+    assert.ok(/^250 \/ \d+ ml · 1 glass$/.test(q(".m-water .s").textContent) || w0 > 0, q(".m-water .s").textContent);
+    click(q('[data-m="water"][aria-label="Plus 250 ml"]')); click(q('[data-m="water"][aria-label="Plus 250 ml"]')); click(q('[data-m="water"][aria-label="Plus 250 ml"]'));
+    assert.ok(/^1000 \/ \d+ ml · 4 glasses$/.test(q(".m-water .s").textContent) || w0 > 0, q(".m-water .s").textContent);
+    [1, 2, 3].forEach(() => click(q('[data-m="water"][aria-label="Minus 250 ml"]')));
+    click(q('[data-m="water"][aria-label="Minus 250 ml"]'));
+    near(M.dayOf(M.today()).water, w0, 0.001);
+  } finally { p.units = "us"; M.ui.render(); }
+});
+function num0(v) { return typeof v === "number" ? v : 0; }
+
+t("scroll is kept per mode + tab; A.tab from Train switches to Macros; data-tab alone opens Macros", () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  M.setMode("macros"); M.ui.tab = "diary"; M.ui.render();
+  const sc = $("scroll");
+  sc.scrollTop = 300;
+  click(q('#modebar [data-v="train"]'));
+  assert.strictEqual(M.mode(), "train");
+  assert.strictEqual(sc.scrollTop, 0, "train starts at its own spot (top)");
+  sc.scrollTop = 120;
+  click(q('#modebar [data-v="macros"]'));
+  assert.strictEqual(sc.scrollTop, 300, "diary comes back where it was");
+  click(q('#modebar [data-v="train"]'));
+  assert.strictEqual(sc.scrollTop, 120, "train comes back where it was");
+  /* a tab button inside Train (e.g. a check-in's Update) */
+  $("app").insertAdjacentHTML("beforeend", '<button id="tabyou" data-m="tab" data-v="you">Update</button>');
+  click($("tabyou"));
+  assert.strictEqual(M.mode(), "macros");
+  assert.strictEqual(M.ui.tab, "you");
+  assert.strictEqual(qa("#tabs [data-mtab]").length, 4, "macro tabs shown");
+  click(q('#modebar [data-v="train"]'));
+  $("app").insertAdjacentHTML("beforeend", '<button id="tabonly" data-m="mode" data-tab="foods">Foods</button>');
+  click($("tabonly"));
+  assert.strictEqual(M.mode(), "macros"); assert.strictEqual(M.ui.tab, "foods");
+  /* macro tabs keep their own spots too */
+  sc.scrollTop = 50; M.ui.tab = "diary"; M.ui.render();
+  assert.strictEqual(sc.scrollTop, 300);
+  M.ui.tab = "foods"; M.ui.render();
+  assert.strictEqual(sc.scrollTop, 50);
+  M.ui.tab = "diary"; M.ui.render(); sc.scrollTop = 0;
+});
+
+t("quick add: calories (and macros) → one entry, not saved as a food; checks the numbers", () => {
+  const foods0 = Object.keys(M.MS.foods).length;
+  openLog();
+  click(q('.m-tools [data-m="quick"]'));
+  assert.ok(/^Quick add/.test($("sheetT").textContent));
+  click(q('[data-m="qa-go"]'));
+  assert.strictEqual($("m-qa-msg").textContent, "Enter the calories.");
+  input(q('[data-m="qa"][data-k="cal"]'), "-5");
+  click(q('[data-m="qa-go"]'));
+  assert.ok(/below zero/.test($("m-qa-msg").textContent));
+  input(q('[data-m="qa"][data-k="cal"]'), "350");
+  input(q('[data-m="qa"][data-k="p"]'), "20");
+  input(q('[data-m="qa"][data-k="name"]'), "Cake at work");
+  change(q('[data-m="qa-slot"]'), "Snacks");
+  assert.strictEqual($("m-qa-go").textContent, "Add to Snacks");
+  click(q('[data-m="qa-go"]'));
+  assert.ok(!sheetOn());
+  const e = M.log.slotEntries(M.today(), "Snacks").find(x => x.name === "Cake at work");
+  assert.ok(e && e.per.cal === 350 && e.per.p === 20 && e.servings === 1, JSON.stringify(e));
+  assert.strictEqual(Object.keys(M.MS.foods).length, foods0, "no food saved");
+  /* macros only → calories from 4/4/9 */
+  openLog(); click(q('.m-tools [data-m="quick"]'));
+  input(q('[data-m="qa"][data-k="p"]'), "10"); input(q('[data-m="qa"][data-k="f"]'), "10");
+  click(q('[data-m="qa-go"]'));
+  const e2 = M.log.slotEntries(M.today(), M.defaultSlot()).find(x => x.name === "Quick add");
+  assert.ok(e2 && e2.per.cal === 130, JSON.stringify(e2));
+  M.log.remove(M.today(), e.id); M.log.remove(M.today(), e2.id); M.ui.render();
+  /* not offered while picking items for a meal */
+  M.ui.openAdd({ slot: "Lunch", onPick: () => {} });
+  assert.ok(!q('.m-tools [data-m="quick"]'));
+  M.ui.close();
 });
 
 (async () => {

@@ -104,17 +104,39 @@ window.M = window.M || {};
   function freshState() {
     return { v: 1, updatedAt: 0, ui: { mode: "train", person: null, date: null, tab: "diary" }, profiles: {}, foods: {}, meals: {}, days: {}, body: {} };
   }
+  /* Keys that must never become properties of a plain object (prototype pollution). */
+  const BAD_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+  const okKey = k => typeof k === "string" && k !== "" && !BAD_KEYS.has(k);
+  const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const isStr = v => typeof v === "string";
+  /* The only two people. Any other id gets a default profile that is never stored. */
+  const isPid = id => id === "nick" || id === "kat";
+  /* id → record map: plain objects only, no dangerous keys. */
+  function cleanMap(o) {
+    const out = {};
+    if (!isObj(o)) return out;
+    Object.keys(o).forEach(k => { if (okKey(k) && isObj(o[k])) out[k] = o[k]; });
+    return out;
+  }
+  const UI_FIELDS = ["mode", "person", "date", "tab"];
+  function applyUi(ui, src) {
+    if (!isObj(src)) return ui;
+    UI_FIELDS.forEach(k => { if (src[k] !== undefined) ui[k] = src[k]; });
+    if (ui.mode !== "macros") ui.mode = "train";
+    if (!isPid(ui.person)) ui.person = null;
+    if (!isStr(ui.tab) || !ui.tab) ui.tab = "diary";
+    if (ui.date != null && !/^\d{4}-\d{2}-\d{2}$/.test(String(ui.date))) ui.date = null;
+    return ui;
+  }
   function shape(s) {
     const o = freshState();
     if (!isObj(s)) return o;
     o.updatedAt = num(s.updatedAt);
-    o.ui = Object.assign(o.ui, isObj(s.ui) ? s.ui : {});
-    if (o.ui.mode !== "macros") o.ui.mode = "train";
-    ["profiles", "foods", "meals", "days", "body"].forEach(k => { if (isObj(s[k])) o[k] = s[k]; });
+    applyUi(o.ui, s.ui);
+    STATE_KEYS.forEach(k => { if (isObj(s[k])) o[k] = cleanMap(s[k]); });
     return o;
   }
   function lsGet(k) { try { if (typeof localStorage === "undefined") return null; return localStorage.getItem(k); } catch (e) { return null; } }
-  function lsSet(k, v) { return !lsWrite(k, v); }
   /* null on success, else the error (quota full, storage blocked…). */
   function lsWrite(k, v) {
     try {
@@ -124,19 +146,43 @@ window.M = window.M || {};
     } catch (e) { return e || new Error("Save failed"); }
   }
   function lsDel(k) { try { if (typeof localStorage !== "undefined") localStorage.removeItem(k); } catch (e) {} }
+  const isQuota = e => !!e && (e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22 || /quota|full/i.test(String(e.message || "")));
 
   /* ---------------------------------------------------------- storage safety */
-  /* A failed save never loses data silently: M.MS stays in memory, every later
+  /* On disk (format 2):
+       M.KEY                  {v:1, fmt:2, updatedAt, profiles, foods, meals, months:["2026-09", …]}
+       M.KEY + ".d.YYYY-MM"   {v:1, d:{dayId: packed day}}   one key per month of logged days
+       M.KEY + ".body"        {v:1, b:{id: [w, rhr, at]}}    weigh-ins and resting heart rate
+       M.UI_KEY               {mode, person, tab, date}      Train | Macros taps only write this
+       M.KEY + ".bak"         a daily copy of the last good save (only recent months when big)
+       M.KEY + ".damaged…"    a copy of anything that couldn't be read, made before any save
+     A save writes the main key plus only the months (and body) that changed.
+     Entries are packed small on disk (short keys, nutrients as a list, no empty
+     fields) and unpacked on load, so M.MS looks exactly like it always did. The
+     old one-key format (everything under M.KEY) still loads and moves over on
+     the next save; if that doesn't fit, the old key stays as it was.
+     A failed save never loses data silently: M.MS stays in memory, every later
      M.save() tries again, M.storage says what happened and M.onStorageError
-     listeners hear about it once per failure streak. A daily copy of the last
-     good save lives under M.KEY + ".bak" for M.load() to fall back on. */
+     listeners hear about it once per failure streak. */
+  M.UI_KEY = "chalk.macros.ui";
   const BAK_KEY = () => M.KEY + ".bak";
+  const BODY_KEY = () => M.KEY + ".body";
+  const MONTH_PRE = () => M.KEY + ".d.";
+  const MONTH_KEY = m => MONTH_PRE() + m;
   const STATE_KEYS = ["profiles", "foods", "meals", "days", "body"];
   function parseJSON(s) { if (s == null) return undefined; try { return JSON.parse(s); } catch (e) { return undefined; } }
   function validState(s) { return isObj(s) && s.v === 1 && (s.ui === undefined || isObj(s.ui)) && STATE_KEYS.every(k => s[k] === undefined || isObj(s[k])); }
-  /* bakMax: like Chalk's own "chalk.bak", no copy above 600,000 characters, so a
-     backup never crowds the training log out of the phone's storage. */
-  M.storage = { ok: true, lastError: null, bytes: 0, bakDay: null, restoredFrom: null, bakMax: 600000 };
+  function validMain(s) {
+    if (!validState(s)) return false;
+    if (s.fmt === undefined) return true;
+    return s.fmt === 2 && s.days === undefined && s.body === undefined && (s.months === undefined || Array.isArray(s.months));
+  }
+  const validChunk = o => isObj(o) && o.v === 1 && isObj(o.d);
+  const validBodyFile = o => isObj(o) && o.v === 1 && isObj(o.b);
+  /* bakMax: a full backup copy is kept up to 600,000 characters (like Chalk's own
+     "chalk.bak"). Past that the copy keeps profiles, foods, meals, weigh-ins and
+     the last two months of days, so it never crowds the training log out. */
+  M.storage = { ok: true, lastError: null, bytes: 0, bakDay: null, restoredFrom: null, bakMax: 600000, damaged: [] };
   const storeFns = [];
   let storeStreak = false;
   M.onStorageError = function (fn) {
@@ -152,44 +198,461 @@ window.M = window.M || {};
     storeStreak = true;
     storeFns.slice().forEach(fn => { try { fn(M.storage); } catch (e) {} });
   }
-  /* First save of each day: copy the stored main copy (the last good save) to .bak. */
-  function dailyBak() {
-    const day = M.today();
-    if (M.storage.bakDay === day) return;
-    const prev = lsGet(M.KEY);
-    if (prev == null) return;
-    if (prev.length > num(M.storage.bakMax, 600000)) { lsDel(BAK_KEY()); M.storage.bakDay = day; return; }
-    if (!validState(parseJSON(prev))) return;
-    lsWrite(BAK_KEY(), '{"bak":1,"day":"' + day + '","at":' + M.now() + ',"data":' + prev + "}");
-    M.storage.bakDay = day;   /* one try a day, even when the phone is full */
+  function storeOk() { M.storage.ok = true; M.storage.lastError = null; storeStreak = false; }
+
+  /* ------------------------------------------------------------ packing */
+  const SLOT_I = { Breakfast: 0, Lunch: 1, Dinner: 2, Snacks: 3 };
+  const ENTRY_STD = { id: 1, slot: 1, name: 1, brand: 1, servings: 1, servingLabel: 1, g: 1, per: 1, at: 1, foodId: 1, mealId: 1, state: 1, cook: 1 };
+  const DAY_STD = { id: 1, pid: 1, date: 1, entries: 1, water: 1, note: 1, updatedAt: 1 };
+  function stdPer(p) {
+    if (!isObj(p)) return false;
+    let n = 0;
+    for (const k in p) { if (!hasOwn(p, k)) continue; n++; if (!isNum(p[k]) || M.NUT.indexOf(k) < 0) return false; }
+    return n === M.NUT.length;
   }
-  function persist() {
-    let str;
-    try { str = JSON.stringify(M.MS); } catch (e) { storeFail(e); return false; }
-    try { dailyBak(); } catch (e) {}
-    let err = lsWrite(M.KEY, str);
-    /* out of room: the main copy matters more than yesterday's backup */
-    if (err && lsGet(BAK_KEY()) != null) { lsDel(BAK_KEY()); err = lsWrite(M.KEY, str); }
-    if (err) { storeFail(err); return false; }
-    M.storage.ok = true; M.storage.lastError = null; M.storage.bytes = str.length;
-    storeStreak = false;
-    return true;
+  function extras(o, std) {
+    let x = null;
+    for (const k in o) { if (!hasOwn(o, k) || std[k] || o[k] === undefined || !okKey(k)) continue; (x || (x = {}))[k] = o[k]; }
+    return x;
+  }
+  /* An entry as the app writes it → a small list:
+       [id, slot 0-3, name, servingLabel, at, servings, per (7 numbers, trailing zeros dropped),
+        g (0 = none), foodId (0 = none), brand, state/cook, mealId (0 = none), other fields]
+     where state/cook is 0, "r" / "c", or ["r"|"c", y] (["r"|"c", y, "dry"] for rice and pasta).
+     Trailing defaults are dropped. Anything unusual is kept whole as {r: entry}. */
+  function packEntry(e) {
+    if (!isObj(e)) return { r: e === undefined ? null : e };
+    if (!(isStr(e.id) && SLOT_I[e.slot] !== undefined && isStr(e.name) && isStr(e.brand) && isNum(e.servings) && isStr(e.servingLabel) &&
+      (e.g === null || (isNum(e.g) && e.g > 0)) && stdPer(e.per) && isNum(e.at))) return { r: e };
+    if ((e.foodId !== undefined && !(isStr(e.foodId) && e.foodId)) || (e.mealId !== undefined && !(isStr(e.mealId) && e.mealId)) ||
+      (e.state !== undefined && e.state !== "raw" && e.state !== "cooked")) return { r: e };
+    let sc = 0;
+    if (e.cook !== undefined) {
+      const c = e.cook;
+      if (e.state === undefined || !isObj(c) || Object.keys(c).length !== 2 || !isNum(c.y) || (c.word !== "raw" && c.word !== "dry")) return { r: e };
+      sc = c.word === "dry" ? [e.state === "cooked" ? "c" : "r", c.y, "dry"] : [e.state === "cooked" ? "c" : "r", c.y];
+    } else if (e.state !== undefined) sc = e.state === "cooked" ? "c" : "r";
+    const per = e.per, p = [per.cal, per.p, per.c, per.f, per.fiber, per.sugar, per.sodium];
+    while (p.length && p[p.length - 1] === 0) p.pop();
+    const x = extras(e, ENTRY_STD);
+    const a = [e.id, SLOT_I[e.slot], e.name, e.servingLabel, e.at, e.servings, p, e.g === null ? 0 : e.g, e.foodId === undefined ? 0 : e.foodId, e.brand, sc, e.mealId === undefined ? 0 : e.mealId];
+    if (x) a.push(x);
+    else while (a.length > 7 && (a[a.length - 1] === 0 || a[a.length - 1] === "")) a.pop();
+    return a;
+  }
+  const pv = (p, j) => (j < p.length && isNum(p[j]) ? p[j] : 0);
+  const SLOT_N = ["Breakfast", "Lunch", "Dinner", "Snacks"];
+  function unpackEntry(a) {
+    if (!Array.isArray(a)) return isObj(a) && hasOwn(a, "r") ? a.r : (a === undefined ? null : a);
+    const p = a[6];
+    const per = Array.isArray(p) && p.length === 7 ? { cal: p[0], p: p[1], c: p[2], f: p[3], fiber: p[4], sugar: p[5], sodium: p[6] }
+      : Array.isArray(p) ? { cal: pv(p, 0), p: pv(p, 1), c: pv(p, 2), f: pv(p, 3), fiber: pv(p, 4), sugar: pv(p, 5), sodium: pv(p, 6) }
+      : { cal: 0, p: 0, c: 0, f: 0, fiber: 0, sugar: 0, sodium: 0 };
+    const e = { id: a[0], slot: SLOT_N[a[1]] || "Snacks", name: a[2], brand: a[9] || "", servings: a[5], servingLabel: a[3], g: a[7] || null, per, at: a[4] };
+    if (a.length > 8) {
+      if (a[8]) e.foodId = a[8];
+      if (a[11]) e.mealId = a[11];
+      const sc = a[10];
+      if (sc) {
+        if (Array.isArray(sc)) { e.state = sc[0] === "c" ? "cooked" : "raw"; e.cook = { y: sc[1], word: sc[2] === "dry" ? "dry" : "raw" }; }
+        else e.state = sc === "c" ? "cooked" : "raw";
+      }
+      const x = a[12];
+      if (isObj(x)) Object.keys(x).forEach(k => { if (okKey(k)) e[k] = x[k]; });
+    }
+    return e;
+  }
+  function splitId(id) { const i = String(id).lastIndexOf("|"); return i < 0 ? null : { pid: id.slice(0, i), date: id.slice(i + 1) }; }
+  function packDay(id, d) {
+    if (!(d.id === id && isStr(d.pid) && isStr(d.date) && d.date.indexOf("|") < 0 && id === d.pid + "|" + d.date &&
+      Array.isArray(d.entries) && isNum(d.water) && isStr(d.note) && isNum(d.updatedAt))) return { r: d };
+    const o = { u: d.updatedAt };
+    if (d.water !== 0) o.w = d.water;
+    if (d.note) o.n = d.note;
+    o.e = d.entries.map(packEntry);
+    const x = extras(d, DAY_STD); if (x) o.x = x;
+    return o;
+  }
+  function unpackDay(id, o) {
+    if (!isObj(o)) return null;
+    if (hasOwn(o, "r")) return isObj(o.r) ? o.r : null;
+    const s = splitId(id); if (!s) return null;
+    const d = { id, pid: s.pid, date: s.date, entries: Array.isArray(o.e) ? o.e.map(unpackEntry) : [], water: o.w !== undefined ? o.w : 0, note: o.n !== undefined ? o.n : "", updatedAt: o.u };
+    if (isObj(o.x)) Object.keys(o.x).forEach(k => { if (okKey(k)) d[k] = o.x[k]; });
+    return d;
+  }
+  function packBody(id, b) {
+    if (b.id === id && isStr(b.pid) && isStr(b.date) && b.date.indexOf("|") < 0 && id === b.pid + "|" + b.date &&
+      (b.w === null || isNum(b.w)) && (b.rhr === null || isNum(b.rhr)) && isNum(b.at) && Object.keys(b).length === 6) return [b.w, b.rhr, b.at];
+    return { r: b };
+  }
+  function unpackBody(id, o) {
+    if (Array.isArray(o)) { const s = splitId(id); return s ? { id, pid: s.pid, date: s.date, w: o[0] === undefined ? null : o[0], rhr: o[1] === undefined ? null : o[1], at: o[2] } : null; }
+    return isObj(o) && isObj(o.r) ? o.r : null;
+  }
+  M.storage._ = { packEntry, unpackEntry, packDay, unpackDay, packBody, unpackBody };
+
+  /* --------------------------------------------------------- disk bookkeeping */
+  /* What the disk holds, so a save can tell what changed since the last good write.
+     A day counts as changed when its object, entries list, entry count, water,
+     note or updatedAt differ from what was written (M.log.* always bumps
+     updatedAt; m-sync swaps in new objects). */
+  const MONTH_RE = /^(\d{4})-(\d{2})-\d{2}$/;
+  function monthOf(id, d) {
+    let date = isObj(d) && isStr(d.date) ? d.date : "";
+    if (!MONTH_RE.test(date)) { const s = splitId(String(id)); date = s ? s.date : ""; }
+    const m = MONTH_RE.exec(date);
+    return m ? m[1] + "-" + m[2] : "x";
+  }
+  const emptyDay = d => !(Array.isArray(d.entries) && d.entries.length) && !num(d.water) && !d.note && !num(d.updatedAt);
+  const daySig = (id, d) => ({ ref: d, u: d.updatedAt, er: d.entries, n: Array.isArray(d.entries) ? d.entries.length : -1, w: d.water, no: d.note, m: monthOf(id, d) });
+  const sameDay = (s, d) => s.ref === d && s.u === d.updatedAt && s.er === d.entries && s.n === (Array.isArray(d.entries) ? d.entries.length : -1) && s.w === d.water && s.no === d.note;
+  const bodySig = b => ({ ref: b, at: b.at, w: b.w, rhr: b.rhr });
+  const sameBody = (s, b) => s.ref === b && s.at === b.at && s.w === b.w && s.rhr === b.rhr;
+  function freshDisk() {
+    return {
+      fmt: 0,                 /* 0 nothing yet · 1 old one-key format · 2 month keys */
+      months: new Set(),      /* month keys present on disk */
+      monthIds: new Map(),    /* month → Set of day ids written there */
+      daySig: new Map(), bodySig: new Map(),
+      dirtyMonths: new Set(), bodyDirty: false, bodyOnDisk: false,
+      bad: new Set(),         /* keys that couldn't be read at load (copied to .damaged) */
+      sizes: new Map(), uiStr: null, noMove: false, strs: new Map()
+    };
+  }
+  let disk = freshDisk();
+  const noteMonth = date => { if (MONTH_RE.test(String(date || ""))) disk.dirtyMonths.add(String(date).slice(0, 7)); };
+  function sumBytes() { let n = 0; disk.sizes.forEach(v => { n += v; }); M.storage.bytes = n; return n; }
+
+  /* Months whose keys exist: the index in the main key, every key the browser
+     lists, and (where the storage can't list keys) a probe of each month from
+     the oldest known one to next month. */
+  function addMonth(m, n) { const y = +m.slice(0, 4), mo = +m.slice(5, 7) - 1 + n; const d = new Date(y, mo, 1, 12); return d.getFullYear() + "-" + pad(d.getMonth() + 1); }
+  function diskMonths(hint) {
+    const out = new Set();
+    (Array.isArray(hint) ? hint : []).forEach(m => { if (/^\d{4}-\d{2}$|^x$/.test(String(m))) out.add(String(m)); });
+    try {
+      if (typeof localStorage !== "undefined" && typeof localStorage.key === "function" && typeof localStorage.length === "number") {
+        const pre = MONTH_PRE();
+        for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf(pre) === 0) out.add(k.slice(pre.length)); }
+        return out;
+      }
+    } catch (e) {}
+    const cur = M.today().slice(0, 7), known = Array.from(out).filter(m => m !== "x").sort();
+    let m = known.length ? known[0] : addMonth(cur, -120);
+    const end = addMonth(cur, 1);
+    for (let guard = 0; m <= end && guard < 600; guard++, m = addMonth(m, 1)) if (!out.has(m) && lsGet(MONTH_KEY(m)) != null) out.add(m);
+    if (lsGet(MONTH_KEY("x")) != null) out.add("x");
+    return out;
+  }
+
+  /* Every ".damaged" copy (Erase removes them too). */
+  function damagedKeys() {
+    const pre = M.KEY + ".damaged", out = [];
+    try {
+      if (typeof localStorage !== "undefined" && typeof localStorage.key === "function" && typeof localStorage.length === "number") {
+        for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf(pre) === 0) out.push(k); }
+        return out;
+      }
+    } catch (e) {}
+    return out.concat([pre, pre + ".2", pre + ".3", pre + ".body", pre + ".body.2"]);
+  }
+  /* A copy of something that can't be read, before anything overwrites it. Never overwrites an older copy. */
+  function keepDamaged(key, raw) {
+    const base = key.replace(M.KEY, M.KEY + ".damaged");
+    for (let n = 1; n <= 5; n++) {
+      const k = n === 1 ? base : base + "." + n;
+      if (lsGet(k) != null) continue;
+      if (!lsWrite(k, raw)) M.storage.damaged.push(k);
+      return;
+    }
+  }
+
+  /* The daily backup as {day, trim, main:{profiles,foods,meals,ui,updatedAt}, days, body}, or null. */
+  function readBak(str) {
+    const b = parseJSON(str === undefined ? lsGet(BAK_KEY()) : str);
+    if (!isObj(b)) return null;
+    if (b.bak === 1 && validState(b.data)) return { day: String(b.day || "backup"), main: b.data, days: cleanMap(b.data.days), body: cleanMap(b.data.body) };
+    if (b.bak === 2 && validMain(b.main)) {
+      const days = {}, body = {};
+      if (isObj(b.d)) Object.keys(b.d).forEach(m => { const c = b.d[m]; if (validChunk(c)) Object.keys(c.d).forEach(id => { if (okKey(id)) { const d = unpackDay(id, c.d[id]); if (d) days[id] = d; } }); });
+      if (validBodyFile(b.body)) Object.keys(b.body.b).forEach(id => { if (okKey(id)) { const r = unpackBody(id, b.body.b[id]); if (r) body[id] = r; } });
+      return { day: String(b.day || "backup"), main: b.main, days, body };
+    }
+    return null;
+  }
+  const bakDayOf = str => { const m = str ? /^\{"bak":[12],"day":"(\d{4}-\d{2}-\d{2})"/.exec(str) : null; return m ? m[1] : null; };
+  /* newer record wins (by tsKey); missing ones are added */
+  function takeNewer(dst, src, tsKey) {
+    Object.keys(src).forEach(id => { const a = dst[id], b = src[id]; if (!isObj(b)) return; if (!isObj(a) || num(b[tsKey]) > num(a[tsKey])) dst[id] = b; });
   }
 
   M.load = function () {
-    const raw = lsGet(M.KEY), bak = lsGet(BAK_KEY());
-    const bm = bak ? /^\{"bak":1,"day":"(\d{4}-\d{2}-\d{2})"/.exec(bak) : null;
-    M.storage.bakDay = bm ? bm[1] : null;
+    disk = freshDisk();
     M.storage.restoredFrom = null;
-    let s = parseJSON(raw);
-    if (!validState(s)) {
-      s = null;
-      const b = parseJSON(bak);
-      if (isObj(b) && validState(b.data)) { s = b.data; M.storage.restoredFrom = String(b.day || "backup"); }
+    M.storage.damaged = [];
+    const bakStr = lsGet(BAK_KEY());
+    M.storage.bakDay = bakDayOf(bakStr);
+    const damaged = [];
+    const rawMain = lsGet(M.KEY);
+    let main = parseJSON(rawMain);
+    if (rawMain != null && !validMain(main)) { damaged.push([M.KEY, rawMain]); main = null; }
+    const fmt2 = !!(main && main.fmt === 2);
+    const s = freshState();
+    if (main) {
+      s.updatedAt = num(main.updatedAt);
+      ["profiles", "foods", "meals"].forEach(k => { s[k] = cleanMap(main[k]); });
+      if (isObj(main.ui)) s.ui = main.ui;
+      if (!fmt2) { s.days = cleanMap(main.days); s.body = cleanMap(main.body); }
+      disk.sizes.set(M.KEY, rawMain.length);
     }
+    /* month keys and the body key */
+    const fromDisk = { days: {}, body: {} }, dayMonth = new Map();
+    diskMonths(fmt2 ? main.months : null).forEach(m => {
+      const k = MONTH_KEY(m), str = lsGet(k);
+      if (str == null) return;
+      disk.months.add(m); disk.sizes.set(k, str.length);
+      const o = parseJSON(str);
+      if (!validChunk(o)) { damaged.push([k, str]); disk.bad.add(k); disk.dirtyMonths.add(m); return; }
+      Object.keys(o.d).forEach(id => { if (!okKey(id)) return; const d = unpackDay(id, o.d[id]); if (d) { fromDisk.days[id] = d; dayMonth.set(id, m); } });
+    });
+    const bstr = lsGet(BODY_KEY());
+    if (bstr != null) {
+      disk.bodyOnDisk = true; disk.sizes.set(BODY_KEY(), bstr.length);
+      const o = parseJSON(bstr);
+      if (!validBodyFile(o)) { damaged.push([BODY_KEY(), bstr]); disk.bad.add(BODY_KEY()); disk.bodyDirty = true; }
+      else Object.keys(o.b).forEach(id => { if (!okKey(id)) return; const r = unpackBody(id, o.b[id]); if (r) fromDisk.body[id] = r; });
+    }
+    const chunksAreTruth = fmt2 || !main;
+    const legacyLost = !main && !disk.months.size;   /* the damaged key held everything (old format) */
+    if (chunksAreTruth) { s.days = fromDisk.days; s.body = fromDisk.body; }
+    else { takeNewer(s.days, fromDisk.days, "updatedAt"); takeNewer(s.body, fromDisk.body, "at"); }   /* old key: keep anything newer a month key holds */
+    /* anything unreadable: keep a copy, then fill the gaps from the daily backup */
+    if (damaged.length) {
+      damaged.forEach(x => keepDamaged(x[0], x[1]));
+      const b = readBak(bakStr);
+      if (b) {
+        let used = false;
+        if (!main) {
+          s.updatedAt = num(b.main.updatedAt);
+          ["profiles", "foods", "meals"].forEach(k => { s[k] = cleanMap(b.main[k]); });
+          if (isObj(b.main.ui)) s.ui = b.main.ui;
+          used = true;
+        }
+        const badMonths = new Set(Array.from(disk.bad).filter(k => k.indexOf(MONTH_PRE()) === 0).map(k => k.slice(MONTH_PRE().length)));
+        Object.keys(b.days).forEach(id => {
+          const d = b.days[id];
+          if (s.days[id] ? (badMonths.has(monthOf(id, d)) && num(d.updatedAt) > num(s.days[id].updatedAt)) : (badMonths.has(monthOf(id, d)) || legacyLost)) { s.days[id] = d; used = true; }
+        });
+        if (disk.bad.has(BODY_KEY()) || legacyLost) Object.keys(b.body).forEach(id => { if (!s.body[id]) { s.body[id] = b.body[id]; used = true; } });
+        if (used) M.storage.restoredFrom = b.day;
+      }
+    }
+    disk.fmt = fmt2 ? 2 : main ? 1 : (disk.months.size || disk.bodyOnDisk ? 2 : 0);
     M.MS = shape(s);
+    /* taps on Train | Macros live in their own small key */
+    const uiStr = lsGet(M.UI_KEY), ui = parseJSON(uiStr);
+    if (isObj(ui)) { applyUi(M.MS.ui, ui); disk.uiStr = uiStr; disk.sizes.set(M.UI_KEY, uiStr.length); }
+    /* what's on disk right now, so the next save writes only what changes */
+    if (disk.fmt === 2) {
+      const days = M.MS.days;
+      dayMonth.forEach((m, id) => {
+        const d = days[id];
+        if (d !== fromDisk.days[id]) { disk.dirtyMonths.add(m); return; }
+        disk.daySig.set(id, daySig(id, d));
+        if (!disk.monthIds.has(m)) disk.monthIds.set(m, new Set());
+        disk.monthIds.get(m).add(id);
+      });
+      if (!disk.bad.has(BODY_KEY())) Object.keys(M.MS.body).forEach(id => { const b = M.MS.body[id]; if (b === fromDisk.body[id]) disk.bodySig.set(id, bodySig(b)); else disk.bodyDirty = true; });
+    }
+    sumBytes();
     return M.MS;
   };
+
+  /* ---------------------------------------------------------------- saving */
+  /* Profiles still exactly as M.person() made them (never set up, never edited) aren't written. */
+  function canon(v) { return JSON.stringify(v, (k, x) => (isObj(x) ? Object.keys(x).sort().reduce((o, key) => { o[key] = x[key]; return o; }, {}) : x)); }
+  const pristine = (id, p) => isObj(p) && !p.setupAt && canon(p) === canon(defaultProfile(id));
+  function keptProfiles(ps) {
+    const out = {};
+    Object.keys(isObj(ps) ? ps : {}).forEach(id => { const p = ps[id]; if (okKey(id) && isObj(p) && !pristine(id, p)) out[id] = p; });
+    return out;
+  }
+  function uiJSON() { const u = M.MS.ui || {}; return JSON.stringify({ mode: u.mode === "macros" ? "macros" : "train", person: isPid(u.person) ? u.person : null, tab: isStr(u.tab) && u.tab ? u.tab : "diary", date: u.date || null }); }
+  /* Writes only the small ui key (mode, person, tab, date). Never a full save. */
+  M.saveUi = function () {
+    const s = uiJSON();
+    if (s === disk.uiStr) return true;
+    const err = lsWrite(M.UI_KEY, s);
+    if (err) return false;
+    disk.uiStr = s; disk.sizes.set(M.UI_KEY, s.length);
+    return true;
+  };
+
+  /* Recent months for a trimmed backup: everything from 2 months before this one. */
+  const trimFrom = () => addMonth(M.today().slice(0, 7), -2);
+  /* The last good save on disk as one backup string, or null when something on disk is damaged or missing. */
+  function bakFromDisk(day) {
+    const mainStr = lsGet(M.KEY), main = parseJSON(mainStr);
+    if (!validMain(main)) return null;
+    const head = '{"bak":' + (main.fmt === 2 ? 2 : 1) + ',"day":"' + day + '","at":' + M.now();
+    const max = num(M.storage.bakMax, 600000);
+    if (main.fmt !== 2) {
+      if (mainStr.length <= max) return head + ',"data":' + mainStr + "}";
+      const t = Object.assign({}, main, { days: {} }), from = trimFrom();
+      Object.keys(cleanMap(main.days)).forEach(id => { if (monthOf(id, main.days[id]) >= from) t.days[id] = main.days[id]; });
+      return head + ',"trim":1,"data":' + JSON.stringify(t) + "}";
+    }
+    if (disk.bad.size) return null;
+    const bodyStr = lsGet(BODY_KEY());
+    let total = mainStr.length + (bodyStr ? bodyStr.length : 0);
+    const parts = [];
+    Array.from(disk.months).sort().forEach(m => { const str = lsGet(MONTH_KEY(m)); if (str != null) { parts.push([m, str]); total += str.length; } });
+    let trim = false;
+    if (total > max) { const from = trimFrom(); trim = true; for (let i = parts.length - 1; i >= 0; i--) if (parts[i][0] < from || parts[i][0] === "x") parts.splice(i, 1); }
+    return head + (trim ? ',"trim":1' : "") + ',"main":' + mainStr + ',"body":' + (bodyStr || "null") + ',"d":{' + parts.map(x => '"' + x[0] + '":' + x[1]).join(",") + "}}";
+  }
+  /* First save of each day: copy the last good save to .bak. A good older copy is
+     never deleted: when the data is big the copy is trimmed, and when something
+     on disk is damaged today's copy is skipped. */
+  function dailyBak() {
+    const day = M.today();
+    if (M.storage.bakDay === day) return;
+    const b = bakFromDisk(day);
+    if (b == null) return;
+    M.storage.bakDay = day;   /* one try a day, even when the phone is full */
+    lsWrite(BAK_KEY(), b);
+  }
+  /* Phone full: swap a full backup for a trimmed one to make room. Never deletes it. */
+  function shrinkBak() {
+    const str = lsGet(BAK_KEY());
+    if (str == null || /^\{"bak":[12],"day":"[^"]*","at":\d+,"trim":1/.test(str)) return false;
+    const b = parseJSON(str); if (!isObj(b)) return false;
+    const from = trimFrom();
+    let out = null;
+    if (b.bak === 2 && isObj(b.d)) {
+      const d = {}; Object.keys(b.d).forEach(m => { if (m >= from && m !== "x") d[m] = b.d[m]; });
+      out = JSON.stringify({ bak: 2, day: b.day, at: b.at, trim: 1, main: b.main, body: b.body, d });
+    } else if (b.bak === 1 && validState(b.data)) {
+      const t = Object.assign({}, b.data, { days: {} });
+      Object.keys(cleanMap(b.data.days)).forEach(id => { if (monthOf(id, b.data.days[id]) >= from) t.days[id] = b.data.days[id]; });
+      out = JSON.stringify({ bak: 1, day: b.day, at: b.at, trim: 1, data: t });
+    }
+    if (!out || out.length >= str.length) return false;
+    return !lsWrite(BAK_KEY(), out);
+  }
+  function put(k, s) {
+    let e = lsWrite(k, s);
+    if (e && isQuota(e) && shrinkBak()) e = lsWrite(k, s);
+    if (!e) disk.sizes.set(k, s.length);
+    return e;
+  }
+  /* The old one-key format: everything in M.KEY (used only while the move to month keys doesn't fit). */
+  function persistOld() {
+    let str;
+    try { str = JSON.stringify(Object.assign({}, M.MS, { profiles: keptProfiles(M.MS.profiles) })); } catch (e) { storeFail(e); return false; }
+    const err = put(M.KEY, str);
+    if (err) { storeFail(err); return false; }
+    disk.fmt = 1;
+    storeOk(); sumBytes();
+    return true;
+  }
+  function persist() {
+    const MS = M.MS;
+    try { dailyBak(); } catch (e) {}
+    try { M.saveUi(); } catch (e) {}
+    if (disk.fmt === 1 && disk.noMove) return persistOld();
+    const moving = disk.fmt !== 2;
+    const days = isObj(MS.days) ? MS.days : {}, body = isObj(MS.body) ? MS.body : {};
+    let monthStr, bodyStr, groups;
+    try {
+      /* 1. which months changed since the last good write */
+      const dirty = new Set(disk.dirtyMonths), seen = new Set();
+      Object.keys(days).forEach(id => {
+        const d = days[id];
+        if (!isObj(d) || !okKey(id)) return;
+        seen.add(id);
+        const sg = disk.daySig.get(id);
+        if (sg && sameDay(sg, d)) return;
+        if (sg) dirty.add(sg.m);
+        if (sg || !emptyDay(d)) dirty.add(monthOf(id, d));
+      });
+      disk.daySig.forEach((sg, id) => { if (!seen.has(id)) dirty.add(sg.m); });
+      /* 2. those months, packed */
+      monthStr = new Map(); groups = new Map();
+      if (dirty.size) {
+        dirty.forEach(m => groups.set(m, []));
+        Object.keys(days).forEach(id => { const d = days[id]; if (!isObj(d) || !okKey(id) || emptyDay(d)) return; const g = groups.get(monthOf(id, d)); if (g) g.push(id); });
+        groups.forEach((ids, m) => {
+          if (!ids.length) { monthStr.set(m, null); return; }
+          const o = {}; ids.forEach(id => { o[id] = packDay(id, days[id]); });
+          monthStr.set(m, '{"v":1,"d":' + JSON.stringify(o) + "}");
+        });
+      }
+      /* 3. body, when any record changed */
+      let bodyChanged = disk.bodyDirty || moving;
+      const bseen = new Set();
+      Object.keys(body).forEach(id => { const b = body[id]; if (!isObj(b) || !okKey(id)) return; bseen.add(id); const sg = disk.bodySig.get(id); if (!sg || !sameBody(sg, b)) bodyChanged = true; });
+      if (!bodyChanged) disk.bodySig.forEach((sg, id) => { if (!bseen.has(id)) bodyChanged = true; });
+      if (bodyChanged) {
+        const o = {}; let n = 0;
+        bseen.forEach(id => { o[id] = packBody(id, body[id]); n++; });
+        bodyStr = n ? '{"v":1,"b":' + JSON.stringify(o) + "}" : null;
+      }
+    } catch (e) { storeFail(e); return false; }
+    /* 4. write the months, then the body, then the main key (which lists the months) */
+    let err = null;
+    const wroteNow = [];
+    monthStr.forEach((str, m) => {
+      const k = MONTH_KEY(m);
+      if (str == null) {
+        lsDel(k); disk.months.delete(m); disk.sizes.delete(k); disk.bad.delete(k); disk.dirtyMonths.delete(m);
+        const old = disk.monthIds.get(m); if (old) old.forEach(id => { const sg = disk.daySig.get(id); if (sg && sg.m === m) disk.daySig.delete(id); });
+        disk.monthIds.delete(m);
+        return;
+      }
+      const e = put(k, str);
+      if (e) { err = err || e; return; }
+      wroteNow.push(k);
+      disk.months.add(m); disk.bad.delete(k); disk.dirtyMonths.delete(m);
+      const ids = groups.get(m), idSet = new Set(ids), old = disk.monthIds.get(m);
+      if (old) old.forEach(id => { if (!idSet.has(id)) { const sg = disk.daySig.get(id); if (sg && sg.m === m) disk.daySig.delete(id); } });
+      ids.forEach(id => disk.daySig.set(id, daySig(id, days[id])));
+      disk.monthIds.set(m, idSet);
+    });
+    if (bodyStr !== undefined) {
+      if (bodyStr === null) { lsDel(BODY_KEY()); disk.sizes.delete(BODY_KEY()); disk.bad.delete(BODY_KEY()); disk.bodySig.clear(); disk.bodyDirty = false; disk.bodyOnDisk = false; }
+      else {
+        const e = put(BODY_KEY(), bodyStr);
+        if (e) err = err || e;
+        else {
+          wroteNow.push(BODY_KEY());
+          disk.bodySig.clear(); Object.keys(body).forEach(id => { if (isObj(body[id]) && okKey(id)) disk.bodySig.set(id, bodySig(body[id])); });
+          disk.bodyDirty = false; disk.bodyOnDisk = true; disk.bad.delete(BODY_KEY());
+        }
+      }
+    }
+    if (moving && err && disk.fmt === 1) {
+      /* The move to month keys didn't fit next to the old key: take back what this
+         save wrote and keep the old format until the next start. */
+      wroteNow.forEach(k => { lsDel(k); disk.sizes.delete(k); });
+      disk.months.clear(); disk.monthIds.clear(); disk.daySig.clear(); disk.bodySig.clear(); disk.bodyOnDisk = false;
+      disk.noMove = true;
+      return persistOld();
+    }
+    let mainStr;
+    try { mainStr = JSON.stringify({ v: 1, fmt: 2, updatedAt: num(MS.updatedAt), profiles: keptProfiles(MS.profiles), foods: isObj(MS.foods) ? MS.foods : {}, meals: isObj(MS.meals) ? MS.meals : {}, months: Array.from(disk.months).sort() }); }
+    catch (e) { storeFail(e); return false; }
+    const e = put(M.KEY, mainStr);
+    if (e) err = err || e;
+    else { disk.fmt = 2; disk.bad.delete(M.KEY); }
+    if (err) { storeFail(err); sumBytes(); return false; }
+    storeOk(); sumBytes();
+    return true;
+  }
+  /* For code that edits a logged day in place (without M.log.*): marks that day's month to be written on the next save. */
+  M.markDay = function (dateKey) { noteMonth(dateKey); };
+
   M.save = function () {
     const s = M.MS;
     s.updatedAt = M.now();
@@ -203,16 +666,18 @@ window.M = window.M || {};
       Object.keys(M.MS.days).forEach(id => M.sync.deleted.days.add(id));
       Object.keys(M.MS.body).forEach(id => M.sync.deleted.body.add(id));
     } catch (e) {}
+    diskMonths(Array.from(disk.months)).forEach(m => { lsDel(MONTH_KEY(m)); lsDel(M.KEY + ".damaged.d." + m); lsDel(M.KEY + ".damaged.d." + m + ".2"); });
+    [M.KEY, BODY_KEY(), BAK_KEY()].concat(damagedKeys()).forEach(lsDel);
     M.MS = freshState();
-    lsDel(M.KEY); lsDel(BAK_KEY());
-    M.storage.bakDay = null; M.storage.restoredFrom = null;
+    disk = freshDisk();
+    M.storage.bakDay = null; M.storage.restoredFrom = null; M.storage.damaged = [];
     M.save();
     return M.MS;
   };
 
   /* ------------------------------------------------------------------- mode */
   M.mode = () => (M.MS.ui.mode === "macros" ? "macros" : "train");
-  M.setMode = m => { M.MS.ui.mode = m === "macros" ? "macros" : "train"; M.save(); return M.MS.ui.mode; };
+  M.setMode = m => { M.MS.ui.mode = m === "macros" ? "macros" : "train"; M.saveUi(); return M.MS.ui.mode; };
 
   /* ----------------------------------------------------------------- person */
   function presetName(id) {
@@ -232,9 +697,12 @@ window.M = window.M || {};
     try { if (typeof S !== "undefined" && S && S.profile) p = S.profile; } catch (e) {}
     return p || M.MS.ui.person || null;
   };
+  /* The person's profile, filled with defaults. Only "nick" and "kat" are kept in
+     M.MS.profiles; a profile nobody has set up or changed is not written to disk. */
   M.person = function (id) {
     if (id === undefined) id = M.pid();
     if (!id) return defaultProfile(null);
+    if (!isPid(id)) return defaultProfile(okKey(String(id)) ? String(id) : null);
     const ps = M.MS.profiles;
     const d = defaultProfile(id);
     if (!isObj(ps[id])) { ps[id] = d; return d; }
@@ -247,7 +715,7 @@ window.M = window.M || {};
     p.snooze = Object.assign(d.snooze, isObj(p.snooze) ? p.snooze : {});
     return p;
   };
-  M.setPerson = id => { M.MS.ui.person = id || null; M.save(); return M.MS.ui.person; };
+  M.setPerson = id => { M.MS.ui.person = isPid(id) ? id : null; M.saveUi(); return M.MS.ui.person; };
 
   /* ------------------------------------------------------------------ units */
   const LB = 0.45359237, IN = 2.54, OZ = 29.5735295625;
@@ -662,11 +1130,11 @@ window.M = window.M || {};
       const c = normCode(code); if (!c) return null;
       return Object.values(M.MS.foods).find(f => normCode(f.barcode) === c) || null;
     },
-    touch(id) {
-      const f = M.MS.foods[id]; if (!f) return null;
-      f.uses = num(f.uses) + 1; f.lastUsed = M.now(); M.save(); return f;
-    }
+    touch(id) { const f = touchFood(id); if (f) M.save(); return f; }
   };
+  /* uses / lastUsed without a save (the caller saves once) */
+  function touchFood(id) { const f = M.MS.foods[id]; if (!isObj(f)) return null; f.uses = num(f.uses) + 1; f.lastUsed = M.now(); return f; }
+  function touchMeal(id) { const m = M.MS.meals[id]; if (!isObj(m)) return null; m.uses = num(m.uses) + 1; m.lastUsed = M.now(); return m; }
 
   /* ------------------------------------------------------------------ meals */
   /* state/cook on entries and meal items: old merged ids → the new id + their
@@ -744,10 +1212,7 @@ window.M = window.M || {};
       if (slot) arr = arr.filter(m => m.slot === slot || m.slot === "Any");
       return arr.sort(byUse);
     },
-    touch(id) {
-      const m = M.MS.meals[id]; if (!m) return null;
-      m.uses = num(m.uses) + 1; m.lastUsed = M.now(); M.save(); return m;
-    }
+    touch(id) { const m = touchMeal(id); if (m) M.save(); return m; }
   };
 
   /* ------------------------------------------------------------------- days */
@@ -800,9 +1265,9 @@ window.M = window.M || {};
       const d = M.day(dateKey);
       const e = normEntry(entry);
       d.entries.push(e);
-      if (e.foodId) M.foods.touch(e.foodId);
-      if (e.mealId) M.meals.touch(e.mealId);
-      touchDay(d); M.save();
+      if (e.foodId) touchFood(e.foodId);
+      if (e.mealId) touchMeal(e.mealId);
+      touchDay(d); M.save();   /* one save per action */
       return e;
     },
     update(dateKey, entryId, patch) {
@@ -1190,7 +1655,7 @@ window.M = window.M || {};
         });
         Object.keys(M.MS.days).forEach(id => { if (!cloudDays.has(id)) M.sync.dirty.days.add(id); });
         Object.keys(M.MS.body).forEach(id => { if (!cloudBody.has(id)) M.sync.dirty.body.add(id); });
-        lsSet(M.KEY, JSON.stringify(M.MS));
+        persist();
         M.sync.pushNow();
         rerender();
         return true;

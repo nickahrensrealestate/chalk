@@ -1,45 +1,116 @@
-const CACHE = "chalk-v15";
-const CORE = ["./", "index.html", "manifest.json", "icon-180.png", "icon-192.png", "icon-512.png",
-  "m.css", "m-trends.css", "m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js", "m-sync.js"];
+/* Chalk service worker.
+   App shell: cache first, straight from this version's cache, so the app opens at once with no signal.
+   One version per launch: index.html asks for "m-core.js?v=16" etc. and CORE lists exactly those URLs, so a page
+   never mixes files from two versions. A new version arrives as a new sw.js (CACHE bumped): install downloads the
+   whole set (all or nothing), activate swaps it in and tells open pages, and the page reloads at a safe moment.
+   Anything not cached: network with a hard 8 s budget for the whole body, else 504. Never a cut-off file.
+   Pinned CDN files (scanner, label reader) and fonts are kept after first use, so they work offline. */
+const VERSION = 16;
+const CACHE = "chalk-v" + VERSION;
+const CDN = "chalk-cdn";      /* pinned jsdelivr files never change, so they outlive app versions */
+const FONTS = "chalk-fonts";
+const V = "?v=" + VERSION;
+const CORE = ["index.html", "manifest.json", "icon-180.png", "icon-192.png", "icon-512.png",
+  "m.css" + V, "m-trends.css" + V, "m-core.js" + V, "m-data.js" + V, "m-food.js" + V, "m-ui.js" + V, "m-trends.js" + V, "m-sync.js" + V];
+const NET_MS = 8000;
+const SCOPE = new URL("./", self.location.href);
+
+/* fetch + read the whole body inside the budget; null on timeout, network error or a body cut off halfway */
+function netWhole(req, ms) {
+  const ctl = typeof AbortController === "function" ? new AbortController() : null;
+  let timer = null;
+  const timeout = new Promise(r => { timer = setTimeout(() => { try { if (ctl) ctl.abort(); } catch (e) {} r(null); }, ms); });
+  const run = (async () => {
+    const r = req.mode === "navigate"
+      ? new Request(req.url, { credentials: "same-origin", signal: ctl ? ctl.signal : undefined })
+      : (ctl ? new Request(req, { signal: ctl.signal }) : req);
+    const res = await fetch(r);
+    const body = await res.arrayBuffer();
+    return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+  })().catch(() => null);
+  return Promise.race([run, timeout]).then(v => { clearTimeout(timer); return v; });
+}
+const put = (cache, key, res) => cache.put(key, res).catch(() => {});
+const okToKeep = res => !!res && res.ok && res.type !== "opaque" && res.type !== "opaqueredirect";
 
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE.map(u => new Request(u, { cache: "reload" })))).then(() => self.skipWaiting()));
+  e.waitUntil((async () => {
+    const got = await Promise.all(CORE.map(async u => {
+      const res = await netWhole(new Request(u, { cache: "reload" }), 60000);
+      if (!res || !res.ok) throw new Error("couldn't download " + u);
+      return [u, res];
+    }));
+    const cache = await caches.open(CACHE);
+    await Promise.all(got.map(([u, res]) => cache.put(u, res)));
+    await self.skipWaiting();
+  })());
 });
+
 self.addEventListener("activate", e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil((async () => {
+    /* the origin hosts other apps: only ever touch Chalk's own caches */
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(k => k.startsWith("chalk-") && k !== CACHE && k !== CDN && k !== FONTS).map(k => caches.delete(k)));
+    await self.clients.claim();
+    const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    list.forEach(c => { try { c.postMessage({ type: "chalk-updated", cache: CACHE }); } catch (x) {} });
+  })());
 });
-const NET_MS = 3000;
-async function shell(req) {
-  const cache = await caches.open(CACHE);
-  let netErr = null;
-  // only an OK response may become the cached shell — never a 404/500 or a captive-portal page
-  const net = fetch(req).then(res => { if (res.ok) cache.put(req, res.clone()).catch(() => {}); return res; }).catch(err => { netErr = err; return null; });
-  const first = await Promise.race([net, new Promise(r => setTimeout(() => r(null), NET_MS))]);
-  if (first && first.ok) return first;
-  const hit = await cache.match(req);
-  if (hit && hit.ok) return hit;
-  if (req.mode === "navigate") { const index = await cache.match("index.html"); if (index && index.ok) return index; }
-  const late = await net;               // nothing usable cached: hand back whatever the network says, however slow
-  if (late) return late;
-  throw netErr || new Error("offline");
+
+self.addEventListener("message", e => {
+  if (e.data && e.data.type === "chalk-version?" && e.source) { try { e.source.postMessage({ type: "chalk-version", cache: CACHE }); } catch (x) {} }
+});
+
+let lastCheck = 0;
+function checkForUpdate() {
+  if (Date.now() - lastCheck < 60000 || !self.registration || !self.registration.update) return Promise.resolve();
+  lastCheck = Date.now();
+  return self.registration.update().catch(() => {});
 }
+
+const OFFLINE = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Chalk</title>' +
+  '<body style="margin:0;padding:64px 24px;font:17px/1.4 -apple-system,Helvetica,Arial,sans-serif;text-align:center;background:#111417;color:#F2EFE8">' +
+  '<h1 style="font-size:26px;margin:0 0 10px">Chalk didn\'t load</h1><p style="color:#8E949C;margin:0 0 24px">The signal is too weak right now.</p>' +
+  '<button onclick="location.reload()" style="font:inherit;font-weight:600;padding:12px 28px;border:0;border-radius:12px;background:#F2B33D;color:#1A1400">Try again</button></body></html>';
+
+async function shell(req, url, e) {
+  const isPage = req.mode === "navigate" || url.pathname === SCOPE.pathname || url.pathname === SCOPE.pathname + "index.html";
+  const cache = await caches.open(CACHE);
+  if (isPage) {
+    const hit = await cache.match("index.html");
+    if (hit) { if (req.mode === "navigate") e.waitUntil(checkForUpdate()); return hit; }
+  } else {
+    /* versioned URLs make every cache safe to read: "m-ui.js?v=16" is only ever version 16 */
+    const hit = (await cache.match(req, { ignoreVary: true })) || (await caches.match(req, { ignoreVary: true }));
+    if (hit) return hit;
+  }
+  /* nothing cached yet (first launch, or a file this version doesn't have): network, whole body, hard budget.
+     Not stored: only install fills the shell, so an old cache never holds a newer page. */
+  const res = await netWhole(req, NET_MS);
+  if (res) return res;
+  if (req.mode === "navigate") return new Response(OFFLINE, { status: 504, statusText: "Gateway Timeout", headers: { "content-type": "text/html; charset=utf-8" } });
+  return new Response("", { status: 504, statusText: "Gateway Timeout" });
+}
+
+async function keepFirst(name, req, e, refresh) {
+  const cache = await caches.open(name);
+  const hit = await cache.match(req.url, { ignoreVary: true });
+  const net = () => fetch(req.url, { mode: "cors", credentials: "omit" }).then(res => { if (okToKeep(res)) return put(cache, req.url, res.clone()).then(() => res); return res; });
+  if (hit) { if (refresh) e.waitUntil(net().catch(() => {})); return hit; }
+  return net();
+}
+
 self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  // App shell: network first with a 3 s budget so updates land; a slow or dead network falls back to the cached copy.
-  if (url.origin === location.origin) {
-    e.respondWith(shell(req));
+  if (url.origin === self.location.origin) {
+    if (!url.href.startsWith(SCOPE.href)) return;          /* another app on this origin */
+    e.respondWith(shell(req, url, e));
     return;
   }
-  // Fonts: cache first, refresh in the background.
-  if (url.hostname.endsWith("googleapis.com") || url.hostname.endsWith("gstatic.com")) {
-    e.respondWith(
-      caches.open(CACHE).then(async c => {
-        const hit = await c.match(req);
-        const net = fetch(req).then(res => { c.put(req, res.clone()); return res; }).catch(() => hit);
-        return hit || net;
-      })
-    );
-  }
+  /* scanner + label reader: pinned versions on jsdelivr never change → keep the first good copy */
+  if (url.hostname === "cdn.jsdelivr.net" && /@\d/.test(url.pathname)) { e.respondWith(keepFirst(CDN, req, e, false)); return; }
+  /* fonts: kept, the stylesheet refreshed in the background */
+  if (url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com") { e.respondWith(keepFirst(FONTS, req, e, url.hostname === "fonts.googleapis.com")); return; }
 });
