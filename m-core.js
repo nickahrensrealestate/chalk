@@ -22,6 +22,12 @@ window.M = window.M || {};
    · M.storage (never saved) = { ok, lastError, bytes, bakDay, restoredFrom };
      M.onStorageError(fn). localStorage also keeps a daily copy under
      M.KEY + ".bak"; M.load() falls back to it when the main copy is damaged.
+     Both are written with characters past U+00FF as \uXXXX (M.lsJSON), which
+     JSON.parse (and every older build) reads back unchanged.
+   · M.MS.codes = { "<barcode>": foodId } — only there once a barcode was linked to
+     a built-in food (M.foods.linkCode); older builds ignore it.
+   · New calls: M.log.shown (K1), M.clean (K4), M.foods.byCode / linkCode (K3),
+     M.searchQuery, M.checkins.daysSince / weeksSince.
    ========================================================================== */
 (function (M) {
   "use strict";
@@ -186,6 +192,10 @@ window.M = window.M || {};
   const BAD_KEYS = new Set(["__proto__", "constructor", "prototype"]);
   const okKey = k => typeof k === "string" && k !== "" && !BAD_KEYS.has(k);
   const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  /* A stored record by id: own keys only ("__proto__" or "constructor" never finds anything). */
+  const ownRec = (map, id) => { if (typeof id === "number" && isFinite(id)) id = String(id); return isObj(map) && okKey(id) && hasOwn(map, id) && isObj(map[id]) ? map[id] : null; };
+  /* a foodId / mealId that can't be a safe key ("__proto__", an object) is dropped; old number ids stay */
+  const badRef = v => !v || (typeof v !== "string" && typeof v !== "number") || BAD_KEYS.has(String(v));
   const isStr = v => typeof v === "string";
   /* The only two people. Any other id gets a default profile that is never stored. */
   const isPid = id => id === "nick" || id === "kat";
@@ -212,7 +222,14 @@ window.M = window.M || {};
     o.updatedAt = num(s.updatedAt);
     applyUi(o.ui, s.ui);
     STATE_KEYS.forEach(k => { if (isObj(s[k])) o[k] = cleanMap(s[k]); });
+    /* K3: barcodes linked to built-in foods (only there once a code was linked) */
+    if (isObj(s.codes)) { const c = cleanCodes(s.codes); if (Object.keys(c).length) o.codes = c; }
     return o;
+  }
+  function cleanCodes(m) {
+    const out = {};
+    Object.keys(isObj(m) ? m : {}).forEach(k => { if (/^\d{6,14}$/.test(k) && okKey(m[k]) && String(m[k]).length <= 120) out[k] = m[k]; });
+    return out;
   }
   function lsGet(k) { try { if (typeof localStorage === "undefined") return null; return localStorage.getItem(k); } catch (e) { return null; } }
   /* null on success, else the error (quota full, storage blocked…). */
@@ -291,9 +308,18 @@ window.M = window.M || {};
     return false;
   }
 
-  /* A copy with profiles, foods, meals, weigh-ins and only the last 60 days. */
-  function trimState(s) {
-    const t = Object.assign({}, s, { days: {} }), from = M.addDays(M.today(), -60), days = cleanMap(s.days);
+  /* JSON for localStorage with every character past U+00FF written as \uXXXX (’ — ⅔ ½).
+     Safari keeps a string that has only Latin-1 characters at 1 byte a character and any
+     other string at 2, so one "’" doubled the room the diary took. JSON.parse reads the
+     escapes back to the same characters, so every build reads it the same way. */
+  const WIDE = /[\u0100-\uffff]/g;
+  const hex4 = c => "\\u" + ("000" + c.charCodeAt(0).toString(16)).slice(-4);
+  const narrow = s => (typeof s === "string" ? s.replace(WIDE, hex4) : s);
+  /* The same, for other files that write JSON to localStorage (m-sync). */
+  M.lsJSON = v => narrow(JSON.stringify(v));
+  /* A copy with profiles, foods, meals, weigh-ins and only the last 60 (or `keep`) days. */
+  function trimState(s, keep) {
+    const t = Object.assign({}, s, { days: {} }), from = M.addDays(M.today(), -(num(keep) > 0 ? num(keep) : 60)), days = cleanMap(s.days);
     Object.keys(days).forEach(id => {
       const d = days[id], date = isStr(d.date) ? d.date : id.slice(id.lastIndexOf("|") + 1);
       if (date >= from) t.days[id] = d;
@@ -313,18 +339,18 @@ window.M = window.M || {};
     const s = parseJSON(prev);
     if (!validState(s)) return;
     M.storage.bakDay = day;   /* one try a day, even when the phone is full */
-    const at = M.now(), trimmed = () => bakHead(day, at, true) + ',"data":' + JSON.stringify(trimState(s)) + "}";
+    const at = M.now(), trimmed = () => bakHead(day, at, true) + ',"data":' + narrow(JSON.stringify(trimState(s))) + "}";
     if (prev.length > num(M.storage.bakMax, 600000)) { lsWrite(BAK_KEY(), trimmed()); return; }
-    const err = lsWrite(BAK_KEY(), bakHead(day, at) + ',"data":' + prev + "}");
+    const err = lsWrite(BAK_KEY(), bakHead(day, at) + ',"data":' + narrow(prev) + "}");
     if (err && isQuota(err)) lsWrite(BAK_KEY(), trimmed());   /* a failed write leaves the older copy as it was */
   }
-  /* Phone full: swap a full backup for a trimmed one to make room. Never deletes it. */
-  function shrinkBak() {
+  /* Phone full: swap a full backup for a trimmed one (60 days, then `keep` days) to make room. */
+  function shrinkBak(keep) {
     const str = lsGet(BAK_KEY());
-    if (str == null || TRIMMED.test(str)) return false;
+    if (str == null || (!keep && TRIMMED.test(str))) return false;
     const b = parseJSON(str);
     if (!isObj(b) || b.bak !== 1 || !validState(b.data)) return false;
-    const out = bakHead(/^\d{4}-\d{2}-\d{2}$/.test(String(b.day)) ? b.day : M.today(), b.at, true) + ',"data":' + JSON.stringify(trimState(b.data)) + "}";
+    const out = bakHead(/^\d{4}-\d{2}-\d{2}$/.test(String(b.day)) ? b.day : M.today(), b.at, true) + ',"data":' + narrow(JSON.stringify(trimState(b.data, keep))) + "}";
     if (out.length >= str.length) return false;
     return !lsWrite(BAK_KEY(), out);
   }
@@ -379,15 +405,24 @@ window.M = window.M || {};
   };
   function persist() {
     let str;
-    try { str = JSON.stringify(Object.assign({}, M.MS, { profiles: keptProfiles(M.MS.profiles) })); } catch (e) { storeFail(e); return false; }
+    try { str = narrow(JSON.stringify(Object.assign({}, M.MS, { profiles: keptProfiles(M.MS.profiles) }))); } catch (e) { storeFail(e); return false; }
     /* the damaged copy must be kept before the main key is written over */
     if (damagedPending != null && !keepDamaged(damagedPending) && damagedPending != null && shrinkBak()) keepDamaged(damagedPending);
     if (damagedPending != null) { storeFail(new Error("No room to keep a copy of the damaged data")); return false; }
     try { dailyBak(); } catch (e) {}
     try { M.saveUi(); } catch (e) {}
     let err = lsWrite(M.KEY, str);
-    /* out of room: trim the backup (never delete it) and try once more */
-    if (err && isQuota(err) && shrinkBak()) err = lsWrite(M.KEY, str);
+    /* out of room: today's save comes first. Trim the backup to 60 days, then to 7,
+       and if that is still not enough, drop it and write the main copy. */
+    const bakTry = shrink => {
+      const before = lsGet(BAK_KEY());
+      if (before == null || !shrink()) return;
+      err = lsWrite(M.KEY, str);
+      if (err) lsWrite(BAK_KEY(), before);   /* it didn't help: the backup goes back as it was */
+    };
+    if (err && isQuota(err)) bakTry(() => shrinkBak());
+    if (err && isQuota(err)) bakTry(() => shrinkBak(7));
+    if (err && isQuota(err)) bakTry(() => { lsDel(BAK_KEY()); return true; });
     if (err) { storeFail(err); return false; }
     storeOk();
     M.storage.bytes = str.length;
@@ -648,7 +683,7 @@ window.M = window.M || {};
   const perAt = (p100, g) => { const o = {}; M.NUT.forEach(k => { o[k] = r4(num(p100 && p100[k]) * g / 100); }); return o; };
   function fracTxt(q) {
     const w = Math.floor(q + 1e-9), rem = q - w;
-    const F = [[0, ""], [0.25, "1/4"], [1 / 3, "1/3"], [0.5, "1/2"], [2 / 3, "2/3"], [0.75, "3/4"], [1, ""]];
+    const F = [[0, ""], [0.25, "¼"], [1 / 3, "⅓"], [0.5, "½"], [2 / 3, "⅔"], [0.75, "¾"], [1, ""]];
     for (const x of F) {
       if (Math.abs(rem - x[0]) <= 0.02) { const whole = x[0] === 1 ? w + 1 : w; return x[1] ? (whole ? whole + " " : "") + x[1] : String(whole); }
     }
@@ -673,6 +708,10 @@ window.M = window.M || {};
     return num(e.g) > 0 ? num(e.g) : 0;
   }
 
+  function alwaysRawOf(e) {
+    if (!isObj(e) || !isStr(e.foodId) || e.mealId) return false;
+    try { const f = M.foods.get(e.foodId); return !!(f && f.alwaysRaw === true); } catch (x) { return false; }
+  }
   /* Cooked grams of the whole batch for a portion of a batch meal, else 0. */
   function batchOf(e) {
     if (!isObj(e) || !e.mealId || e.state !== "cooked") return 0;
@@ -736,10 +775,10 @@ window.M = window.M || {};
       const states = only ? ["cooked"] : ["raw", "cooked"];
       const word = c ? c.word : "raw";
       const out = [];
-      const add = (unit, st, g, vol) => {
+      const add = (unit, st, g, vol, label, step, per) => {
         const key = unit + "-" + st;
         if (!(g > 0) || out.some(o => o.key === key)) return;
-        out.push({ key, unit, state: st, label: unit + " " + (st === "cooked" ? "cooked" : word), g: r4(g), per: perAt(st === "cooked" ? ck100 : raw100, g), step: vol ? 0.25 : (STEP[unit] || 0.25), vol: !!vol });
+        out.push({ key, unit, state: st, label: label || unit + " " + (st === "cooked" ? "cooked" : word), g: r4(g), per: per || perAt(st === "cooked" ? ck100 : raw100, g), step: step || (vol ? 0.25 : (STEP[unit] || 0.25)), vol: !!vol });
       };
       const ws = Array.isArray(opt.weights) ? opt.weights : famOf(units) === "g" ? ["g", "oz", "lb"] : ["oz", "g", "lb"];
       ws.forEach(u => { if (WEIGHT_G[u]) states.forEach(st => add(u, st, WEIGHT_G[u])); });
@@ -751,14 +790,24 @@ window.M = window.M || {};
           const p = M.parseServing(a.label), u = unitWord(p.unit);
           if (!u || !VOLUME[u]) return;
           const q = p.qty || 1;
-          if (!byU[u] || Math.abs(q - 1) < Math.abs(byU[u].q - 1)) byU[u] = { q, g: num(a.g) / q };
+          if (byU[u] && byU[u].own) return;
+          if (a.own || !byU[u] || Math.abs(q - 1) < Math.abs(byU[u].q - 1)) byU[u] = { q, g: num(a.g) / q, own: !!a.own };
         });
         Object.keys(byU).forEach(u => add(u, st, byU[u].g, true));
       };
       if (opt.vol !== false && isObj(food)) {
         const sv = normServing(food.serving);
-        vols(normAlts(food.alts).concat(sv.g ? [{ label: sv.qty + " " + sv.unit, g: sv.g }] : []), "raw");
+        vols((sv.g ? [{ label: sv.qty + " " + sv.unit, g: sv.g, own: true }] : []).concat(normAlts(food.alts)), "raw");
         vols(c && c.alts, "cooked");
+        /* the food's own count servings, raw: "breast (175 g raw)" for "1 breast" / "½ breast" */
+        if (states.indexOf("raw") >= 0) {
+          (sv.g ? [{ label: sv.qty + " " + sv.unit, g: sv.g }] : []).concat(normAlts(food.alts)).forEach(a => {
+            const p = M.parseServing(a.label), u = String(p.unit || "").replace(/\([^)]*\)/g, " ").replace(/,.*$/, "").trim();
+            if (!(num(a.g) > 0) || !u || unitWord(u) || /^(servings?|g|grams?|ml)$/i.test(u) || /\d/.test(u)) return;
+            const g1 = num(a.g) / (p.qty || 1);
+            add(u, "raw", g1, false, u + " (" + r0(g1) + " g " + word + ")", 0.5);
+          });
+        }
       }
       return out;
     },
@@ -787,9 +836,13 @@ window.M = window.M || {};
       const b = batchOf(e);
       if (b) {
         const fam = famOf(i.fam || units || personUnits());
-        const whole = fam === "g" && b >= 1000 ? String(r1(b / 1000)) + " kg" : fmtWeight(b, fam);
+        /* whole grams up to 10 kg ("of 1,950 g batch", not "of 2 kg batch") */
+        const whole = fam === "g" ? (b >= 10000 ? String(r1(b / 1000)) + " kg" : r0(b).toLocaleString("en-US") + " g") : fmtWeight(b, fam);
         return fmtWeight(i.grams, fam) + " cooked · of " + whole + " batch";
       }
+      /* K8: a food always weighed raw (the chicken breast) reads in grams, whatever the
+         person's units: "175 g raw (127 g cooked)", also for "1 breast (175 g)" or "6 oz raw" */
+      if (alwaysRawOf(e)) return M.cook.label(i.grams, i.state, i.cook, "g", {});
       return M.cook.label(i.grams, i.state, i.cook, i.fam || units || personUnits(), { vol: i.vol });
     },
     /* A copy of a cook food seen in its cooked state (serving / per / per100g /
@@ -865,7 +918,7 @@ window.M = window.M || {};
     f = isObj(f) ? f : {};
     const now = M.now();
     const o = Object.assign({}, f);
-    o.id = o.id || M.uid();
+    o.id = okKey(o.id) ? o.id : M.uid();
     o.name = String(o.name || "Food").trim().slice(0, 120);
     o.brand = String(o.brand || "").trim().slice(0, 120);
     o.barcode = String(o.barcode || "").trim();
@@ -886,13 +939,13 @@ window.M = window.M || {};
   M.foods = {
     add(food) { const f = normFood(food); M.MS.foods[f.id] = f; M.save(); return f; },
     update(id, patch) {
-      const f = M.MS.foods[id]; if (!f) return null;
+      const f = ownRec(M.MS.foods, id); if (!f) return null;
       const merged = normFood(Object.assign({}, f, isObj(patch) ? patch : {}, { id }));
       merged.createdAt = f.createdAt;
       M.MS.foods[id] = merged; M.save(); return merged;
     },
-    remove(id) { if (!M.MS.foods[id]) return false; delete M.MS.foods[id]; M.save(); return true; },
-    get(id) { return M.MS.foods[id] || genericById(id); },   /* old raw/cooked generic ids resolve to the merged food */
+    remove(id) { if (!ownRec(M.MS.foods, id)) return false; delete M.MS.foods[id]; M.save(); return true; },
+    get(id) { return ownRec(M.MS.foods, id) || genericById(id); },   /* old raw/cooked generic ids resolve to the merged food */
     list() {
       return Object.values(M.MS.foods).sort((a, b) => num(b.lastUsed) - num(a.lastUsed) || num(b.updatedAt) - num(a.updatedAt) || lc(a.name).localeCompare(lc(b.name)));
     },
@@ -900,11 +953,35 @@ window.M = window.M || {};
       const c = normCode(code); if (!c) return null;
       return Object.values(M.MS.foods).find(f => normCode(f.barcode) === c) || null;
     },
-    touch(id) { const f = touchFood(id); if (f) M.save(); return f; }
+    touch(id) { const f = touchFood(id); if (f) M.save(); return f; },
+    /* K3: the food for a barcode on this phone: My foods first, then a code linked to a
+       built-in food, then built-in foods' own `barcodes`. UPC-A and EAN-13 match with or
+       without the leading zero. null when none. */
+    byCode(code) {
+      const c = normCode(code); if (!c) return null;
+      const mine = M.foods.findByBarcode(c); if (mine) return mine;
+      const codes = isObj(M.MS.codes) ? M.MS.codes : {};
+      for (const k of Object.keys(codes)) if (normCode(k) === c) { const f = M.foods.get(codes[k]); if (isObj(f)) return f; }
+      return genericList().find(f => isObj(f) && Array.isArray(f.barcodes) && f.barcodes.some(b => normCode(b) === c)) || null;
+    },
+    /* K3: "Pick one of my foods" for a barcode. A saved food gets it as its barcode (a food
+       that has one already keeps it and the new code is linked too); a built-in food is
+       linked in M.MS.codes. Saves. → the food, or null. */
+    linkCode(code, foodId) {
+      const c = String(code == null ? "" : code).replace(/\D/g, "");
+      if (!normCode(c) || c.length < 6 || c.length > 14 || !okKey(foodId)) return null;
+      const own = ownRec(M.MS.foods, foodId);
+      if (!own && !genericById(foodId)) return null;
+      const id = own ? own.id : genericById(foodId).id;
+      if (own && (!own.barcode || normCode(own.barcode) === normCode(c))) { own.barcode = c; own.updatedAt = M.now(); }
+      else { if (!isObj(M.MS.codes)) M.MS.codes = {}; M.MS.codes[c] = id; }
+      M.save();
+      return M.foods.get(id);
+    }
   };
   /* uses / lastUsed without a save (the caller saves once) */
-  function touchFood(id) { const f = M.MS.foods[id]; if (!isObj(f)) return null; f.uses = num(f.uses) + 1; f.lastUsed = M.now(); return f; }
-  function touchMeal(id) { const m = M.MS.meals[id]; if (!isObj(m)) return null; m.uses = num(m.uses) + 1; m.lastUsed = M.now(); return m; }
+  function touchFood(id) { const f = ownRec(M.MS.foods, id); if (!f) return null; f.uses = num(f.uses) + 1; f.lastUsed = M.now(); return f; }
+  function touchMeal(id) { const m = ownRec(M.MS.meals, id); if (!m) return null; m.uses = num(m.uses) + 1; m.lastUsed = M.now(); return m; }
 
   /* ------------------------------------------------------------------ meals */
   /* state/cook on entries and meal items: old merged ids → the new id + their
@@ -935,22 +1012,22 @@ window.M = window.M || {};
     o.g = num(o.g) > 0 ? num(o.g) : null;
     o.per = normPer(o.per);
     delete o.slot;
-    if (!o.foodId) delete o.foodId;
-    if (!o.mealId) delete o.mealId;
+    if (badRef(o.foodId)) delete o.foodId;
+    if (badRef(o.mealId)) delete o.mealId;
     return o;
   }
   function normMeal(m) {
     m = isObj(m) ? m : {};
     const now = M.now();
     const o = Object.assign({}, m);
-    o.id = o.id || M.uid();
+    o.id = okKey(o.id) ? o.id : M.uid();
     o.name = String(o.name || "Meal").trim().slice(0, 120);
     o.desc = String(o.desc || "").trim().slice(0, 120);
     o.slot = M.isSlot(o.slot) ? o.slot : "Any";
     o.items = (Array.isArray(o.items) ? o.items : []).map(normItem);
     o.servingsMade = num(o.servingsMade, 1) > 0 ? num(o.servingsMade, 1) : 1;
     /* batch: per = the whole batch; rawG always recomputed from the items */
-    if (isObj(o.batch) && num(o.batch.cookedG) > 0) { o.servingsMade = 1; o.batch = { cookedG: r1(num(o.batch.cookedG)), rawG: M.cook.rawTotal(o.items) }; }
+    if (isObj(o.batch) && num(o.batch.cookedG) > 0) { o.servingsMade = 1; const bu = ["g", "oz", "lb"].indexOf(o.batch.unit) >= 0 ? o.batch.unit : null; o.batch = { cookedG: r1(num(o.batch.cookedG)), rawG: M.cook.rawTotal(o.items) }; if (bu) o.batch.unit = bu; }
     else delete o.batch;
     o.per = M.meals.computePer(o);
     o.createdAt = num(o.createdAt) || now;
@@ -970,13 +1047,13 @@ window.M = window.M || {};
     },
     add(meal) { const m = normMeal(meal); M.MS.meals[m.id] = m; M.save(); return m; },
     update(id, patch) {
-      const m = M.MS.meals[id]; if (!m) return null;
+      const m = ownRec(M.MS.meals, id); if (!m) return null;
       const merged = normMeal(Object.assign({}, m, isObj(patch) ? patch : {}, { id }));
       merged.createdAt = m.createdAt;
       M.MS.meals[id] = merged; M.save(); return merged;
     },
-    remove(id) { if (!M.MS.meals[id]) return false; delete M.MS.meals[id]; M.save(); return true; },
-    get(id) { return M.MS.meals[id] || null; },
+    remove(id) { if (!ownRec(M.MS.meals, id)) return false; delete M.MS.meals[id]; M.save(); return true; },
+    get(id) { return ownRec(M.MS.meals, id); },
     list(slot) {
       let arr = Object.values(M.MS.meals);
       if (slot) arr = arr.filter(m => m.slot === slot || m.slot === "Any");
@@ -1026,11 +1103,11 @@ window.M = window.M || {};
     o.g = num(o.g) > 0 ? num(o.g) : null;
     o.per = normPer(isObj(o.per) ? o.per : (food ? food.per : null));
     o.at = num(o.at) || M.now();
-    if (!o.foodId) delete o.foodId;
-    if (!o.mealId) delete o.mealId;
+    if (badRef(o.foodId)) delete o.foodId;
+    if (badRef(o.mealId)) delete o.mealId;
     /* a portion of a batch meal remembers the batch's cooked weight, so its label never changes later */
     if (o.mealId && o.state === "cooked" && !(num(o.batchG) > 0)) {
-      const m = M.MS.meals[o.mealId];
+      const m = ownRec(M.MS.meals, o.mealId);
       if (isObj(m) && isObj(m.batch) && num(m.batch.cookedG) > 0) { o.batch = true; o.batchG = r1(num(m.batch.cookedG)); }
     }
     return o;
@@ -1068,7 +1145,7 @@ window.M = window.M || {};
        weight: per = the batch per one unit, so later edits to the meal never
        change this day. */
     addMeal(dateKey, mealId, servings, slot, opt) {
-      const m = M.MS.meals[mealId]; if (!m) return [];
+      const m = ownRec(M.MS.meals, mealId); if (!m) return [];
       /* the foods inside count as used too (saved in the one save below) */
       (Array.isArray(m.items) ? m.items : []).forEach(it => { if (isObj(it) && isStr(it.foodId)) touchFood(it.foodId); });
       const s = M.isSlot(slot) ? slot : (M.isSlot(m.slot) ? m.slot : M.defaultSlot());
@@ -1098,6 +1175,21 @@ window.M = window.M || {};
     },
     slotEntries(dateKey, slot, pid) { const d = M.dayOf(dateKey, pid); return d && Array.isArray(d.entries) ? d.entries.filter(x => isObj(x) && x.slot === slot) : []; },
     totals(dateKey, pid) { const d = M.dayOf(dateKey, pid); return M.foodMath.sum(d && Array.isArray(d.entries) ? d.entries.filter(isObj) : []); },
+    /* K1: a day's totals as the Diary shows them: each row rounded to whole numbers
+       (per × servings, to 0.1, then to 1), then added. The Diary, Suggest, the Train
+       summary and the week summary all use this, so a day shows one number everywhere.
+       → {cal, p, c, f, fiber, sugar, sodium, water} */
+    shown(dateKey, pid) {
+      const d = M.dayOf(dateKey || M.today(), pid);
+      const o = { cal: 0, p: 0, c: 0, f: 0, fiber: 0, sugar: 0, sodium: 0, water: 0 };
+      (d && Array.isArray(d.entries) ? d.entries : []).forEach(e => {
+        if (!isObj(e)) return;
+        const s = Math.max(0, num(e.servings, 1)), per = isObj(e.per) ? e.per : {};
+        M.NUT.forEach(k => { o[k] += r0(r1(num(per[k]) * s)); });
+      });
+      o.water = d ? Math.max(0, r0(num(d.water))) : 0;
+      return o;
+    },
     slotTotals(dateKey, slot, pid) { return M.foodMath.sum(M.log.slotEntries(dateKey, slot, pid)); },
     setWater(dateKey, oz) { const d = M.day(dateKey); d.water = Math.max(0, r0(num(oz))); touchDay(d); M.save(); return d.water; },
     setNote(dateKey, note) { const d = M.day(dateKey); d.note = String(note || ""); touchDay(d); M.save(); return d.note; },
@@ -1209,6 +1301,22 @@ window.M = window.M || {};
     const o = {}; M.NUT.forEach(k => { o[k] = r4(num(p[k]) * num(grams) / 100); });
     return o;
   }
+  /* The food's own portion with these unit words ("bar", "large egg", "cup, halves"): its
+     serving or one of its alts, with the food's numbers for it. null when it has none. */
+  const unitKey = u => toksOf(String(u == null ? "" : u).replace(/\([^)]*\)/g, " ")).join(" ");
+  function portionOf(f, L) {
+    const key = unitKey(L.unit);
+    if (!key || key === "serving") return null;
+    const S = normServing(f.serving), fp = normPer(f.per), lq = L.qty || 1;
+    const alt = a => { const per = {}; M.NUT.forEach(k => { per[k] = fp[k] * num(a.g) / S.g; }); const A = M.parseServing(a.label); return { qty: A.qty || 1, unit: A.unit, g: num(a.g), per }; };
+    const alts = S.g > 0 ? normAlts(f.alts).filter(a => num(a.g) > 0 && unitKey(M.parseServing(a.label).unit) === key) : [];
+    const same = q => Math.abs(q - lq) < 1e-6;
+    /* the same amount first ("½ breast" is its own portion), then the serving's unit, then any portion in that unit */
+    const exact = alts.find(a => same(M.parseServing(a.label).qty || 1));
+    if (unitKey(S.unit) === key && (same(S.qty) || !exact)) return { qty: S.qty, unit: S.unit, g: S.g, per: fp };
+    if (exact) return alt(exact);
+    return alts.length ? alt(alts[0]) : null;
+  }
   function liveRecent(o) {
     if (o.mealId) {
       const m = M.meals.get(o.mealId);
@@ -1217,6 +1325,7 @@ window.M = window.M || {};
       if (isObj(m.batch) && num(m.batch.cookedG) > 0) {
         const g1 = unitGrams(o), cg = num(m.batch.cookedG);
         if (g1 > 0) { const per = {}; M.NUT.forEach(k => { per[k] = r4(num(m.per && m.per[k]) * g1 / cg); }); o.per = per; }
+        if (o.state === "cooked") { o.batch = true; o.batchG = r1(cg); }   /* the label and the math use today's batch */
       }
       else { const sv = M.parseServing(o.servingLabel); if (lc(sv.unit) === "serving" && sv.qty === 1) o.per = normPer(m.per); }
       return o;
@@ -1228,6 +1337,22 @@ window.M = window.M || {};
     o.foodId = f.id; o.name = f.name; o.brand = f.brand || "";
     if (c) { o.state = o.state || (al ? al.state : "raw"); o.cook = cookLite(c); }
     else { delete o.state; delete o.cook; }
+    /* A count or cup unit the food has ("1 bar", "1 large egg", "1 slice", "½ cup", "1 breast"):
+       the food's own numbers for that unit, never its grams, so fixing a food's grams
+       doesn't change "1 bar". Grams only for g / oz / lb. */
+    const L = M.parseServing(o.servingLabel), lu = unitWord(L.unit);
+    if (!(lu && WEIGHT_G[lu]) && (!c || (o.state !== "cooked" && !(lu && VOLUME[lu])))) {
+      const pt = portionOf(f, L);
+      if (pt) {
+        const k = (L.qty || 1) / (pt.qty || 1), per = {};
+        M.NUT.forEach(n => { per[n] = r4(num(pt.per[n]) * k); });
+        o.g = pt.g ? r4(pt.g * k) : null;
+        /* a cook food (the chicken breast) counts by the portion's raw grams, like its oz and g units */
+        o.per = c && o.g ? perExact(f, "raw", o.g) || per : per;
+        o.servingLabel = M.fmtServing({ qty: L.qty || 1, unit: pt.unit, g: pt.g ? r1(pt.g * k) : null }, M.isLiquid(f) ? f : undefined);
+        return o;
+      }
+    }
     const g1 = unitGrams(o);
     if (c && f.alwaysRaw === true && o.state === "cooked" && g1 > 0) {
       /* cooked grams → raw grams, in the same family of unit (oz / lb → oz, else g) */
@@ -1266,6 +1391,8 @@ window.M = window.M || {};
     const snap = e => {
       const o = { servingLabel: e.servingLabel || "1 serving", servings: num(e.servings, 1) || 1, g: num(e.g) > 0 ? num(e.g) : null, per: normPer(e.per), foodId: e.foodId || null, mealId: e.mealId || null, lastUsed: num(e.at) };
       if (e.state === "raw" || e.state === "cooked") { o.state = e.state; if (cookLite(e.cook)) o.cook = cookLite(e.cook); }
+      /* FD-03: a batch portion keeps its batch, so it still reads "8 oz cooked · of 45 oz batch" after the meal is gone */
+      if (e.mealId && e.batch) { o.batch = true; if (num(e.batchG) > 0) o.batchG = r1(num(e.batchG)); }
       return o;
     };
     const keyOfEntry = e => {
@@ -1341,11 +1468,12 @@ window.M = window.M || {};
     return o;
   }
   let scoreWeak = false;   /* set by scoreText: some word only matched inside another word, a brand or the description */
+  let scoreInside = false; /* set by scoreText: some word only matched inside another word ("oil" in "boiled") */
   function scoreText(toks, name, brand, extra, kw) {
     const ni = nameInfo(name, brand), n = ni.n, words = ni.words, bw = ni.bw, hw = ni.hw, headNoun = ni.head;
     const xw = toksOf(extra), kws = toksOf(kw);
     let s = 0;
-    scoreWeak = false;
+    scoreWeak = false; scoreInside = false;
     for (const t of toks) {
       if (hw.length === 1 && hw[0] === t) s += 50;
       else if (t === headNoun) s += 36;
@@ -1353,12 +1481,116 @@ window.M = window.M || {};
       else if (words.indexOf(t) >= 0 || kws.indexOf(t) >= 0) s += 22;
       else if (words.some(w => w.startsWith(t))) s += 14 + (words[0] && words[0].startsWith(t) ? 4 : 0);
       else if (bw.indexOf(t) >= 0) s += 12;
-      else if (ni.plain.includes(t)) { s += 8; scoreWeak = true; }
-      else if (bw.some(w => w.startsWith(t)) || ni.lb.includes(t)) { s += 6; scoreWeak = true; }
+      else if (kws.some(w => w.startsWith(t))) s += 10;
+      /* letters inside a word only for 4+ letters ("pb" never finds Raspberries) */
+      else if (t.length >= 4 && ni.plain.includes(t)) { s += 8; scoreWeak = true; scoreInside = true; }
+      else if (bw.some(w => w.startsWith(t)) || (t.length >= 4 && ni.lb.includes(t))) { s += 6; scoreWeak = true; }
       else if (xw.some(w => w.startsWith(t))) { s += 3; scoreWeak = true; }
       else return -1;
     }
     return s - Math.min(8, n.length / 10);
+  }
+  /* A word the person may leave out ("grilled", "organic", "cup"): a small plus when the
+     food has it, a small minus when it doesn't. Never needed for a match. */
+  function optHit(t, name, brand, extra, kw) {
+    const ni = nameInfo(name, brand), st = w => w.startsWith(t);
+    return ni.words.some(st) || ni.bw.some(st) || toksOf(kw).some(st) || toksOf(extra).some(st);
+  }
+  function scoreQuery(pq, name, brand, extra, kw) {
+    let s = scoreText(pq.req, name, brand, extra, kw);
+    if (s < 0) return -1;
+    for (const o of pq.opt) s += optHit(o, name, brand, extra, kw) ? 2 : -3;
+    return s;
+  }
+
+  /* ------------------------------------------------ what the person typed */
+  /* "2 large eggs", "6oz chicken", "chicken 6 oz", "a cup of milk", "eggs x2", "half cup rice":
+     amounts, counts and size words go; prep and package words ("grilled", "boneless",
+     "organic", "deli", "low fat") and bare units ("cup") may be missing from the food.
+     → { req: words a food must have, opt: words it may have, all: every word left } */
+  const Q_FILL = new Set(["large", "medium", "small", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "a", "an", "of", "the", "half", "scoop", "piece", "glass", "handful", "bowl", "serving", "and", "with", "x", "some"]);
+  const Q_OPT = new Set(["grilled", "baked", "roasted", "rotisserie", "fried", "scrambled", "boneless", "skinless", "organic", "signature", "fillet", "filet", "deli", "lunchmeat", "natural", "plain", "frozen", "tender", "strip",
+    "g", "gram", "oz", "ounce", "lb", "pound", "kg", "ml", "cup", "tbsp", "tsp", "tablespoon", "teaspoon", "slice", "can", "bottle", "container", "packet", "stick"]);
+  const Q_OPT2 = [["low", "fat"], ["lunch", "meat"], ["reduced", "fat"], ["fat", "free"]];
+  const Q_UNIT = "g|grams?|gr|kg|oz|ounces?|lbs?|pounds?|ml|cups?|c|tbsps?|tablespoons?|tsps?|teaspoons?|slices?|pieces?|pcs|servings?|scoops?";
+  const Q_AMT = new RegExp("(?:\\d+\\s*\\/\\s*\\d+|\\d+(?:[.,]\\d+)?\\s*[½¼¾⅓⅔⅛]?|[½¼¾⅓⅔⅛])\\s*(?:" + Q_UNIT + ")?(?![\\p{L}])", "gu");
+  const qCache = new Map();
+  function searchQuery(q) {
+    const key = String(q == null ? "" : q);
+    let o = qCache.get(key);
+    if (o) return o;
+    let s = lc(key).replace(/['’‘`]/g, "");
+    s = s.replace(/\bpb\s*(?:&|and|n)\s*j\b|\bpbj\b|\bpb\b/g, " peanut butter ");
+    s = s.replace(/(^|\s)[×x]\s*\d+(?:\.\d+)?(?![\p{L}])/gu, "$1 ").replace(/\d+(?:\.\d+)?\s*[×x](?![\p{L}])/gu, " ");
+    s = s.replace(Q_AMT, " ");
+    const all = M.searchTokens(s);
+    const fill = all.map(t => Q_FILL.has(t)), opt = all.map(t => Q_OPT.has(t));
+    /* "half and half" / "half & half" is a food, not an amount */
+    for (let i = 0; i + 1 < all.length; i++) {
+      if (all[i] !== "half") continue;
+      const j = all[i + 1] === "and" && all[i + 2] === "half" ? i + 2 : all[i + 1] === "half" ? i + 1 : -1;
+      if (j > 0) { fill[i] = fill[j] = false; i = j; }
+    }
+    for (let i = 0; i + 1 < all.length; i++) Q_OPT2.forEach(p => { if (all[i] === p[0] && all[i + 1] === p[1]) opt[i] = opt[i + 1] = true; });
+    const kept = all.filter((t, i) => !fill[i]);
+    let req = all.filter((t, i) => !fill[i] && !opt[i]), op = all.filter((t, i) => !fill[i] && opt[i]);
+    if (!req.length) { req = op; op = []; }
+    if (!req.length) req = all.slice();
+    o = { req, opt: op, all: kept.length ? kept : all.slice() };
+    if (qCache.size > 500) qCache.clear();
+    qCache.set(key, o);
+    return o;
+  }
+  M.searchQuery = q => { const o = searchQuery(q); return { req: o.req.slice(), opt: o.opt.slice(), all: o.all.slice() }; };
+
+  /* Typos: "chiken", "cotage cheese", "bannana", "hilshire", "peanutbutter". One letter off
+     for words of 4+ letters, two for 7+, against the words of the foods on hand. */
+  function editDist(a, b, max) {
+    const la = a.length, lb = b.length;
+    if (Math.abs(la - lb) > max) return max + 1;
+    let p2 = null, p1 = new Array(lb + 1);
+    for (let j = 0; j <= lb; j++) p1[j] = j;
+    for (let i = 1; i <= la; i++) {
+      const c = new Array(lb + 1); c[0] = i;
+      let rowMin = c[0];
+      for (let j = 1; j <= lb; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        let v = Math.min(p1[j] + 1, c[j - 1] + 1, p1[j - 1] + cost);
+        if (p2 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, p2[j - 2] + 1);   /* swapped letters */
+        c[j] = v; if (v < rowMin) rowMin = v;
+      }
+      if (rowMin > max) return max + 1;
+      p2 = p1; p1 = c;
+    }
+    return p1[lb];
+  }
+  const fuzzMax = t => (t.length >= 7 ? 2 : t.length >= 4 ? 1 : 0);
+  /* → the query with typo words swapped for real words, or null when nothing changed. */
+  function fuzzQuery(pq, vocab) {
+    const fix = t => {
+      if (vocab.has(t)) return null;
+      for (const w of vocab.keys()) if (w.startsWith(t)) return null;   /* a word still being typed */
+      /* two words typed as one ("peanutbutter", "lunchmeat") */
+      for (let i = 3; i <= t.length - 3; i++) { const a = t.slice(0, i), b = t.slice(i); if (vocab.has(a) && vocab.has(singular(b))) return [a, singular(b)]; }
+      const max = fuzzMax(t); if (!max) return null;
+      let best = null, bd = max + 1, bf = 0;
+      vocab.forEach((f, w) => {
+        if (w.length < 3) return;
+        let d = editDist(t, w, max);
+        if (d > max && w.length > t.length) {   /* a typo in a word still being typed ("chike" → chicken) */
+          const pd = Math.min(editDist(t, w.slice(0, t.length), max), editDist(t, w.slice(0, t.length + 1), max));
+          if (pd <= max) d = pd + 0.5;
+        }
+        if (d > max + 0.5) return;
+        const same = w[0] === t[0] ? 0 : 0.25;
+        if (d + same < bd || (d + same === bd && f > bf)) { best = w; bd = d + same; bf = f; }
+      });
+      return best ? [best] : null;
+    };
+    let changed = false;
+    const map = list => { const out = []; list.forEach(t => { const r = fix(t); if (r) { changed = true; out.push.apply(out, r); } else out.push(t); }); return out; };
+    const req = map(pq.req), op = pq.opt.slice(), all = map(pq.all);
+    return changed ? { req, opt: op, all } : null;
   }
   const usesBonus = o => Math.min(10, Math.log2(num(o.uses) + 1) * 2);
   /* Cook foods also answer to "raw" / "dry" / "cooked" ("cooked chicken", "dry pasta"). */
@@ -1404,11 +1636,25 @@ window.M = window.M || {};
   }
   /* opt.recents === false / opt.meals === false leave those out (the add sheet's Foods list),
      so a food already logged still shows up as a food instead of being folded into its recent. */
+  /* A saved meal answers to its description and the names of the foods in it. */
+  const mealText = m => [m.desc].concat((Array.isArray(m.items) ? m.items : []).map(it => (isObj(it) && isStr(it.name) ? it.name : ""))).filter(Boolean).join(" ");
+  /* Built-in foods' extra search words (m-data `words`: "preserves fruit spread"). */
+  const foodWords = f => { const w = f && f.words; return Array.isArray(w) ? w.filter(isStr).join(" ") : isStr(w) ? w : ""; };
+  function vocabOf(cands) {
+    const v = new Map(), add = w => { if (w.length >= 3 || v.has(w)) v.set(w, (v.get(w) || 0) + 1); };
+    cands.forEach(c => {
+      const ni = nameInfo(c.r.name, c.r.brand);
+      ni.words.forEach(add); ni.bw.forEach(add);
+      if (c.kw) toksOf(c.kw).forEach(add);
+      if (c.extra) toksOf(c.extra).forEach(add);
+    });
+    return v;
+  }
   M.search = function (q, opt) {
     opt = isObj(opt) ? opt : {};
     const pid = opt.pid || M.pid(), slot = opt.slot, limit = num(opt.limit, 40) || 40;
     const wantRecents = opt.recents !== false, wantMeals = opt.meals !== false;
-    const toks = tokens(q);
+    const pq = searchQuery(q), toks = pq.req;
     const out = [], seen = new Set();
     /* Dedupe: same kind+name+brand, or a food/meal a recent already points at. */
     const push = r => {
@@ -1421,51 +1667,77 @@ window.M = window.M || {};
       return true;
     };
     if (!toks.length) {
-      if (wantRecents) M.recents(pid, 30, slot).forEach(rc => push(recentResult(rc)));
+      /* In a meal: what they ate in this meal lately, their meals for this meal, their
+         "Any time" meals, then other recents, other meals and their own foods. */
+      const rec = wantRecents ? M.recents(pid, 30, slot) : [];
       const meals = wantMeals ? M.meals.list() : [];
+      if (slot) rec.filter(rc => num(rc.slotCount) > 0).forEach(rc => push(recentResult(rc)));
       if (slot) meals.filter(m => m.slot === slot).forEach(m => push(mealResult(m)));
       meals.filter(m => m.slot === "Any").forEach(m => push(mealResult(m)));
+      rec.forEach(rc => push(recentResult(rc)));
       meals.forEach(m => push(mealResult(m)));
       M.foods.list().forEach(f => push(foodResult("food", f)));
       return out.slice(0, limit);
     }
-    const qn = toks.join(" ");
-    const rule = stapleRule(toks);
-    const scored = [];
-    const consider = (r, bonus, extra, kw, forced, own) => {
-      let s = scoreText(toks, r.name, r.brand, extra, kw);
-      if (s < 0) { if (!forced) return; s = 0; }
-      scored.push({ r, tier: own && !scoreWeak ? 0 : 1, s: s + bonus + (nameInfo(r.name, r.brand).j === qn ? 40 : 0) });
-    };
-    const namedFood = f => { try { return !!(rule && rule.hit(f)); } catch (e) { return false; } };
-    if (wantRecents) M.recents(pid, 40, slot).forEach((rc, i) => consider(recentResult(rc), 25 + Math.max(0, 10 - i / 4), "", "", false, true));
-    if (wantMeals) M.meals.list().forEach(m => consider(mealResult(m), 15 + (slot && m.slot === slot ? 25 : m.slot === "Any" ? 6 : 0) + usesBonus(m), m.desc, "", false, true));
-    M.foods.list().forEach(f => consider(foodResult("food", f), 10 + usesBonus(f), "", cookWords(f), false, true));
+    const cands = [];
+    const cand = (r, bonus, extra, kw, own, gen) => cands.push({ r, bonus, extra, kw, own, gen });
+    if (wantRecents) M.recents(pid, 40, slot).forEach((rc, i) => cand(recentResult(rc), 25 + Math.max(0, 10 - i / 4), "", "", true));
+    if (wantMeals) M.meals.list().forEach(m => cand(mealResult(m), 15 + (slot && m.slot === slot ? 25 : m.slot === "Any" ? 6 : 0) + usesBonus(m), mealText(m), "", true));
+    M.foods.list().forEach(f => cand(foodResult("food", f), 10 + usesBonus(f), "", (cookWords(f) + " " + foodWords(f)).trim(), true));
     /* built-in foods: a food they named for these words first, then foods they buy,
        then plain meat / fish / rice / pasta (the cook foods) before mixed dishes that share a word */
     genericList().forEach(f => {
       if (!isObj(f) || !f.name) return;
-      const named = namedFood(f);
-      consider(foodResult("generic", f), (named ? NAMED : 0) + (f.staple === true ? STAPLE : 0) + (M.cook.of(f) ? 3 : 0), "", cookWords(f), named);
+      cand(foodResult("generic", f), (f.staple === true ? STAPLE : 0) + (M.cook.of(f) ? 3 : 0), "", (cookWords(f) + " " + foodWords(f)).trim(), false, f);
     });
+    const pass = (pq, fuzzy) => {
+      const qn = pq.req.join(" "), rule = stapleRule(pq.req) || stapleRule(pq.all), res = [];
+      cands.forEach(c => {
+        let named = false;
+        if (rule && c.gen) { try { named = !!rule.hit(c.gen); } catch (e) {} }
+        let s = scoreQuery(pq, c.r.name, c.r.brand, c.extra, c.kw);
+        const weak = scoreWeak, inside = s >= 0 && scoreInside;
+        if (s < 0) { if (!named) return; s = 0; }
+        res.push({ r: c.r, inside, tier: (c.own && !weak ? 0 : 1) + (fuzzy ? 2 : 0), s: s + c.bonus + (named ? NAMED : 0) + (nameInfo(c.r.name, c.r.brand).j === qn ? 40 : 0) });
+      });
+      /* letters inside a word ("apple" in Pineapple) only when no word matches whole or at its start */
+      return res.some(x => !x.inside) ? res.filter(x => !x.inside) : res;
+    };
+    let scored = pass(pq, false);
+    /* fewer than 3 hits: try again with typos fixed; those come after the exact hits */
+    let fq = null;
+    if (scored.length < 3) { fq = fuzzQuery(pq, vocabOf(cands)); if (fq) scored = scored.concat(pass(fq, true)); }
+    /* still nothing ("red onion", "baby carrots"): the last word must match, the rest may */
+    const lq = fq || pq;
+    if (!scored.length && lq.req.length > 1) scored = pass({ req: lq.req.slice(-1), opt: lq.req.slice(0, -1).concat(lq.opt), all: lq.all }, true);
     scored.sort((a, b) => a.tier - b.tier || b.s - a.s || lc(a.r.name).localeCompare(lc(b.r.name)));
     for (const x of scored) { if (out.length >= limit) break; push(x.r); }
     return out;
   };
 
   /* --------------------------------------------------------------- checkins */
+  /* Whole calendar days from a time to today: a check-in comes due in the morning of its
+     day, not at the clock time of the last one. */
+  const daysSince = ts => (num(ts) > 0 ? M.daysBetween(M.tsToKey(num(ts)), M.today()) : 0);
+  const snoozed = until => num(until) > 0 && M.today() < M.tsToKey(num(until));
   M.checkins = {
     due(pid) {
       pid = pid || M.pid(); if (!pid) return null;
-      const p = M.person(pid), now = M.now(), sn = p.snooze || {};
+      const p = M.person(pid), sn = p.snooze || {};
       if (!p.setupAt) return "setup";
-      if (now - num(p.setupAt) > 60 * DAY && num(sn.refresh60) < now) return "refresh60";
+      if (daysSince(p.setupAt) >= 60 && !snoozed(sn.refresh60)) return "refresh60";
       /* The 2-week weigh-in clock runs from the last weigh-in only (setup sets it:
          setup collects a weight). A 60-day refresh doesn't reset it. */
       const lastBody = num(p.lastBody) || num(p.setupAt);
-      if (now - lastBody > 14 * DAY && num(sn.body14) < now) return "body14";
+      if (daysSince(lastBody) >= 14 && !snoozed(sn.body14)) return "body14";
       return null;
     },
+    /* Days / whole weeks since the last weigh-in ("body14") or setup ("refresh60"), for the card's words. */
+    daysSince(pid, kind) {
+      const p = M.person(pid || M.pid());
+      return daysSince(kind === "refresh60" ? p.setupAt : num(p.lastBody) || num(p.setupAt));
+    },
+    weeksSince(pid, kind) { return Math.floor(M.checkins.daysSince(pid, kind) / 7); },
     snooze(pid, kind, days) {
       const p = M.person(pid || M.pid());
       if (!isObj(p.snooze)) p.snooze = { refresh60: 0, body14: 0 };
@@ -1491,7 +1763,7 @@ window.M = window.M || {};
       if (!isObj(p.snooze)) p.snooze = { refresh60: 0, body14: 0 };
       let changed = false;
       if (!p.setupAt) { if (M.calc.complete(p)) { p.setupAt = now; if (!p.lastBody) p.lastBody = now; changed = true; } }
-      else if (now - num(p.setupAt) > 60 * DAY) { p.setupAt = now; p.snooze.refresh60 = 0; changed = true; }
+      else if (daysSince(p.setupAt) >= 60) { p.setupAt = now; p.snooze.refresh60 = 0; changed = true; }
       if (changed) { p.updatedAt = now; M.save(); }
       return M.checkins.due(pid);
     }
@@ -1520,7 +1792,7 @@ window.M = window.M || {};
       const d = pid ? M.dayOf(date, pid) : null;
       const es = d && Array.isArray(d.entries) ? d.entries.filter(isObj) : [];
       const has = es.length > 0;
-      const t = has ? M.foodMath.sum(es) : M.foodMath.blank();
+      const t = has ? M.log.shown(date, pid) : M.foodMath.blank();   /* K1: the Diary's numbers */
       const into = date === today ? tAcc : acc;
       if (has) { logged++; if (date === today) todayLogged = true; else full++; into.cal += t.cal; into.p += t.p; into.c += t.c; into.f += t.f; }
       const row = { date, logged: has, cal: t.cal, p: t.p, c: t.c, f: t.f };
@@ -1546,10 +1818,154 @@ window.M = window.M || {};
   /* Names, brands and descriptions are capped at 120 characters. */
   const cap = v => (isStr(v) && v.length > 120 ? v.slice(0, 120) : v);
   function capRec(r) { if (isObj(r)) ["name", "brand", "desc"].forEach(k => { if (isStr(r[k])) r[k] = cap(r[k]); }); return r; }
+  /* ------------------------------------------------------------------ clean */
+  /* K4: M.clean(kind, id, rec) → a cleaned copy of one stored record, or null when it
+     can't be used. kind: "food" | "meal" | "day" | "body" | "profile". Rules (from
+     m-sync's cleaner): only JSON values and own keys ("__proto__" never), finite
+     numbers in sane ranges, names capped, entries and items are objects in an array,
+     every entry has an id and a real meal, servings > 0, foodId / mealId that aren't
+     safe keys are dropped, weigh-ins must pass M.body.check. Clean data comes back
+     the same. */
+  const C_LEN = 120, C_MAX = 1e6;
+  function scrubJSON(v, d) {
+    if (Array.isArray(v)) return d > 40 ? [] : v.map(x => { const y = scrubJSON(x, d + 1); return y === undefined ? null : y; });
+    if (v && typeof v === "object") {
+      const o = {};
+      if (d > 40) return o;
+      Object.keys(v).forEach(k => { if (BAD_KEYS.has(k)) return; const x = scrubJSON(v[k], d + 1); if (x !== undefined) o[k] = x; });
+      return o;
+    }
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    if (typeof v === "string" || typeof v === "boolean" || v === null) return v;
+    return undefined;
+  }
+  function cStr(o, k, max, dflt) {
+    if (!(k in o)) { if (dflt !== undefined) o[k] = dflt; return; }
+    if (typeof o[k] === "number") o[k] = String(o[k]);
+    if (typeof o[k] !== "string") { if (dflt === undefined) delete o[k]; else o[k] = dflt; return; }
+    if (o[k].length > max) o[k] = o[k].slice(0, max);
+  }
+  /* a number in [min, max]; else null (nul) or the field goes */
+  function cNum(o, k, nul, min, max) {
+    if (!(k in o)) return;
+    let v = o[k];
+    if (v === null && nul) return;
+    if (typeof v === "string" && v.trim() !== "" && isFinite(+v)) v = +v;
+    if (!isNum(v) || (min != null && v < min) || v > (max == null ? C_MAX * 1e7 : max)) { if (nul) o[k] = null; else delete o[k]; return; }
+    o[k] = v;
+  }
+  function cPer(o, k, keepNull) {
+    if (!(k in o)) { if (k === "per") o.per = M.foodMath.blank(); return; }
+    if (!isObj(o[k])) { if (k === "per" || !keepNull) o[k] = k === "per" ? M.foodMath.blank() : null; return; }
+    const p = o[k];
+    Object.keys(p).forEach(n => { let v = p[n]; if (typeof v === "string" && v.trim() !== "" && isFinite(+v)) v = +v; p[n] = isNum(v) && v >= 0 && v <= C_MAX ? v : 0; });
+  }
+  function cCook(o) {
+    if (!("cook" in o)) return;
+    if (!cookLite(o.cook)) { delete o.cook; return; }
+    cNum(o.cook, "y", false, 0, 20); cStr(o.cook, "word", 12);
+    if ("per100gCooked" in o.cook) cPer(o.cook, "per100gCooked", true);
+    if ("alts" in o.cook && !Array.isArray(o.cook.alts)) delete o.cook.alts;
+  }
+  const cKey = (o, k) => { if (k in o && !((isNum(o[k]) && o[k] > 0) || (okKey(o[k]) && o[k].length <= 120))) delete o[k]; };
+  function cLine(it, dflt) {   /* a diary entry or a meal item */
+    cStr(it, "name", C_LEN, dflt); cStr(it, "brand", C_LEN, "");
+    cNum(it, "servings", false, 1e-9, 1e4);
+    if ("servings" in it && !(it.servings > 0)) delete it.servings;
+    cStr(it, "servingLabel", C_LEN); cNum(it, "g", true, 0, C_MAX); cPer(it, "per");
+    cNum(it, "at", false, 0); cKey(it, "foodId"); cKey(it, "mealId");
+    if ("state" in it && it.state !== "raw" && it.state !== "cooked") delete it.state;
+    cCook(it);
+    cNum(it, "batchG", false, 0, C_MAX);
+    if (!okKey(it.id) || it.id.length > 120) it.id = M.uid();
+    return it;
+  }
+  const C_DAYID = /^(nick|kat)\|(\d{4}-\d{2}-\d{2})$/;
+  const C_FIX = {
+    food(o, id) {
+      o.id = id;
+      cStr(o, "name", C_LEN, "Food"); cStr(o, "brand", C_LEN, ""); cStr(o, "barcode", 40, ""); cStr(o, "source", 40, "custom");
+      if ("serving" in o) {
+        if (!isObj(o.serving)) o.serving = { qty: 1, unit: "serving", g: null };
+        else { cNum(o.serving, "qty", false, 1e-9, 1e4); cStr(o.serving, "unit", 60, "serving"); cNum(o.serving, "g", true, 0, C_MAX); }
+      }
+      cPer(o, "per"); if ("per100g" in o) cPer(o, "per100g", true);
+      if ("alts" in o) o.alts = Array.isArray(o.alts) ? o.alts.filter(a => isObj(a) && isStr(a.label)).map(a => { cStr(a, "label", C_LEN); cNum(a, "g", true, 0, C_MAX); return a; }) : [];
+      cCook(o);
+      ["createdAt", "updatedAt", "uses", "lastUsed"].forEach(k => cNum(o, k, false, 0));
+      return o;
+    },
+    meal(o, id) {
+      o.id = id;
+      cStr(o, "name", C_LEN, "Meal"); cStr(o, "desc", C_LEN, "");
+      if (!(o.slot === "Any" || M.isSlot(o.slot))) o.slot = "Any";
+      o.items = Array.isArray(o.items) ? o.items.filter(isObj).map(it => cLine(it, "Item")) : [];
+      cNum(o, "servingsMade", false, 1e-9, 1e4); cPer(o, "per");
+      if ("batch" in o) { if (!isObj(o.batch)) delete o.batch; else { cNum(o.batch, "cookedG", false, 0, C_MAX); cNum(o.batch, "rawG", false, 0, C_MAX); if (o.batch.unit !== undefined && ["g", "oz", "lb"].indexOf(o.batch.unit) < 0) delete o.batch.unit; } }
+      ["createdAt", "updatedAt", "uses", "lastUsed"].forEach(k => cNum(o, k, false, 0));
+      return o;
+    },
+    day(o, id) {
+      const m = C_DAYID.exec(id); if (!m) return null;
+      o.id = id; o.pid = m[1]; o.date = m[2];
+      o.entries = Array.isArray(o.entries) ? o.entries.filter(isObj) : [];
+      const ids = new Set();
+      o.entries.forEach(e => {
+        cLine(e, "Food");
+        if (ids.has(e.id)) e.id = M.uid();
+        ids.add(e.id);
+        if (!M.isSlot(e.slot)) e.slot = isNum(e.at) && e.at > 0 ? M.defaultSlot(new Date(e.at)) : "Snacks";
+      });
+      cNum(o, "water", false, 0, 1e4); if (!isNum(o.water)) o.water = 0;
+      cStr(o, "note", 1000, "");
+      cNum(o, "updatedAt", false, 0); if (!isNum(o.updatedAt)) o.updatedAt = 0;
+      return o;
+    },
+    body(o, id) {
+      const m = C_DAYID.exec(id); if (!m) return null;
+      o.id = id; o.pid = m[1]; o.date = m[2];
+      cNum(o, "w", true, 0); cNum(o, "rhr", true, 0); cNum(o, "at", false, 0);
+      if (o.w != null && !M.body.check(o.w, "w", "us").ok) o.w = null;
+      if (o.rhr != null && !M.body.check(o.rhr, "rhr").ok) o.rhr = null;
+      if (o.w == null && o.rhr == null) return null;
+      if (o.at > M.now() + DAY) o.at = M.now();
+      return o;
+    },
+    profile(o, id) {
+      if (!isPid(id)) return null;
+      o.id = id;
+      cStr(o, "name", C_LEN);
+      if ("sex" in o && o.sex !== null && o.sex !== "m" && o.sex !== "f") o.sex = null;
+      ["age", "heightIn", "weightLb", "goalWeightLb", "setupAt"].forEach(k => cNum(o, k, true, 0));
+      ["pace", "lastBody", "updatedAt"].forEach(k => cNum(o, k, false));
+      cStr(o, "activity", 20); cStr(o, "split", 20); cStr(o, "aiModel", 80);
+      if ("units" in o && o.units !== "us" && o.units !== "metric") o.units = "us";
+      if ("targetsManual" in o && typeof o.targetsManual !== "boolean") delete o.targetsManual;
+      ["custom", "targets", "snooze"].forEach(k => {
+        if (!(k in o)) return;
+        if (!isObj(o[k])) { delete o[k]; return; }
+        Object.keys(o[k]).forEach(n => cNum(o[k], n, false, k === "snooze" ? 0 : -1e4, C_MAX * 1e7));
+      });
+      return o;
+    }
+  };
+  M.clean = function (kind, id, rec) {
+    if (!isObj(rec) || !okKey(id) || !hasOwn(C_FIX, kind)) return null;
+    const o = scrubJSON(rec, 0);
+    if (!isObj(o)) return null;
+    try { return C_FIX[kind](o, id) || null; } catch (e) { return null; }
+  };
+
   M.export = () => M.cp(M.MS);
   M.import = function (obj) {
     if (!isObj(obj) || obj.v !== 1) return false;
     const cur = M.MS, inc = shape(M.cp(obj));
+    /* K4: every incoming record cleaned first; one that can't be used is left out */
+    [["profiles", "profile"], ["foods", "food"], ["meals", "meal"], ["days", "day"], ["body", "body"]].forEach(([k, kind]) => {
+      const src = inc[k], out = {};
+      Object.keys(src).forEach(id => { const c = M.clean(kind, id, src[id]); if (c) out[id] = c; });
+      inc[k] = out;
+    });
     /* profiles one by one: a set-up profile beats one never set up; else the newer one wins */
     Object.keys(inc.profiles).forEach(id => {
       if (!isPid(id)) return;
@@ -1566,6 +1982,7 @@ window.M = window.M || {};
     mergeById(cur.meals, inc.meals, "updatedAt");
     mergeById(cur.days, inc.days, "updatedAt");
     mergeById(cur.body, inc.body, "at");
+    if (isObj(inc.codes)) { if (!isObj(cur.codes)) cur.codes = {}; Object.keys(inc.codes).forEach(k => { if (!hasOwn(cur.codes, k)) cur.codes[k] = inc.codes[k]; }); }
     if (!cur.ui.person && inc.ui.person) cur.ui.person = inc.ui.person;
     M.sync.markAll();
     M.save();
@@ -1667,6 +2084,30 @@ window.M = window.M || {};
       try { db.doc("mbody/" + docId(id)).set(b).catch(noop); } catch (e) {}
     }
   };
+
+  /* --------------------------------------------------------------- two tabs */
+  /* CO-08: another tab (desktop) saved: read the new copy and redraw, so this tab never
+     writes its older copy over it. Waits while a box here has focus (typing). */
+  let otherTab = false;
+  function otherTabSaved() {
+    otherTab = false;
+    try { M.load(); } catch (e) { return; }
+    rerender();
+  }
+  try {
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("storage", ev => {
+        if (!ev || (ev.key !== M.KEY && ev.key !== null)) return;
+        if (ev.key === null && lsGet(M.KEY) == null) return;
+        const a = typeof document !== "undefined" ? document.activeElement : null;
+        if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName || "")) { otherTab = true; return; }
+        otherTabSaved();
+      });
+      if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+        document.addEventListener("focusout", () => { if (otherTab) setTimeout(() => { const a = document.activeElement; if (otherTab && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName || ""))) otherTabSaved(); }, 0); }, true);
+      }
+    }
+  } catch (e) {}
 
   /* ------------------------------------------------------------------- boot */
   try { M.load(); } catch (e) { M.MS = freshState(); }

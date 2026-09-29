@@ -53,7 +53,8 @@ window.M = window.M || {};
   const COLL = { food: "foods", meal: "meals", day: "days", body: "body", profile: "profiles" };
   const ORDER = { train: 0, meta: 1, profile: 2, food: 3, meal: 4, body: 5, day: 6 };  /* training + small rows first */
   const NUT = ["cal", "p", "c", "f", "fiber", "sugar", "sodium"];
-  const SELECT = "household,kind,id,data,deleted,client_updated,updated_at";
+  const SELECT = "household,kind,id,data,deleted,client_updated,updated_at,device";
+  const BASE_DAYS = 60;                      /* diary days keep a merge base this long */
   const EPOCH = "1970-01-01T00:00:00Z";
   const PAGE = 500;                          /* rows per pull page */
   const CHUNK_ROWS = 200, CHUNK_BYTES = 1e6; /* per upsert request */
@@ -67,11 +68,11 @@ window.M = window.M || {};
   const HOUR = 36e5, DAY_MS = 864e5;
   const META_EVERY = DAY_MS;                 /* is the household still there? once per start and per day */
   const REFUSED_AGAIN = DAY_MS, ASIDE_AGAIN = HOUR;   /* stuck rows are tried again this often (Sync now: always) */
-  const UNDO_KEEP = 7 * DAY_MS;
+  const UNDO_KEEP = DAY_MS;                   /* the Undo copy of a restore: one day (it can be big) */
   const MAXLEN = 120;                        /* names, brands, descriptions */
   const BISECT_BUDGET = 40;                  /* requests one cycle may spend hunting a bad row */
   const PREFER = { Prefer: "resolution=merge-duplicates,return=minimal" };
-  const EAGER = { retry: 1, online: 1, show: 1, start: 1, join: 1, create: 1, code: 1 };
+  const EAGER = { retry: 1, online: 1, show: 1, start: 1, join: 1, create: 1, code: 1, person: 1 };
 
   /* --------------------------------------------------------------- helpers */
   const isNum = v => typeof v === "number" && isFinite(v);
@@ -165,7 +166,7 @@ window.M = window.M || {};
   function freshSt(device) {
     return { v: 1, code: "", device: device || "d" + rand(12).toLowerCase(), cursor: "", lastSync: 0, lastError: "", note: "",
       hashes: {}, gone: {}, bad: {}, fail: {}, base: {}, train: {}, trainAt: 0, meta: null,
-      verified: false, joining: false, pp: "", metaAt: 0, retryAt: 0, tp: null, tsw: null, prev: null, old: [] };
+      verified: false, joining: false, pp: "", metaAt: 0, retryAt: 0, tp: null, tsw: null, prev: null, old: [], home: "" };
   }
   function loadSt() {
     let s = null;
@@ -184,6 +185,7 @@ window.M = window.M || {};
     o.verified = s.verified === true || (s.verified === undefined && !!o.code);
     o.joining = s.joining === true;
     o.pp = okPid(s.pp) ? s.pp : "";
+    o.home = okPid(s.home) ? s.home : "";
     o.metaAt = num(s.metaAt); o.retryAt = num(s.retryAt);
     o.tp = isObj(s.tp) && Array.isArray(s.tp.pids) ? { pids: s.tp.pids.filter(okPid) } : null;
     o.tsw = isObj(s.tsw) && okPid(s.tsw.to) && Array.isArray(s.tsw.ids) ? { to: s.tsw.to, ids: s.tsw.ids.map(String) } : null;
@@ -195,11 +197,16 @@ window.M = window.M || {};
   let unsaved = false;       /* M.MS holds pulled data that isn't on disk yet (phone was full) */
   /* The sync state says which records match the cloud. It is only written when the data it
      describes is on disk too; otherwise a restart would see "missing" records and delete them. */
-  function saveSt() {
+  /* Inside a sync cycle the state is written once, at the end (it can be large). A phone killed
+     before that only sends or reads a few rows again. force: write now. */
+  let deferSt = 0, stDirty = false;
+  function saveSt(force) {
+    if (deferSt > 0 && !force) { stDirty = true; return true; }
+    stDirty = false;
     if (unsaved && !commitLocal()) return false;
     return lsSet(ST_KEY, JSON.stringify(st));
   }
-  /* The training copy a restore replaced lives for a week. */
+  /* The training copy a restore replaced lives for a day. */
   try { const u = JSON.parse(lsGet(UNDO_KEY)); if (u !== null && (!isObj(u) || now() - num(u.at) > UNDO_KEEP)) lsDel(UNDO_KEY); } catch (e) { lsDel(UNDO_KEY); }
 
   const over = { url: null, key: null, delay: null };
@@ -233,14 +240,32 @@ window.M = window.M || {};
     }
     return rec;
   }
+  /* Diary days and weigh-ins are most of the data: each one's hash is kept with the record
+     itself and its edit stamp (m-core stamps every change), so a sync only re-reads the few
+     that changed instead of all of them. */
+  const wcache = typeof WeakMap === "function" ? new WeakMap() : null;
+  function sigOf(kind, rec) {
+    if (kind === "day") {
+      const e = rec.entries, u = rec.updatedAt;
+      if (typeof u !== "number" || !(u > 0) || !Array.isArray(e)) return "";
+      const last = e.length ? e[e.length - 1] : null;
+      return u + "|" + e.length + "|" + (last && typeof last === "object" ? last.id + "|" + last.servings : "") + "|" + rec.water + "|" + (typeof rec.note === "string" ? rec.note.length : 0);
+    }
+    if (kind === "body") return typeof rec.at === "number" && rec.at > 0 ? rec.at + "|" + rec.w + "|" + rec.rhr : "";
+    return "";
+  }
   function hashRec(key, rec) {
+    const kind = kindOf(key);
+    const sig = wcache && (kind === "day" || kind === "body") && isObj(rec) ? sigOf(kind, rec) : "";
+    if (sig) { const w = wcache.get(rec); if (w && w.sig === sig && w.key === key) return w.h; }
     let s;
     try { s = JSON.stringify(rec); } catch (e) { return ""; }
     if (typeof s !== "string") return "";
     const c = rcache.get(key);
-    if (c && c.s === s) return c.h;
-    const h = fnv(canon(upData(kindOf(key), rec)) || "");
-    rcache.set(key, { s, h });
+    let h;
+    if (c && c.s === s) h = c.h;
+    else { h = fnv(canon(upData(kind, rec)) || ""); rcache.set(key, { s, h }); }
+    if (sig) { wcache.set(rec, { sig, key, h }); rcache.delete(key); }   /* one copy is enough */
     return h;
   }
   const blankDay = d => !(Array.isArray(d.entries) && d.entries.length) && !num(d.water) && !d.note && !num(d.updatedAt);
@@ -324,7 +349,18 @@ window.M = window.M || {};
     fixStr(it, "brand", MAXLEN, ""); fixNum(it, "servings", false, 0); fixStr(it, "servingLabel", MAXLEN);
     fixNum(it, "g", true, 0); fixPer(it, "per"); if (!isObj(it.per)) it.per = blankPer();
     fixNum(it, "at", false); fixStr(it, "foodId", 120); fixStr(it, "mealId", 120); fixState(it); fixCook(it);
+    ["foodId", "mealId"].forEach(k => { if (k in it && (!it[k] || isBadKey(it[k]))) delete it[k]; });   /* never a lookup by "__proto__" */
     return it;
+  }
+  /* Every line gets an id, the same one each time (a merge matches lines by id), never twice. */
+  function lineIds(list) {
+    const seen = new Set();
+    list.forEach((x, i) => {
+      if (typeof x.id !== "string" || !x.id || isBadKey(x.id) || x.id.length > 120) x.id = "x" + i;
+      if (seen.has(x.id)) x.id = x.id.slice(0, 100) + "-" + i;
+      seen.add(x.id);
+    });
+    return list;
   }
   function fixFood(o, id) {
     if (o.id !== id) o.id = id;
@@ -342,7 +378,7 @@ window.M = window.M || {};
   function fixMeal(o, id) {
     if (o.id !== id) o.id = id;
     fixStr(o, "name", MAXLEN, "Meal"); fixStr(o, "desc", 500, ""); fixStr(o, "slot", 20, "Any");
-    if ("items" in o) o.items = Array.isArray(o.items) ? o.items.filter(isObj).map(it => fixLine(it, "Item")) : [];
+    if ("items" in o) o.items = Array.isArray(o.items) ? lineIds(o.items.filter(isObj).map(it => fixLine(it, "Item"))) : [];
     fixNum(o, "servingsMade", false, 0); fixPer(o, "per");
     if ("batch" in o) { if (!isObj(o.batch)) delete o.batch; else { fixNum(o.batch, "cookedG", false, 0); fixNum(o.batch, "rawG", false, 0); } }
     fixNums(o, ["createdAt", "updatedAt", "uses", "lastUsed"]); fixPid(o);
@@ -355,7 +391,8 @@ window.M = window.M || {};
     if (o.date !== date) o.date = date;
     if (!Array.isArray(o.entries)) o.entries = [];
     else if (o.entries.some(e => !isObj(e))) o.entries = o.entries.filter(isObj);
-    o.entries.forEach((e, i) => { fixLine(e, "Food"); if (typeof e.id !== "string" || !e.id) e.id = "x" + i; if (typeof e.slot !== "string" || !(typeof M.isSlot === "function" ? M.isSlot(e.slot) : true)) e.slot = "Snacks"; });
+    o.entries.forEach(e => { fixLine(e, "Food"); if (typeof e.slot !== "string" || !(typeof M.isSlot === "function" ? M.isSlot(e.slot) : true)) e.slot = "Snacks"; });
+    lineIds(o.entries);
     fixNum(o, "water", false, 0); fixStr(o, "note", 1000, ""); fixNum(o, "updatedAt", false);
     /* the app reads these on every day: fill what a bad row dropped (own rows always have them) */
     if (!isNum(o.water)) o.water = 0;
@@ -396,6 +433,14 @@ window.M = window.M || {};
       else if (kind === "body") fixBody(o, id);
       else if (kind === "profile") fixProfile(o, id);
     } catch (e) { return null; }
+    /* K4: then m-core's own cleaner, when this build has it (weigh-in limits, the app's rules).
+       Ours runs first, so every line already has a steady id and nothing random is added. */
+    if (typeof M.clean === "function") {
+      let c;
+      try { c = M.clean(kind, id, cpy(o)); } catch (e) { return o; }
+      if (c === null) return null;                   /* it can't be used: ours stays */
+      if (isObj(c)) { const s2 = scrub(c, 0); if (isObj(s2)) return s2; }
+    }
     return o;
   }
   function validId(kind, id) {
@@ -485,6 +530,40 @@ window.M = window.M || {};
     st.train[id] = { h, t: num(r.client_updated), at, n: t.sum.n, last: t.sum.last, ids: t.sum.ids, del: false, dev, guest: r.data.guest === true };
     const tl = trainLocal();
     if (tl && tl.id === id && tl.h === h) st.hashes["train|" + id] = h;
+  }
+  /* Workouts from `extra` whose ids `have` doesn't hold, added to state `d` (sorted by start).
+     This phone's workout in progress stays. Returns how many were added. */
+  const wid = w => (w.id != null ? String(w.id) : (w.start ? "s" + w.start : ""));
+  function addWorkouts(d, cur, have, active) {
+    const extra = (Array.isArray(cur.log) ? cur.log : []).filter(w => isObj(w) && wid(w) && !have.has(wid(w)));
+    if (extra.length) d.log = d.log.concat(extra).map((w, i) => ({ w, i })).sort((a, b) => num(a.w.start) - num(b.w.start) || a.i - b.i).map(o => o.w);
+    if (active) d.active = cur.active;
+    if (extra.length && Array.isArray(cur.gone) && cur.gone.length) {
+      const inLog = new Set(d.log.map(wid)), g = Array.isArray(d.gone) ? d.gone.slice() : [], seenG = new Set(g.map(String));
+      cur.gone.forEach(x => { const k = String(x); if (!seenG.has(k) && !inLog.has(k)) { seenG.add(k); g.push(x); } });
+      d.gone = g;
+    }
+    return extra.length;
+  }
+  function parseTrain(raw, pid) {
+    let d = null;
+    try { d = raw ? JSON.parse(raw) : null; } catch (e) { d = null; }
+    return isObj(d) && d.v === 1 && d.profile === pid && Array.isArray(d.log) && !hasBadKey(d, 0) ? d : null;
+  }
+  /* Restore = the backup plus the workouts only this phone has (never a silent loss). */
+  function mergeRestore(pid, t, curRaw) {
+    const cur = parseTrain(curRaw, pid);
+    if (!cur) return { raw: t.raw, kept: 0 };
+    const have = new Set(t.sum.ids);
+    (Array.isArray(t.d.gone) ? t.d.gone : []).forEach(g => have.add(String(g)));
+    /* after Switch person, the workouts that were here at the switch are the other person's:
+       they never go into this person's history (they stay in their own backup) */
+    if (st.tsw && st.tsw.to === pid && Array.isArray(st.tsw.ids)) st.tsw.ids.forEach(x => have.add(String(x)));
+    const d = JSON.parse(t.raw);
+    const kept = addWorkouts(d, cur, have, isObj(cur.active));
+    if (!kept && !isObj(cur.active)) return { raw: t.raw, kept: 0 };
+    d.updatedAt = now();
+    return { raw: JSON.stringify(d), kept };
   }
   function readUndo() {
     try {
@@ -598,6 +677,7 @@ window.M = window.M || {};
   function agree(key, kind, data, rh) {
     st.hashes[key] = rh;
     if (kind === "food" || kind === "meal") st.base[key] = cpy(upData(kind, data));
+    else if (kind === "day") { if (recentDay(idOf(key))) st.base[key] = dayBase(data); else delete st.base[key]; }
   }
   function keepLocal(kind, rec, local) {
     if ((kind === "food" || kind === "meal") && isObj(local)) {
@@ -620,6 +700,115 @@ window.M = window.M || {};
       if (v !== undefined) out[k] = cpy(v);
     });
     return out;
+  }
+  /* ------------------------------ lists merged item by item (diary entries, meal items) */
+  /* An entry's or item's fingerprint: short, since a day's merge base lives for weeks. */
+  const eh = x => fnv(canon(x) || "").split(".")[0];
+  /* Entries and items are matched by id ("i…"); one without an id by its content ("#…"). */
+  const lineKey = x => (typeof x.id === "string" && x.id ? "i" + x.id : "#" + eh(x));
+  /* B: {key: fingerprint} of the list both phones last agreed on, or null when there is none
+     (then nothing counts as deleted: both sides' entries are kept). Kept from either side:
+     new entries. Dropped: an entry deleted on one side and untouched on the other. Changed on
+     both sides (or deleted on one, edited on the other): the newer change wins. Nothing doubles. */
+  function mergeList(B, mine, theirs, theirsNewer, byTime) {
+    const mL = (Array.isArray(mine) ? mine : []).filter(isObj), tL = (Array.isArray(theirs) ? theirs : []).filter(isObj);
+    const tBy = new Map(), mBy = new Map();
+    tL.forEach(x => { const k = lineKey(x); if (!tBy.has(k)) tBy.set(k, x); });
+    mL.forEach(x => { const k = lineKey(x); if (!mBy.has(k)) mBy.set(k, x); });
+    const pick = (k, m, t) => {
+      const b = B && has(B, k) ? B[k] : undefined;
+      if (m && t) {
+        const hm = eh(m), ht = eh(t);
+        if (hm === ht) return m;
+        if (b !== undefined) { if (hm === b) return t; if (ht === b) return m; }
+        return theirsNewer ? t : m;
+      }
+      const x = m || t;
+      if (b === undefined) return x;                       /* new on one side */
+      if (eh(x) === b) return null;                        /* deleted on the other side, untouched here */
+      return (m ? !theirsNewer : theirsNewer) ? x : null;  /* deleted on one side, edited on the other */
+    };
+    const out = [], used = new Set();
+    let added = false;
+    mL.forEach(m => { const k = lineKey(m); if (used.has(k)) return; used.add(k); const v = pick(k, m, tBy.get(k)); if (v) out.push(v); });
+    tL.forEach(t => { const k = lineKey(t); if (used.has(k)) return; used.add(k); const v = pick(k, null, t); if (v) { out.push(v); added = true; } });
+    /* the same as one side: keep that side's own order (so nothing echoes back) */
+    const same = (L, by) => out.length === L.length && out.every(x => { const y = by.get(lineKey(x)); return !!y && eh(y) === eh(x); });
+    if (same(tL, tBy)) return tL;
+    if (same(mL, mBy)) return mL;
+    if (added && byTime) return out.map((x, i) => ({ x, i })).sort((a, b) => num(a.x.at) - num(b.x.at) || a.i - b.i).map(o => o.x);
+    return out;
+  }
+  const listBase = L => { const B = {}; (Array.isArray(L) ? L : []).forEach(x => { if (isObj(x)) { const k = lineKey(x); if (!has(B, k)) B[k] = eh(x); } }); return B; };
+  /* A diary day's merge base: its entries' fingerprints, water and note (not the whole day). */
+  const dayBase = d => ({ d: 1, e: listBase(d && d.entries), w: num(d && d.water), n: typeof (d && d.note) === "string" ? d.note : "" });
+  let cutC = { at: 0, v: "" };
+  function cutoffDate() {
+    const t = now();
+    if (t - cutC.at < 60000 && cutC.v) return cutC.v;
+    let v = "";
+    try { if (typeof M.addDays === "function" && typeof M.today === "function") v = String(M.addDays(M.today(), -BASE_DAYS)); } catch (e) { v = ""; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) v = new Date(t - BASE_DAYS * DAY_MS).toISOString().slice(0, 10);
+    cutC = { at: t, v };
+    return v;
+  }
+  const dateOfId = id => id.slice(id.indexOf("|") + 1);
+  const recentDay = id => dateOfId(id) >= cutoffDate();
+  function pruneBase() {
+    const cut = cutoffDate();
+    Object.keys(st.base).forEach(k => { if (kindOf(k) === "day" && dateOfId(idOf(k)) < cut) delete st.base[k]; });
+  }
+  /* Two copies of one diary day become one: entries by id, water and note on their own. */
+  function mergeDay(b, mine, theirs, theirsNewer) {
+    const B = isObj(b) && isObj(b.e) ? b.e : null;
+    const entries = mergeList(B, mine.entries, theirs.entries, theirsNewer, true);
+    const field = (k, bv, blank) => {
+      const m = mine[k], t = theirs[k];
+      if (canon(m) === canon(t)) return m;
+      if (B) { if (canon(m) === canon(bv)) return t; if (canon(t) === canon(bv)) return m; }
+      else { if (blank(m)) return t; if (blank(t)) return m; }   /* a day just made on one side */
+      return theirsNewer ? t : m;
+    };
+    const out = Object.assign({}, theirsNewer ? theirs : mine, { id: mine.id, pid: mine.pid, date: mine.date });
+    out.entries = cpy(entries);
+    out.water = field("water", B ? b.w : 0, v => !num(v));
+    out.note = field("note", B ? b.n : "", v => !v);
+    const body = d => { const o = Object.assign({}, d); delete o.updatedAt; return canon(o); };
+    const ob = body(out);
+    if (ob === body(theirs)) return theirs;
+    if (ob === body(mine)) return mine;
+    out.updatedAt = Math.max(num(mine.updatedAt), num(theirs.updatedAt));
+    return out;
+  }
+  /* Foods: the numbers belong together, so they all come from one side. Meals: items by id,
+     the batch's cooked weight and unit on their own; then per and the batch's raw weight are
+     worked out again from the merged items (never merged as numbers). */
+  const FOOD_NUMS = ["serving", "per", "per100g", "alts", "cook"];
+  function mergeRec(kind, base, mine, theirs, theirsNewer) {
+    const out = merge3(base, mine, theirs, theirsNewer);
+    if (kind === "food") {
+      const g = o => canon(FOOD_NUMS.map(k => (o[k] === undefined ? null : o[k])));
+      const b = g(base), m = g(mine), t = g(theirs);
+      const src = m === t || t === b ? mine : m === b ? theirs : theirsNewer ? theirs : mine;
+      FOOD_NUMS.forEach(k => { if (src[k] === undefined) delete out[k]; else out[k] = cpy(src[k]); });
+    } else if (kind === "meal") {
+      out.items = cpy(mergeList(listBase(base.items), mine.items, theirs.items, theirsNewer, false));
+      const bp = o => (isObj(o.batch) ? { cookedG: o.batch.cookedG, unit: o.batch.unit } : {});
+      const bf = merge3(bp(base), bp(mine), bp(theirs), theirsNewer);
+      if (num(bf.cookedG) > 0) {
+        const batch = Object.assign({}, isObj(out.batch) ? out.batch : {}, { cookedG: bf.cookedG });
+        if (bf.unit !== undefined) batch.unit = bf.unit; else delete batch.unit;
+        try { if (M.cook && typeof M.cook.rawTotal === "function") batch.rawG = M.cook.rawTotal(out.items); } catch (e) {}
+        out.batch = batch; out.servingsMade = 1;
+      } else delete out.batch;
+      try { if (M.meals && typeof M.meals.computePer === "function") out.per = M.meals.computePer(out); } catch (e) {}
+    }
+    return out;
+  }
+  /* This phone's own person (its first one): their diary never leaves this phone. */
+  function homePid() {
+    if (okPid(st.home)) return st.home;
+    return st.tp && Array.isArray(st.tp.pids) && okPid(st.tp.pids[0]) ? st.tp.pids[0] : null;
   }
   const lcs = s => String(s == null ? "" : s).trim().toLowerCase();
   const digits = s => String(s == null ? "" : s).replace(/\D/g, "").replace(/^0+/, "");
@@ -644,7 +833,7 @@ window.M = window.M || {};
       if (!isObj(d) || !Array.isArray(d.entries)) return;
       let hit = false;
       d.entries.forEach(e => { if (isObj(e) && e[field] === from) { e[field] = to; hit = true; } });
-      if (hit) markDirty("day", did);
+      if (hit) { markDirty("day", did); if (wcache) wcache.delete(d); }
     });
     if (kind === "food") Object.keys(isObj(MS.meals) ? MS.meals : {}).forEach(mid => {
       const m = MS.meals[mid];
@@ -697,6 +886,18 @@ window.M = window.M || {};
       const lh = hashRec(key, local);
       if (lh === rh) { agree(key, kind, data, rh); return; }
       if (synced !== undefined && rh === synced) return;               /* nothing new in the cloud */
+      if (kind === "day") {
+        /* Never one whole day over the other: entries from both phones are kept, a delete
+           sticks, and an entry changed on both takes the newer edit. The cloud copy replaced
+           our last push when ours hasn't changed since, so it counts as the newer one. */
+        const b = isObj(st.base[key]) && st.base[key].d === 1 ? st.base[key] : null;
+        const tn = synced !== undefined && lh === synced ? true : remoteAt > srvTime(localTime(kind, local));
+        const m = mergeDay(b, local, data, tn);
+        if (m === data) { take(data); return; }
+        if (m !== local) { coll[id] = m; markDirty(kind, id); ch.applied++; }
+        agree(key, kind, data, rh); rcache.delete(key);
+        return;
+      }
       if (kind === "profile") {
         const rs = num(data.setupAt) > 0, ls = num(local.setupAt) > 0;
         /* a profile nobody set up never replaces a real one; ours goes back up */
@@ -713,7 +914,7 @@ window.M = window.M || {};
            written after our push (it replaced it), so on a field both changed, it wins. */
         const b = st.base[key];
         if ((kind === "food" || kind === "meal") && isObj(b) && H(b) !== lh) {
-          const m = merge3(b, upData(kind, local), up, true);
+          const m = mergeRec(kind, b, upData(kind, local), up, true);
           coll[id] = keepLocal(kind, m, local); agree(key, kind, data, rh); rcache.delete(key); markDirty(kind, id); ch.applied++;
           return;
         }
@@ -721,7 +922,7 @@ window.M = window.M || {};
       }
       /* both sides changed since they last agreed */
       if ((kind === "food" || kind === "meal") && isObj(st.base[key])) {
-        const m = merge3(st.base[key], upData(kind, local), up, remoteAt > srvTime(localTime(kind, local)));
+        const m = mergeRec(kind, st.base[key], upData(kind, local), up, remoteAt > srvTime(localTime(kind, local)));
         coll[id] = keepLocal(kind, m, local); agree(key, kind, data, rh); rcache.delete(key); markDirty(kind, id); ch.applied++;
         return;
       }
@@ -887,7 +1088,7 @@ window.M = window.M || {};
       });
     });
     if (!drop.length) return 0;
-    drop.forEach(x => { delete st.hashes[x.key]; });
+    drop.forEach(x => { delete st.hashes[x.key]; delete st.base[x.key]; });
     if (!lsSet(ST_KEY, JSON.stringify(st))) { drop.forEach(x => { st.hashes[x.key] = x.h; }); return 0; }
     drop.forEach(x => { delete MS[COLL[x.kind]][x.id]; rcache.delete(x.key); markDirty(x.kind, x.id); });
     commitLocal();
@@ -932,7 +1133,7 @@ window.M = window.M || {};
     if (!keys.length) return false;
     keys.forEach(forget);
     st.cursor = "";           /* read everything again: the lost records come back */
-    saveSt();                 /* at once: a restart must not find the old memory again */
+    saveSt(true);                 /* at once: a restart must not find the old memory again */
     return true;
   }
 
@@ -1218,14 +1419,14 @@ window.M = window.M || {};
       st.pp = curPid() || "";
     } else if (!isObj(st.meta) && isObj(r.data)) { st.meta = scrub(r.data, 0); st.hashes["meta|household"] = H(st.meta); }
     st.metaAt = now();
-    saveSt();
+    saveSt(true);
     return "ok";
   }
   function closed() {
     try { commitLocal(); } catch (e) {}
     resetFor("");
     st.note = "Sync is off. The other phone deleted the cloud copy or changed the code. Everything is still on this phone.";
-    saveSt(); notify(); safeRerender();
+    saveSt(true); notify(); safeRerender();
   }
   /* Mark every row of a household deleted (row-level security allows no real deletes).
      The household row goes first, alone, so other phones stop before they see the rest. */
@@ -1258,7 +1459,7 @@ window.M = window.M || {};
         if (job.why === "moved" && !(isOn() && st.code !== job.code && st.lastSync > num(job.at))) return false;
         await wipeHousehold(job.code, job.why);
         st.old = st.old.filter(j => j !== job);
-        saveSt();
+        saveSt(true);
       }
       return true;
     })().then(v => { oldBusy = null; return v; }, () => { oldBusy = null; return false; });
@@ -1277,7 +1478,9 @@ window.M = window.M || {};
     const stopped = { ok: false, error: "Sync stopped." };
     if (!isOn()) return { ok: false, error: "Sync is off." };
     busy = true; badNote = ""; notify();
+    deferSt++;
     try {
+      if (!okPid(st.home) && st.tp && okPid(st.tp.pids[0])) st.home = st.tp.pids[0];   /* phones that joined before "home" was kept */
       const tested = !st.verified;
       if (tested) await selfTest(gen, !st.joining);
       if (gen !== epoch) return stopped;
@@ -1299,21 +1502,26 @@ window.M = window.M || {};
       }
       const pushed = await push(gen, opts);
       if (gen !== epoch) return stopped;
+      /* Only the phone's own (home) person's phone sheds a borrowed person's rows. The home
+         person's diary never leaves their own phone, whoever is picked right now. */
       const who = curPid();
-      if (who && who === st.pp && !opts.all) trimOther(who);
+      if (who && who === st.pp && who === homePid() && !opts.all) trimOther(who);
+      pruneBase();
       st.lastSync = now(); st.lastError = stuckLine() || badNote; retryN = 0; st.retryAt = 0;
       clearTimeout(retryT); retryT = null;
-      if (!saveSt()) st.lastError = errText({ code: "storage" });
+      if (!saveSt(true)) st.lastError = errText({ code: "storage" });
       if (st.old.length) finishOld();
       return { ok: true, applied, pushed };
     } catch (e) {
       if (gen !== epoch) return stopped;
       st.lastError = errText(e);
       try { pendingN = Math.max(pendingN, collect({}).items.length); } catch (x) {}
-      saveSt();   /* skipped by saveSt itself while pulled data can't reach the disk */
+      saveSt(true);   /* skipped by saveSt itself while pulled data can't reach the disk */
       scheduleRetry(e);
       return { ok: false, error: st.lastError };
     } finally {
+      deferSt = Math.max(0, deferSt - 1);
+      if (!deferSt && stDirty) saveSt(true);
       busy = false;
       notify();
     }
@@ -1398,9 +1606,9 @@ window.M = window.M || {};
     tcache = { raw: null, val: null };
     hold = null; pendingN = 0; badNote = ""; metaChecked = false;
     unsaved = false;          /* a state with no hashes claims nothing, so it can always be written */
-    const keep = { device: st.device, tp: st.tp, tsw: st.tsw, old: st.old };
+    const keep = { device: st.device, tp: st.tp, tsw: st.tsw, old: st.old, home: st.home };
     st = freshSt(keep.device);
-    st.tp = keep.tp; st.tsw = keep.tsw; st.old = keep.old;
+    st.tp = keep.tp; st.tsw = keep.tsw; st.old = keep.old; st.home = keep.home;
     st.code = code || "";
   }
 
@@ -1427,9 +1635,9 @@ window.M = window.M || {};
     const wrappedReset = function () {
       const r = origReset.apply(this, arguments);
       try {
-        resetFor(""); st.tp = null; st.tsw = null; st.prev = null;
+        resetFor(""); st.tp = null; st.tsw = null; st.prev = null; st.home = "";
         lsDel(UNDO_KEY); lsDel(RESTORED_KEY);
-        saveSt(); notify();
+        saveSt(true); notify();
       } catch (e) {}
       return r;
     };
@@ -1452,6 +1660,16 @@ window.M = window.M || {};
     }
     return all;
   }
+  /* Workouts on this phone that the cloud copy doesn't have: a restore keeps them. */
+  function keepCount(seen, tl) {
+    const have = new Set(Array.isArray(seen && seen.ids) ? seen.ids.map(String) : []);
+    if (tl && st.tsw && st.tsw.to === tl.id && Array.isArray(st.tsw.ids)) st.tsw.ids.forEach(x => have.add(String(x)));
+    return tl ? tl.ids.filter(x => !have.has(String(x))).length : 0;
+  }
+  function catchingUp() {
+    const p = curPid();
+    return !!(isOn() && p && p !== st.pp && p !== homePid() && !st.joining);
+  }
   function trainingInfo() {
     const pid = trainPid();
     if (!isOn() || !pid) return null;
@@ -1463,7 +1681,8 @@ window.M = window.M || {};
     /* mine: the cloud copy is what this phone itself last sent (or restored) */
     return { pid, t: num(seen.t), n: num(seen.n), last: num(seen.last), same: !!(here && here.h === seen.h),
       mine: !!seen.h && seen.h === st.hashes["train|" + pid],
-      missing: missingCount(seen, here), held: !!(hold && hold.id === pid), why: hold && hold.id === pid ? hold.why : "", busy: !!(here && here.busy) };
+      missing: missingCount(seen, here), held: !!(hold && hold.id === pid), why: hold && hold.id === pid ? hold.why : "", busy: !!(here && here.busy),
+      keep: keepCount(seen, here) };
   }
   M.cloud = {
     configured() { try { return configured(); } catch (e) { return false; } },
@@ -1481,7 +1700,7 @@ window.M = window.M || {};
     status() {
       try {
         return { on: isOn(), configured: configured(), code: st.code || "", lastSync: num(st.lastSync), lastError: st.lastError || "",
-          pending: pendingN, stuck: stuckKeys().length, busy: !!busy, device: st.device, note: st.note || "", verified: !!st.verified };
+          pending: pendingN, stuck: stuckKeys().length, busy: !!busy, device: st.device, note: st.note || "", verified: !!st.verified, catchUp: catchingUp() };
       } catch (e) { return { on: false, configured: false, code: "", lastSync: 0, lastError: "", pending: 0, stuck: 0, busy: false, note: "" }; }
     },
     start() {
@@ -1500,9 +1719,10 @@ window.M = window.M || {};
       try {
         if (!configured()) return null;
         resetFor(rand(20));
+        if (!okPid(st.home)) st.home = homePid() || curPid() || "";
         st.meta = { v: 1, createdAt: now(), by: st.device };
         st.verified = false; st.pp = curPid() || "";
-        saveSt();
+        saveSt(true);
         attach(); startTicker();
         cycle({ reason: "create", manual: true });
         notify();
@@ -1527,6 +1747,7 @@ window.M = window.M || {};
           if (!Array.isArray(other) || other.some(r => isObj(r) && r.household === code)) return { ok: false, error: errText({ code: "unsafe" }) };
           const prev = st.prev && st.prev.code === code ? st.prev : null;
           resetFor(code);
+          if (!okPid(st.home)) st.home = homePid() || curPid() || "";
           st.verified = true;
           if (prev) {
             /* same household as before Turn off: pick up where this phone left off */
@@ -1535,7 +1756,7 @@ window.M = window.M || {};
             st.meta = isObj(prev.meta) ? prev.meta : null;
             st.pp = okPid(prev.pp) ? prev.pp : "";
           } else { st.joining = true; st.pp = curPid() || ""; }
-          saveSt();
+          saveSt(true);
           attach(); startTicker();
           const r = await cycle({ reason: "join", manual: true });
           return { ok: true, synced: !!r.ok, error: r.ok ? "" : r.error };
@@ -1548,7 +1769,7 @@ window.M = window.M || {};
     leave() {
       try {
         const prev = st.code ? { code: st.code, hashes: st.hashes, gone: st.gone, base: st.base, train: st.train, cursor: st.cursor, meta: st.meta, pp: st.pp } : st.prev;
-        resetFor(""); st.prev = prev; saveSt(); notify();
+        resetFor(""); st.prev = prev; saveSt(true); notify();
       } catch (e) {}
       return true;
     },
@@ -1556,6 +1777,18 @@ window.M = window.M || {};
       try { return cycle({ reason: "manual", manual: true }); }
       catch (e) { return Promise.resolve({ ok: false, error: errText(e) }); }
     },
+    /* Chalk calls this right after the person on this phone changes (pick profile, Switch
+       person): that person's diary and weigh-ins come down now, not at the next tick. */
+    personChanged() {
+      try {
+        if (!isOn()) return Promise.resolve({ ok: false, error: configured() ? (st.note || "Sync is off.") : "Cloud sync isn't set up yet." });
+        notify();
+        return cycle({ reason: "person" });
+      } catch (e) { return Promise.resolve({ ok: false, error: errText(e) }); }
+    },
+    /* True while the person picked on this phone is waiting for their diary to come down
+       (show "Getting your diary…"). Never for the phone's own person: theirs stays here. */
+    catchingUp() { try { return catchingUp(); } catch (e) { return false; } },
     /* Delete my cloud data: every row of this household is marked deleted (and emptied), the
        other phone stops syncing, and this phone keeps everything. Finishes later if offline. */
     deleteCloud() {
@@ -1568,7 +1801,7 @@ window.M = window.M || {};
           st.old = st.old.filter(j => j.code !== st.code).concat({ code: st.code, why: "deleted", at: now() });
           resetFor("");
           st.note = "Your cloud copy is deleted. Everything is still on this phone.";
-          saveSt(); notify();
+          saveSt(true); notify();
           return finishOld().then(done => (done && !st.old.length ? { ok: true, error: "" }
             : { ok: false, later: true, error: "Couldn't reach the cloud. We'll finish deleting when you're online." }));
         }).catch(e => ({ ok: false, error: notDeleted({ error: errText(e) }) }));
@@ -1580,14 +1813,26 @@ window.M = window.M || {};
       try {
         if (!isOn()) return Promise.resolve({ ok: false, error: configured() ? "Sync is off." : "Cloud sync isn't set up yet." });
         /* First bring in what the other phone added (like her profile), so the new code gets it too. */
-        return cycle({ reason: "manual", manual: true, all: true }).then(r0 => {
+        return cycle({ reason: "manual", manual: true, all: true }).then(async r0 => {
           if (!r0 || !r0.ok || !isOn()) return { ok: false, code: st.code, error: (r0 && r0.error) || "Sync is off." };
-          const old = st.code, t = now();
-          resetFor(rand(20));
+          const old = st.code, t = now(), nc = rand(20), gen = epoch;
+          /* The other person's training backup lives only in the cloud: it moves to the new code
+             first. If that can't happen, nothing changes (the old code keeps working). */
+          const tl = trainLocal();
+          const rows = await request("GET", endpoint() + "?select=" + SELECT + "&kind=eq.train&deleted=eq.false&limit=10", null, old);
+          if (gen !== epoch || !isOn() || st.code !== old) return { ok: false, code: st.code, error: "Sync stopped." };
+          const carry = (Array.isArray(rows) ? rows : []).filter(x => isObj(x) && x.household === old && okPid(String(x.id)) && !(tl && tl.id === String(x.id)) && trainCheck(String(x.id), x.data));
+          if (carry.length) {
+            const body = "[" + carry.map(x => noKey(JSON.stringify({ household: nc, kind: "train", id: String(x.id), data: x.data, deleted: false,
+              client_updated: Math.max(0, Math.round(num(x.client_updated))), device: typeof x.device === "string" ? x.device.slice(0, 64) : "" }))).join(",") + "]";
+            await request("POST", upsertURL(), body, nc, PREFER);
+            if (gen !== epoch || !isOn() || st.code !== old) return { ok: false, code: st.code, error: "Sync stopped." };
+          }
+          resetFor(nc);
           st.old = st.old.filter(j => j.code !== old).concat({ code: old, why: "moved", at: t });
           st.meta = { v: 1, createdAt: t, by: st.device };
           st.verified = false; st.pp = curPid() || "";
-          saveSt(); attach(); startTicker(); notify();
+          saveSt(true); attach(); startTicker(); notify();
           return cycle({ reason: "code", manual: true }).then(r => Promise.resolve(finishOld()).then(() => ({ ok: !!r.ok, code: st.code, error: r.ok ? "" : r.error })));
         }).catch(e => ({ ok: false, code: st.code, error: errText(e) }));
       } catch (e) { return Promise.resolve({ ok: false, error: errText(e) }); }
@@ -1604,13 +1849,14 @@ window.M = window.M || {};
           const yes = !!(r && !r.deleted);
           const seen = st.train[pid];
           if (yes && (!seen || seen.del || String(seen.at) !== String(r.updated_at))) cycle({ reason: "train" });   /* learn what it holds */
-          if (!yes && seen && !seen.del) { st.train[pid] = { del: true, t: 0, at: "" }; saveSt(); }
+          if (!yes && seen && !seen.del) { st.train[pid] = { del: true, t: 0, at: "" }; saveSt(true); }
           return yes;
         }, () => { const s = st.train[pid]; return !!(s && !s.del); }).catch(() => false);
       } catch (e) { return Promise.resolve(false); }
     },
-    /* Replace this phone's training with the cloud copy, then reload. Refuses mid-workout.
-       The replaced training is kept for a week so Undo can put it back. */
+    /* Bring back the cloud copy of this person's training, then reload. Refuses mid-workout.
+       Workouts only this phone has stay (added in date order); the next sync backs them up.
+       The phone's training from before is kept for a day so Undo can put it back. */
     restoreTraining() {
       try {
         const pid = trainPid();
@@ -1623,14 +1869,16 @@ window.M = window.M || {};
           const t = r && r.deleted !== true ? trainCheck(pid, r.data) : null;
           if (!t) return false;
           const cur = lsGet(TRAIN_KEY);
+          const mr = mergeRestore(pid, t, cur);
           if (cur) {
             let n = 0;
             try { n = trainSum(JSON.parse(cur)).n; } catch (e) { n = 0; }
-            if (!lsSet(UNDO_KEY, JSON.stringify({ v: 1, at: now(), pid, n, raw: cur })) && n > 0) {
-              st.lastError = errText({ code: "storage" }); saveSt(); notify(); return false;
+            /* with nothing of this phone's lost, a phone too full for the Undo copy may still restore */
+            if (!lsSet(UNDO_KEY, JSON.stringify({ v: 1, at: now(), pid, n, raw: cur, bk: t.sum.ids })) && n > 0 && n > mr.kept) {
+              st.lastError = errText({ code: "storage" }); saveSt(true); notify(); return false;
             }
           }
-          if (!lsSet(TRAIN_KEY, t.raw)) { lsDel(UNDO_KEY); st.lastError = errText({ code: "storage" }); saveSt(); notify(); return false; }
+          if (!lsSet(TRAIN_KEY, mr.raw)) { lsDel(UNDO_KEY); st.lastError = errText({ code: "storage" }); saveSt(true); notify(); return false; }
           lsSet(RESTORED_KEY, String(t.sum.n));
           const h = fnv(t.raw);
           st.hashes["train|" + pid] = h;
@@ -1638,7 +1886,7 @@ window.M = window.M || {};
           st.tp = { pids: [pid] }; st.tsw = null;
           hold = null;
           tcache = { raw: null, val: null };
-          saveSt();
+          saveSt(true);
           try { if (typeof location !== "undefined" && location && typeof location.reload === "function") location.reload(); } catch (e) {}
           return true;
         }, () => false).catch(() => false);
@@ -1651,12 +1899,21 @@ window.M = window.M || {};
       try {
         const u = readUndo();
         if (!u || activeWorkout()) return false;
-        if (!lsSet(TRAIN_KEY, u.raw)) { st.lastError = errText({ code: "storage" }); saveSt(); notify(); return false; }
+        /* exactly what the phone had, plus any workout logged since the restore */
+        let raw = u.raw;
+        const pid = okPid(u.pid) ? u.pid : null, old = pid ? parseTrain(u.raw, pid) : null, now_ = pid ? parseTrain(lsGet(TRAIN_KEY), pid) : null;
+        if (old && now_) {
+          const have = new Set(Array.isArray(u.bk) ? u.bk.map(String) : []);
+          old.log.forEach(w => { if (isObj(w) && wid(w)) have.add(wid(w)); });
+          const fresh = isObj(now_.active) && num(now_.active.start) > num(u.at);   /* a workout started after the restore */
+          if (addWorkouts(old, now_, have, fresh) || fresh) { old.updatedAt = now(); raw = JSON.stringify(old); }
+        }
+        if (!lsSet(TRAIN_KEY, raw)) { st.lastError = errText({ code: "storage" }); saveSt(true); notify(); return false; }
         lsDel(UNDO_KEY); lsDel(RESTORED_KEY);
         if (okPid(u.pid)) delete st.hashes["train|" + u.pid];
         st.tp = null; st.tsw = null; hold = null;
         tcache = { raw: null, val: null };
-        saveSt();
+        saveSt(true);
         try { if (typeof location !== "undefined" && location && typeof location.reload === "function") location.reload(); } catch (e) {}
         return true;
       } catch (e) { return false; }
@@ -1668,6 +1925,6 @@ window.M = window.M || {};
     codeMasked() { try { const c = st.code; return c ? c.slice(0, 4) + "-••••-••••-••••-••••" : ""; } catch (e) { return ""; } },
     pickCode(s) { try { const c = pickCode(s); return CODE_RE.test(c) ? c : ""; } catch (e) { return ""; } },
     /* internals for tests */
-    _: { canon, hash: H, tsVal, normCode, clean, merge3, state: () => st, scan: () => scan({}), cycle: o => cycle(o), CODE_RE }
+    _: { canon, hash: H, tsVal, normCode, clean, merge3, mergeDay, dayBase, mergeRec, state: () => st, scan: () => scan({}), cycle: o => cycle(o), CODE_RE }
   };
 })(window.M);

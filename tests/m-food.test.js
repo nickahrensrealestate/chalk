@@ -533,7 +533,8 @@ t("scanner camera errors: plain words, always {code:\"camera\"}", () => {
   const C = M.food._.cameraErr;
   const blocked = C({ name: "NotAllowedError", message: "Permission denied" });
   assert.strictEqual(blocked.code, "camera");
-  assert.ok(/blocked/i.test(blocked.message) && /photo of the barcode/i.test(blocked.message));
+  /* IO-02: how to turn the camera back on, in plain words */
+  assert.strictEqual(blocked.message, "Chalk can't use the camera. Swipe Chalk closed, open it again, and tap Allow. Or turn on Camera in Settings → Apps → Safari → Camera.");
   assert.ok(/No camera/.test(C({ name: "NotFoundError" }).message));
   assert.ok(/busy/.test(C({ name: "NotReadableError" }).message));
   assert.ok(/didn't start/.test(C(new Error("weird")).message));
@@ -633,7 +634,7 @@ t("scanner flow: camera + engine → onCode once, after two agreeing frames, as 
 t("scanner flow: camera blocked / insecure page / no camera API → {code:\"camera\"}, container untouched or restored", async () => {
   const denied = scanDom({ gum: () => Promise.reject(Object.assign(new Error("Permission denied"), { name: "NotAllowedError" })) });
   denied.M.food.scanner._setEngine(scriptedEngine([[]]));
-  await denied.M.food.scanner.start(denied.el, () => {}).then(() => assert.fail(), e => { assert.strictEqual(e.code, "camera"); assert.ok(/photo of the barcode/i.test(e.message)); });
+  await denied.M.food.scanner.start(denied.el, () => {}).then(() => assert.fail(), e => { assert.strictEqual(e.code, "camera"); assert.ok(/can't use the camera/i.test(e.message)); });
   assert.strictEqual(denied.el.innerHTML, "");
   assert.strictEqual(denied.el.getAttribute("style"), "min-height:200px");
   const insecure = scanDom({ insecure: true });
@@ -899,7 +900,9 @@ t("describe (no Claude): the six everyday phrases", async () => {
   it = await d("pork tenderloin 5 oz with broccoli");
   assert.strictEqual(it.length, 2);
   assert.ok(/pork tenderloin/i.test(it[0].name) && /^5 oz \(142 g\)/.test(it[0].servingLabel) && it[0].servings === 1, JSON.stringify(it[0]));
-  near(kcalOf(it[0]), 203, 25, "5 oz pork tenderloin");
+  /* decision 1: typed meat is a raw weight unless they say cooked (5 oz raw ≈ 155 kcal) */
+  near(kcalOf(it[0]), 155, 20, "5 oz raw pork tenderloin");
+  if (cookOf(it[0].foodId)) assert.strictEqual(it[0].state, "raw");
   assert.ok(/broccoli/i.test(it[1].name) && it[1].servings === 1);
   it = await d("zucchini and onions");
   assert.strictEqual(it.length, 2);
@@ -1443,6 +1446,7 @@ t("OFL-06/PRF-10/BEF-20 label reader: download progress in plain words; one read
   const photo = { type: "image/jpeg", size: 10 };
   try {
     M.food.label.release();
+    localStorage.removeItem("chalk.ocr.loaded");       /* first time on this phone */
     let T = global.Tesseract = fakeTess(LABEL_TXT);
     const said = [];
     const r = await M.food.label.fromImage(photo, { onProgress: m => said.push(m) });
@@ -1618,7 +1622,7 @@ t("Nick's rules, describe (no Claude): turkey slices → Hillshire Farm, jam / j
     assert.strictEqual(it.servings, 1, "'4%' is part of the name, not 4 servings");
     /* "peanut butter and jelly": the jelly is theirs */
     const pbj = await M.food.describe("peanut butter and jelly", {});
-    assert.strictEqual(pbj.items[1].foodId, fx.jam.id);
+    assert.ok(pbj.items.some(x => x.foodId === fx.jam.id), "the jelly is theirs");
     /* their own saved turkey still wins */
     const mine = M.foods.add({ name: "Turkey slices", brand: "Kroger", source: "off", serving: { qty: 2, unit: "oz", g: 56 }, per: { cal: 60, p: 11, c: 1, f: 1, fiber: 0, sugar: 1, sodium: 500 } });
     assert.strictEqual((await d("turkey slices")).foodId, mine.id);
@@ -1742,8 +1746,10 @@ t("C4 describe (no Claude): '10 shrimp' is 10 shrimp (not 10 × 4 oz); amounts a
     assert.ok(/large shrimp/.test(s10.servingLabel), "a count uses the per-shrimp size: " + s10.servingLabel);
     assert.strictEqual(s10.servings, 10);
     assert.ok(s10.g > 80 && s10.g < 250, "10 shrimp weigh about 150 g, got " + s10.g);
-    const r10 = one("10 raw shrimp");
-    assert.strictEqual(r10.state, "raw"); assert.ok(r10.g > s10.g, "raw shrimp weigh more than cooked");
+    /* decision 1: shrimp are raw unless they say cooked */
+    assert.strictEqual(s10.state, "raw");
+    const c10 = one("10 cooked shrimp");
+    assert.strictEqual(c10.state, "cooked"); assert.ok(c10.g < s10.g, "cooked shrimp weigh less than raw");
   }
   const qn = G.find(f => f.id === "g_quinoa");
   if (qn && qn.cook) {
@@ -1804,6 +1810,232 @@ t("C4 Claude's chicken breast with a count but no grams ('2 breasts') gets 175 g
     assert.strictEqual(srv.foodId, undefined); assert.strictEqual(srv.per.cal, 300);
     assert.strictEqual(thigh.foodId, undefined); assert.strictEqual(thigh.per.cal, 300);
   } finally { delete global.fetch; M.ai.setKey(""); }
+});
+
+/* ======================================================================= */
+/* Fixer round 4 (F4): describe amounts, raw / cooked, missing words, two foods, PB&J, codes */
+const r4one = s => { const r = M.food.describeLocal(s); assert.deepStrictEqual(r.unmatched, [], s + " unmatched"); assert.strictEqual(r.items.length, 1, s + " → " + r.items.map(i => i.name).join(" + ")); return r.items[0]; };
+const r4g = it => it.g;   /* a describe item's g is the grams of the whole portion */
+t("DA-01 a size word the food's own portion already has isn't applied again ('1 large egg' is 1 egg); sizes scale only when no sized portion exists", () => {
+  M.reset();
+  const egg = M.DB.generic.find(f => f.id === "g_egg_large");
+  if (egg && /large/i.test(egg.serving.unit)) {
+    let it = r4one("1 large egg");
+    assert.strictEqual(it.foodId, egg.id); assert.strictEqual(it.servings, 1, "1 large egg is one egg"); near(r4g(it), egg.serving.g, 0.5);
+    it = r4one("2 large eggs");
+    assert.strictEqual(it.servings, 2); near(r4g(it), 2 * egg.serving.g, 0.5);
+    it = r4one("3 large eggs"); near(r4g(it), 3 * egg.serving.g, 0.5);
+  }
+  const ban = M.DB.generic.find(f => f.id === "g_banana");
+  if (ban && (ban.alts || []).some(a => /^1 large\b/.test(a.label))) { const it = r4one("1 large banana"); near(r4g(it), ban.alts.find(a => /^1 large\b/.test(a.label)).g, 0.5, "the banana's own large size"); }
+  const cu = M.DB.generic.find(f => f.id === "g_cucumber");
+  const whole = cu && (cu.alts || []).find(a => /^1 cucumber\b/.test(a.label));
+  if (whole) { const it = r4one("1 small cucumber"); near(r4g(it), 0.75 * whole.g, 1, "¾ of a whole cucumber, not ¾ cup"); }
+});
+t("DA-02 raw / cooked twins: the state they typed wins; plain vegetables default to raw; '10 baby carrots' is 10 baby carrots", () => {
+  M.reset();
+  const G = M.DB.generic, has = id => G.some(f => f.id === id);
+  if (has("g_broccoli_raw") && has("g_broccoli_cooked")) {
+    for (const s of ["raw broccoli", "1 cup raw broccoli", "broccoli", "1 cup broccoli"]) assert.strictEqual(r4one(s).foodId, "g_broccoli_raw", s);
+    for (const s of ["cooked broccoli", "roasted broccoli", "1 cup steamed broccoli"]) assert.strictEqual(r4one(s).foodId, "g_broccoli_cooked", s);
+  }
+  if (has("g_zucchini_raw") && has("g_zucchini")) { assert.strictEqual(r4one("1 zucchini").foodId, "g_zucchini_raw"); assert.strictEqual(r4one("grilled zucchini").foodId, "g_zucchini"); }
+  if (has("g_carrots")) {
+    const it = r4one("10 baby carrots");
+    assert.ok(/carrot/i.test(it.name) && !/cooked/i.test(it.name), it.name);
+    near(r4g(it), 100, 15, "10 baby carrots ≈ 100 g");
+    assert.ok(kcalOf(it) < 60, "10 baby carrots are ~35 cal, got " + kcalOf(it));
+    assert.ok(!/cooked/i.test(r4one("2 carrots").name));
+  }
+});
+t("DA-03 a whole item is the item, not a cup: '1 cucumber', '½ cucumber'; asparagus spears (DA-05)", () => {
+  M.reset();
+  const cu = M.DB.generic.find(f => f.id === "g_cucumber");
+  const whole = cu && (cu.alts || []).find(a => /^1 cucumber\b/.test(a.label));
+  if (whole) {
+    let it = r4one("1 cucumber");
+    near(r4g(it), whole.g, 0.5, "one whole cucumber"); near(kcalOf(it), whole.g * cu.per100g.cal / 100, 1.5);
+    it = r4one("½ cucumber"); near(r4g(it), whole.g / 2, 2, "half a cucumber");
+    it = r4one("half a cucumber"); near(r4g(it), whole.g / 2, 2);
+  }
+  const as = M.DB.generic.find(f => f.id === "g_asparagus");
+  if (as && /spear/.test(as.serving.unit)) {
+    const per = as.serving.g / as.serving.qty;
+    for (const [s, n] of [["6 asparagus spears", 6], ["3 asparagus spears", 3], ["6 spears asparagus", 6], ["4 spears of asparagus", 4]]) { const it = r4one(s); assert.strictEqual(it.foodId, as.id, s); near(r4g(it), n * per, 0.6, s); }
+  }
+  assert.deepStrictEqual(M.food.parseQuantity("6 asparagus spears"), { qty: 6, unit: "spear", words: "asparagus", raw: "6 asparagus spears", explicitQty: true });
+  assert.strictEqual(M.food.parseQuantity("1 cup broccoli florets").words, "broccoli");
+  assert.strictEqual(M.food.parseQuantity("3 chicken strips").unit, null, "chicken strips aren't breasts");
+});
+t("decision 1: typed meat and fish are raw weights unless they say cooked; rice stays cooked unless dry", () => {
+  M.reset();
+  for (const s of ["4 oz cod", "8 oz shrimp", "scallops", "6 oz pork tenderloin"]) { const it = r4one(s); if (it.cook) assert.strictEqual(it.state, "raw", s); }
+  for (const s of ["4 oz cooked cod", "8 oz grilled shrimp", "6 oz baked pork tenderloin"]) { const it = r4one(s); if (it.cook) assert.strictEqual(it.state, "cooked", s); }
+  const rice = r4one("1 cup rice"); if (rice.cook) assert.strictEqual(rice.state, "cooked");
+  assert.strictEqual(r4one("3/4 cup cooked rice").foodId, rice.foodId, "cooked rice is the rice that has raw and cooked, not brown rice");
+  const dry = r4one("1/4 cup dry quinoa"); if (dry.cook) assert.strictEqual(dry.state, "raw");
+  const ch = r4one("200 g chicken"); if (ch.cook) assert.strictEqual(ch.state, "raw");
+  const gc = r4one("2 grilled chicken breasts"); if (gc.cook) assert.strictEqual(gc.state, "raw", "Nick: chicken breast is always raw grams");
+});
+t("SC-04 a word they said that isn't in the food means it's not that food: string / cheddar / feta cheese, whipped cream; 'cream' is cream, not sour cream", () => {
+  M.reset();
+  for (const s of ["string cheese", "cheddar cheese", "feta cheese", "whipped cream", "2 cheese sticks"]) assert.deepStrictEqual(M.food.describeLocal(s).unmatched, [s], s);
+  const c = r4one("cream"); assert.ok(!/sour/i.test(c.name), "cream → " + c.name);
+  assert.ok(/sour/i.test(r4one("sour cream").name));
+  assert.ok(!/peanut/i.test((M.food.describeLocal("butter").items[0] || { name: "" }).name), "butter isn't peanut butter");
+  const r = M.food.describeLocal("coffee with cream");
+  assert.strictEqual(r.items.length, 2); assert.ok(!r.items.some(i => /sour/i.test(i.name)));
+  /* colors, sizes and "baby" may be missing; a food's search words count */
+  assert.ok(/bell pepper/i.test(r4one("1 red bell pepper").name));
+  const jam = M.DB.generic.find(f => f.words && /preserves/.test(f.words));
+  if (jam) assert.strictEqual(r4one("1 tbsp preserves").foodId, jam.id);
+  assert.deepStrictEqual(M.food.describeLocal("a turkey sandwich").unmatched, ["a turkey sandwich"], "search words don't make a sandwich");
+});
+t("SC-05 two foods said together are both logged; a word that makes it another food isn't split off; unknown dishes stay unmatched", () => {
+  M.reset();
+  const names = s => M.food.describeLocal(s).items.map(i => i.name);
+  let n = names("chicken rice"); assert.strictEqual(n.length, 2); assert.ok(/chicken breast/i.test(n[0]) && /rice/i.test(n[1]), n.join(" + "));
+  n = names("avocado toast"); assert.ok(n.length === 2 && /avocado/i.test(n[0]) && /bread/i.test(n[1]), n.join(" + "));
+  n = names("egg toast"); assert.ok(n.length === 2 && /^egg/i.test(n[0]) && /bread/i.test(n[1]), n.join(" + "));
+  const bowl = M.food.describeLocal("burrito bowl with chicken rice and beans");
+  assert.ok(bowl.items.some(i => /chicken breast/i.test(i.name)) && bowl.items.some(i => /rice/i.test(i.name)) && bowl.items.some(i => /beans/i.test(i.name)), bowl.items.map(i => i.name).join(" + "));
+  assert.deepStrictEqual(bowl.unmatched, ["burrito bowl"]);
+  const bagel = M.food.describeLocal("cream cheese on a bagel");
+  assert.deepStrictEqual(bagel.items.map(i => i.name), [M.DB.generic.find(f => f.id === "g_bagel_plain").name]);
+  assert.deepStrictEqual(bagel.unmatched, ["cream cheese"], "cream cheese isn't cream + cheese");
+  assert.ok(/corn on the cob/i.test(r4one("corn on the cob").name), "'on the cob' isn't a split");
+  assert.ok(/rice/i.test(r4one("rice on the side").name));
+  assert.deepStrictEqual(M.food.describeLocal("teriyaki chicken").unmatched, ["teriyaki chicken"]);
+  assert.deepStrictEqual(M.food.describeLocal("chicken salad").unmatched, ["chicken salad"], "a dish isn't split into its parts");
+});
+t("SC-06 PB&J in any spelling is 2 slices of bread + 2 tbsp peanut butter + 1 tbsp jam; 'half and half' stays one food", () => {
+  M.reset();
+  const pb = M.DB.generic.find(f => f.id === "g_peanut_butter");
+  for (const s of ["PB&J", "pb and j", "pbj sandwich", "peanut butter jelly", "peanut butter and jelly sandwich", "a pb&j", "pb & j"]) {
+    const r = M.food.describeLocal(s);
+    assert.deepStrictEqual(r.unmatched, [], s);
+    assert.strictEqual(r.items.length, 3, s + " → " + r.items.map(i => i.name).join(" + "));
+    const [bread, butter, jam] = r.items;
+    assert.ok(/bread/i.test(bread.name), s); near(r4g(bread), 2 * M.DB.generic.find(f => f.id === bread.foodId).serving.g, 0.5, s + " bread");
+    assert.strictEqual(butter.foodId, pb.id, s); near(r4g(butter), 32, 0.5, s + " 2 tbsp");
+    assert.ok(/jam|jelly/i.test(jam.name), s); assert.ok(r4g(jam) > 10 && r4g(jam) < 25, s + " 1 tbsp jam");
+  }
+  const two = M.food.describeLocal("2 pb&j");
+  near(r4g(two.items[1]), 64, 0.5, "2 sandwiches → 4 tbsp");
+  const js = M.food.describeLocal("jelly sandwich");
+  assert.strictEqual(js.items.length, 2); assert.ok(!js.items.some(i => /peanut/i.test(i.name)));
+  const hh = M.food.describeLocal("coffee with half and half");
+  assert.deepStrictEqual(hh.unmatched, []); assert.strictEqual(hh.items.length, 2);
+  assert.ok(/^half and half/i.test(hh.items[1].name), hh.items[1].name);
+  assert.deepStrictEqual(M.food.describeLocal("2 tbsp half and half").items.map(i => i.servingLabel.replace(/ \(.*/, "") + "|" + i.servings), ["2 tbsp|1"]);
+});
+t("SC-03 Claude's chicken weight: a photo is cooked unless Claude says raw; describe goes by raw / cooked words, else calories per gram", async () => {
+  M.reset(); M.ai.setKey("sk-ant-test");
+  const breast = M.DB.generic.find(f => f.alwaysRaw === true && /chicken/i.test(f.name));
+  const ck = breast && M.cook && M.cook.of ? M.cook.of(breast) : null;
+  if (!breast || !ck || !ck.per100gCooked) { M.ai.setKey(""); return; }
+  const P = cal => ({ cal, p: 50, c: 0, f: 6, fiber: 0, sugar: 0, sodium_mg: 120 });
+  let items = [];
+  global.fetch = async () => claudeReply({ items });
+  try {
+    const file = { type: "image/jpeg", size: 3, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+    items = [{ name: "Chicken breast", servingLabel: "6 oz (170 g)", g: 170, per: P(280) }, { name: "Chicken breast", servingLabel: "6 oz (170 g raw)", g: 170, per: P(190) }];
+    let out = await M.food.photo.estimate(file, {});
+    assert.strictEqual(out.items[0].state, "cooked", "a photo shows cooked chicken");
+    near(out.items[0].per.cal, 170 * ck.per100gCooked.cal / 100, 1.5, "cooked Kirkland numbers");
+    assert.strictEqual(out.items[1].state, "raw", "Claude said raw");
+    items = [{ name: "Grilled chicken breast", servingLabel: "6 oz (170 g)", g: 170, per: P(280) }, { name: "Chicken breast", servingLabel: "6 oz (170 g)", g: 170, per: P(280) }, { name: "Chicken breast", servingLabel: "6 oz (170 g)", g: 170, per: P(190) }, { name: "Chicken breast", servingLabel: "1 breast", g: null, per: P(300) }];
+    out = await M.food.describe("chicken", {});
+    assert.strictEqual(out.method, "ai");
+    assert.deepStrictEqual(out.items.map(i => i.state), ["cooked", "cooked", "raw", "raw"], "grilled → cooked; 1.65 cal/g → cooked; 1.1 cal/g → raw; a breast count is raw");
+  } finally { delete global.fetch; M.ai.setKey(""); }
+});
+t("K3 lookup: built-in foods' package codes (UPC-A or EAN-13) and linked codes are found before going online, offline too", async () => {
+  const byCode = M.foods.byCode;
+  for (const withCore of [true, false]) {
+  if (!withCore) delete M.foods.byCode;              /* before m-core has M.foods.byCode */
+  try { await k3Case(); } finally { if (byCode) M.foods.byCode = byCode; }
+  }
+});
+async function k3Case() {
+  M.reset();
+  const g = M.DB.generic.find(f => f.id === "g_cottage_cheese_2") || M.DB.generic[0];
+  const had = g.barcodes;
+  let asked = 0;
+  global.fetch = async () => { asked++; return reply({ status: 0 }); };
+  try {
+    g.barcodes = ["073420516208"];
+    for (const code of ["073420516208", "0073420516208"]) {
+      const r = await M.food.lookup(code);
+      assert.strictEqual(r.status, "found", code); assert.strictEqual(r.food.id, g.id); assert.strictEqual(r.saved, true); assert.strictEqual(r.builtIn, true);
+    }
+    NAV.onLine = false;
+    assert.strictEqual((await M.food.lookup("073420516208")).food.id, g.id, "works offline");
+    NAV.onLine = true;
+    assert.strictEqual(asked, 0, "Open Food Facts never asked");
+    /* a code they linked to a food ("Pick one of my foods") */
+    const other = M.DB.generic.find(f => f.id === "g_banana");
+    M.MS.codes = { "0012345678905": other.id };
+    const r = await M.food.lookup("012345678905");
+    assert.strictEqual(r.status, "found"); assert.strictEqual(r.food.id, other.id);
+    assert.strictEqual(asked, 0);
+    /* their own saved food with the code still comes first */
+    const mine = M.foods.add({ name: "Cottage cheese", brand: "Daisy", source: "off", barcode: "073420516208", serving: { qty: 0.5, unit: "cup", g: 113 }, per: { cal: 90, p: 13, c: 5, f: 2.5, fiber: 0, sugar: 4, sodium: 390 } });
+    assert.strictEqual((await M.food.lookup("073420516208")).food.id, mine.id);
+  } finally { if (had === undefined) delete g.barcodes; else g.barcodes = had; delete M.MS.codes; NAV.onLine = true; delete global.fetch; M.reset(); }
+}
+t("OF-01 offline barcode lookup: code 'offline' with the barcode, plain words, Open Food Facts not tried; scanner offline text", async () => {
+  M.reset();
+  let asked = 0;
+  global.fetch = async () => { asked++; return reply({ status: 0 }); };
+  NAV.onLine = false;
+  try {
+    await M.food.lookup("049000028904").then(() => assert.fail("should reject"), e => {
+      assert.strictEqual(e.code, "offline");
+      assert.strictEqual(e.message, "No internet, so this barcode can't be looked up. Add it by hand now.");
+      assert.strictEqual(e.detail && e.detail.barcode, "049000028904");
+    });
+    assert.strictEqual(asked, 0);
+  } finally { NAV.onLine = true; delete global.fetch; }
+  assert.ok(/needs internet the first time\. Add the food by hand for now\./.test(SRC("m-food.js")), "scanner load text offline");
+});
+
+t("OF-03 label reader loaded before on this phone (cached) or offline: 'Starting the label reader…', no download talk", async () => {
+  M.ai.setKey("");
+  const realPrep = M.img.prepOCR;
+  M.img.prepOCR = async () => ({ canvas: {}, blob: {}, width: 10, height: 10 });
+  try {
+    M.food.label.release();
+    localStorage.setItem("chalk.ocr.loaded", "1");
+    global.Tesseract = fakeTess(LABEL_TXT);
+    const said = [];
+    const r = await M.food.label.fromImage({ type: "image/jpeg", size: 10 }, { onProgress: m => said.push(m) });
+    assert.strictEqual(r.food.per.cal, 190);
+    assert.ok(said.includes("Starting the label reader…"), said.join(" | "));
+    assert.ok(!said.some(m => /Downloading/.test(m)), said.join(" | "));
+    M.food.label.release();
+    localStorage.removeItem("chalk.ocr.loaded");
+    await M.food.label.fromImage({ type: "image/jpeg", size: 10 });
+    assert.strictEqual(localStorage.getItem("chalk.ocr.loaded"), "1", "remembered after the first load");
+  } finally { M.food.label.release(); M.img.prepOCR = realPrep; delete global.Tesseract; }
+});
+t("SC-08 shouting words in a normal name read like the rest; BBQ / USDA stay; SC-11 no '1 package' smaller than a serving", () => {
+  const f = M.food.fromOFF({ code: "0000000000017", product_name: "Organic GREEK YOGURT plain", brands: "KIRKLAND Signature", serving_size: "170 g", serving_quantity: 170, nutriments: { "energy-kcal_100g": 73, proteins_100g: 10, carbohydrates_100g: 4, fat_100g: 2 } });
+  assert.strictEqual(f.name, "Organic Greek Yogurt plain");
+  assert.strictEqual(f.brand, "Kirkland Signature");
+  const b = M.food.fromOFF({ code: "0000000000024", product_name: "Sweet BBQ sauce USDA organic", brands: "Stubb's", serving_size: "2 tbsp (36 g)", serving_quantity: 36, nutriments: { "energy-kcal_100g": 150, proteins_100g: 0, carbohydrates_100g: 36, fat_100g: 0 } });
+  assert.strictEqual(b.name, "Sweet BBQ sauce USDA organic");
+  const can = M.food.fromOFF({ code: "0000000000031", product_name: "Sparkling water", brands: "Brand", quantity: "100 g", serving_size: "12 fl oz (355 ml)", serving_quantity: 355, nutriments: { "energy-kcal_100g": 10, proteins_100g: 0, carbohydrates_100g: 2.5, fat_100g: 0 } });
+  assert.ok(!(can.alts || []).some(a => /package/.test(a.label)), JSON.stringify(can.alts));
+});
+
+t("SC-09 label OCR: a gram line read as 'N.N9' with no unit is N.N g (the g read as 9), flagged to check", () => {
+  const txt = "Nutrition Facts\nServing size 1/2 cup (113g)\nCalories 90\nTotal Fat 2.59\nSodium 390mg\nTotal Carbohydrate 5g\nDietary Fiber 0g\nTotal Sugars 4g\nProtein 13g";
+  const r = M.food.label.parse(txt);
+  assert.strictEqual(r.per.f, 2.5);
+  assert.ok(r.check.includes("f"), JSON.stringify(r.check));
+  const ok = M.food.label.parse(txt.replace("2.59", "2.5g"));
+  assert.strictEqual(ok.per.f, 2.5); assert.ok(!ok.check.includes("f"), "a real 2.5g isn't flagged");
 });
 
 /* ---- run ---- */

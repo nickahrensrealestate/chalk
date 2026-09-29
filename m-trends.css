@@ -182,3 +182,22 @@
 .mt-b14 .lbl{line-height:1.25}
 .mt-setnote .mt-text{margin-bottom:10px}
 @media (max-width:340px){.mt-rangebar .mt-rl{display:none}.mt-rangebar{justify-content:flex-end}.mt-code{font-size:19px;letter-spacing:.02em}}
+
+/* ---- round 4 (TR-06, VI-14, VI-21, VI-22, TR-01..03 messages) ---- */
+/* today is still going: a lighter bar with "so far" over it */
+.mt-chart .bar.sofar{fill-opacity:.42}
+.mt-chart .sofar-t{fill:var(--mut);font-size:10px;font-weight:600}
+.mt-sofarnote{margin:0 0 4px}
+/* the 3 tiles line up at 375 wide ("7-day average" no longer wraps into a taller tile) */
+@media (max-width:380px){.mt-card .stats{grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) minmax(0,1fr)}.mt-card .stats .stat .k{white-space:nowrap}}
+.mt-nb{white-space:nowrap}
+/* You: no double line under a card head; the key box hint in the app's font */
+.mt-card>.hd+.srow{border-top:0}
+.mt-key input:placeholder-shown{font-family:"Barlow",-apple-system,sans-serif;font-size:16px;letter-spacing:0}
+/* both check-in cards: the same two-column buttons; a third button (Skip) takes the full row */
+.mt-banner .mt-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mt-banner .mt-row .btn{width:100%;min-width:0}
+.mt-banner .mt-row .btn:nth-child(3){grid-column:1/-1}
+/* a typo message sits right under its row */
+.mt-card>.mt-msg{margin:0;padding:0 14px 12px}
+#mt-tmsg{margin:4px 2px 6px}

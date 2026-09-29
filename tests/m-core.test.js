@@ -426,8 +426,9 @@ t("search: empty query → recents then slot meals then other meals", () => {
   const res = M.search("", { pid: "nick", slot: "Lunch" });
   /* UX2-07: in a slot, what they log most there (last 14 days) comes first, then the newest */
   assert.strictEqual(res[0].kind, "recent"); assert.strictEqual(res[0].name, "eggs");
-  assert.strictEqual(res[1].kind, "recent"); assert.strictEqual(res[1].name, "Oatmeal");
-  assert.deepStrictEqual(M.search("", { pid: "nick", slot: "Breakfast" }).slice(0, 2).map(x => x.name), ["Oatmeal", "eggs"]);
+  /* WK-08: recents eaten in this meal, this meal's saved meals, "Any time" meals, other recents, other meals */
+  assert.deepStrictEqual(res.slice(0, 5).map(x => x.kind + ":" + x.name), ["recent:eggs", "meal:Chicken rice bowls", "meal:Any meal", "recent:Oatmeal", "meal:Oats"]);
+  assert.deepStrictEqual(M.search("", { pid: "nick", slot: "Breakfast" }).slice(0, 1).map(x => x.name), ["Oatmeal"]);
   const meals = res.filter(x => x.kind === "meal").map(x => x.name);
   assert.deepStrictEqual(meals, ["Chicken rice bowls", "Any meal", "Oats"], "Lunch meal first, then Any, then others");
   assert.ok(res.every(x => x.per && typeof x.per.cal === "number" && x.serving && Array.isArray(x.alts) && "sub" in x));
@@ -546,8 +547,8 @@ t("cook.label: raw first, cooked in parentheses (US, metric, dry, cups, no y)", 
   assert.strictEqual(M.cook.label(2 * M.cook.OZ, "raw", RICE, "us"), "2 oz dry (5.6 oz cooked)");
   assert.strictEqual(M.cook.label(4.4 * M.cook.OZ, "cooked", CHK, "oz"), "6.1 oz raw (4.4 oz cooked)", "cooked weight converts back to raw");
   assert.strictEqual(M.cook.label(158, "cooked", RICE, "us", { vol: { unit: "cup", g: 158 } }), "2 oz dry (1 cup cooked)");
-  assert.strictEqual(M.cook.label(46, "raw", RICE, "us", { vol: { unit: "cup", g: 184 } }), "1/4 cup dry (4.6 oz cooked)");
-  assert.strictEqual(M.cook.label(237, "cooked", RICE, "metric", { vol: { unit: "cup", g: 158 } }), "84 g dry (1 1/2 cups cooked)");
+  assert.strictEqual(M.cook.label(46, "raw", RICE, "us", { vol: { unit: "cup", g: 184 } }), "¼ cup dry (4.6 oz cooked)");
+  assert.strictEqual(M.cook.label(237, "cooked", RICE, "metric", { vol: { unit: "cup", g: 158 } }), "84 g dry (1 ½ cups cooked)");
   assert.strictEqual(M.cook.label(12 * M.cook.OZ, "cooked", null, "us"), "12 oz cooked", "no y known: only the weighed side");
   assert.strictEqual(M.cook.label(1.5 * M.cook.LB, "raw", CHK, "lb"), "1.5 lb raw (1.09 lb cooked)");
 });
@@ -568,7 +569,7 @@ t("merged foods: old raw/cooked ids resolve to one food; y and both profiles kep
   const k = M.foods.get("g_kirkland_organic_chicken");
   assert.deepStrictEqual(k.cook.per100gCooked, f.cook.per100gCooked, "Kirkland gets chicken breast's cooked profile");
   assert.strictEqual(M.cook.servingLabel(f, "us"), "4 oz raw (2.9 oz cooked)");
-  assert.strictEqual(M.cook.servingLabel(M.foods.get("g_white_rice"), "us"), "1/4 cup dry (4.6 oz cooked)");
+  assert.strictEqual(M.cook.servingLabel(M.foods.get("g_white_rice"), "us"), "¼ cup dry (4.6 oz cooked)");
   assert.strictEqual(M.cook.servingLabel(M.foods.get("g_banana"), "us"), "", "plain foods have no cook label");
 });
 
@@ -963,7 +964,9 @@ t("search ranking: whole words and head nouns first; own foods above built-in; s
     /* a letter run inside another word isn't "similar": built-in whole words still win */
     const lic = M.foods.add({ name: "Licorice", per: { cal: 100 } });
     assert.strictEqual(top("rice")[0], meal.id, "their meal 'Chicken and rice' first");
-    assert.ok(top("rice").indexOf("g_white_rice") < top("rice").indexOf(lic.id), "White rice before Licorice");
+    /* CO-06: letters inside a word only count when no word matches whole or at its start */
+    assert.ok(top("rice").indexOf("g_white_rice") >= 0 && top("rice").indexOf(lic.id) < 0, "White rice listed, Licorice left out");
+    assert.strictEqual(top("licorice")[0], lic.id);
     /* a name that repeats its brand is matched without it; logging a meal counts its foods as used */
     const ps = M.foods.add({ name: "Dave's Killer Bread Powerseed", brand: "Dave's Killer Bread", per: { cal: 100 } });
     assert.strictEqual(top("powerseed")[0], ps.id);
@@ -1139,7 +1142,7 @@ t("batch portions: cooked-only label with the batch size; normal cook foods keep
   assert.strictEqual(e.batch, true);
   assert.strictEqual(M.cook.entryLabel(e, "us"), "6 oz cooked · of 80 oz batch");
   const [g] = M.log.addMeal(today, m.id, 1, "Dinner", { grams: 170, unit: "g" });
-  assert.strictEqual(M.cook.entryLabel(g, "metric"), "170 g cooked · of 2.3 kg batch");
+  assert.strictEqual(M.cook.entryLabel(g, "metric"), "170 g cooked · of 2,268 g batch");
   /* older batch entries (no batchG) read the meal's batch */
   const old = Object.assign({}, e); delete old.batch; delete old.batchG;
   assert.strictEqual(M.cook.entryLabel(old, "us"), "6 oz cooked · of 80 oz batch");
@@ -1275,6 +1278,351 @@ t("C1: round once: rows show whole numbers and add up to the total; left = round
   assert.strictEqual(M.foodMath.left(2281.6, 1500.5), 2282 - 1501);
   assert.strictEqual(M.foodMath.left(2000, 2100.4), -100);
   assert.deepStrictEqual(M.foodMath.rows(null), { rows: [], total: M.foodMath.blank() });
+});
+
+/* ---- F1 round 4: K2 search, PF-01 / CO-05 storage, FD-02 recents, K1, K4, K8, K3, WK-02, WK-08, cook labels ---- */
+const SEARCH_FOODS = () => [
+  G("g_egg", "Eggs, whole", { serving: { qty: 1, unit: "large egg", g: 50 } }), G("g_egg_white", "Egg white, large"), G("g_boiled", "Egg, hard-boiled"),
+  G("g_kb", "Chicken breast, organic", { brand: "Kirkland", staple: true, alwaysRaw: true, cook: { y: 0.75, word: "raw" } }), G("g_thigh", "Chicken thigh, boneless skinless"),
+  G("g_daisy", "Cottage cheese, 2%", { brand: "Daisy", staple: true }),
+  G("g_jam", "Strawberry jam / jelly", { brand: "Smucker's Natural", staple: true, words: "fruit spread preserves smuckers" }),
+  G("g_turkey", "Turkey slices, oven roasted", { brand: "Hillshire Farm", staple: true, words: "sliced deli lunch meat lunchmeat sandwich meat thin" }), G("g_turkey_bacon", "Turkey bacon"),
+  G("g_banana", "Banana", { staple: true }), G("g_milk", "Milk, 2%"), G("g_rice", "White rice"), G("g_pb", "Peanut butter, creamy"), G("g_rasp", "Raspberries"),
+  G("g_olive", "Olive oil"), G("g_apple", "Apple"), G("g_pine", "Pineapple"), G("g_hh", "Half and half"), G("g_onion", "Onion, white"),
+  G("g_broc", "Broccoli, raw"), G("g_yog", "Greek yogurt, plain 2%"), G("g_corn", "Corn on the cob, grilled", { words: ["sweet corn", "bbq"] })
+];
+t("K2 search: amounts, counts, size and prep words anywhere; typos; built-in words; meal items (CO-01..04, DA-04, CO-06, FD-04)", () => {
+  withFakeDB(SEARCH_FOODS(), null, () => {
+    const top = (q, n) => M.search(q, { pid: "nick", limit: n || 10 }).map(r => r.id);
+    const first = (qs, id) => qs.forEach(q => assert.strictEqual(top(q)[0], id, q + " → " + top(q).join(",")));
+    /* CO-01: size / count / filler words */
+    first(["2 large eggs", "large egg", "1 large egg", "eggs x2", "scrambled eggs", "fried egg", "two eggs"], "g_egg");
+    first(["1 medium banana", "one banana", "a banana", "bananas"], "g_banana");
+    first(["a cup of milk", "1 cup milk", "glass of milk"], "g_milk");
+    first(["4 slices of turkey", "turkey deli", "turkey lunchmeat", "deli turkey", "lunchmeat", "lunch meat", "sandwich meat", "sliced turkey"], "g_turkey");
+    /* CO-02: prep / package words may be missing from the food */
+    first(["grilled chicken", "boneless skinless chicken breast", "kirkland organic boneless skinless chicken breasts", "kirkland signature chicken breast", "chicken tenders", "rotisserie chicken"], "g_kb");
+    first(["daisy low fat cottage cheese", "cottage cheese", "low fat cottage cheese"], "g_daisy");
+    /* CO-03: amounts after the food or glued */
+    first(["6oz chicken", "chicken 6 oz", "175g chicken", "½lb chicken", "chicken 175 g", "200 grams chicken"], "g_kb");
+    first(["rice 1 cup", "half cup rice", "1/2 cup rice", "¾ cup rice"], "g_rice");
+    /* CO-04: one typo, joined words; the fixed word still gets their product first */
+    first(["chiken", "chikcen", "chicken brest", "kirkand", "chike"], "g_kb");
+    first(["cotage cheese"], "g_daisy"); first(["brocolli"], "g_broc"); first(["bannana"], "g_banana");
+    first(["turky", "hilshire"], "g_turkey"); first(["smukers", "strawbery jam"], "g_jam"); first(["yoghurt"], "g_yog"); first(["peanutbutter"], "g_pb");
+    /* DA-04: built-in words (a string or a list) */
+    first(["preserves", "fruit spread"], "g_jam"); first(["sweet corn", "bbq corn"], "g_corn");
+    /* CO-06: letters inside a word only when nothing matches whole or at a word start */
+    first(["pb", "pb&j", "pbj"], "g_pb");
+    assert.ok(top("pb").indexOf("g_rasp") < 0, "pb never finds Raspberries");
+    assert.ok(top("oil").indexOf("g_boiled") < 0, "oil never finds hard-boiled");
+    assert.ok(top("apple").indexOf("g_pine") < 0, "apple leaves Pineapple out: " + top("apple"));
+    first(["half and half", "half & half"], "g_hh");
+    /* nothing has every word: the last word must match ("red onion" → onion) */
+    first(["red onion"], "g_onion");
+    assert.deepStrictEqual(top("xqzt"), []);
+    /* their own foods still come first, also for a typo; exact hits before typo hits */
+    const own = M.foods.add({ name: "Chicken tikka, homemade", per: { cal: 300 } });
+    assert.strictEqual(top("chiken")[0], own.id, "own food first for a typo too");
+    assert.strictEqual(top("chicken")[0], own.id); assert.strictEqual(top("chicken")[1], "g_kb");
+    /* FD-04: a saved meal answers to the names of the foods in it */
+    const meal = M.meals.add({ name: "Nick's lunch bowl", slot: "Lunch", items: [{ name: "Chicken breast, organic", foodId: "g_kb", per: { cal: 200 } }, { name: "Blueberries", per: { cal: 40 } }] });
+    assert.ok(top("blueberries").indexOf(meal.id) >= 0, "meal found by an item name");
+    /* the query words, and the shared tokenizer is unchanged (describe needs size words) */
+    assert.deepStrictEqual(M.searchQuery("2 large eggs").req, ["egg"]);
+    assert.deepStrictEqual(M.searchQuery("grilled chicken 6oz"), { req: ["chicken"], opt: ["grilled"], all: ["grilled", "chicken"] });
+    assert.deepStrictEqual(M.searchQuery("lunch meat").req, ["lunch", "meat"], "only optional words: they count");
+    assert.deepStrictEqual(M.searchTokens("1 large egg"), ["large", "egg"]);
+  });
+});
+
+t("K2 search speed: a keystroke stays fast with a year of diary, 300 foods and 80 meals", () => {
+  withFakeDB(SEARCH_FOODS(), null, () => {
+    for (let i = 0; i < 300; i++) M.MS.foods["f" + i] = { id: "f" + i, name: "Food number " + i + (i % 7 ? " crunchy" : " with chicken"), brand: "Brand " + (i % 13), per: { cal: 100 }, serving: { qty: 1, unit: "serving", g: 50 }, alts: [], uses: i % 5, lastUsed: i };
+    for (let i = 0; i < 80; i++) M.MS.meals["m" + i] = { id: "m" + i, name: "Meal " + i, slot: M.SLOTS[i % 4], items: [{ name: "Item " + i, per: { cal: 10 } }], per: { cal: 10 }, uses: 1, lastUsed: i };
+    for (let d = 0; d < 365; d++) { const date = M.addDays(today, -d); M.MS.days["nick|" + date] = { id: "nick|" + date, pid: "nick", date, entries: [0, 1, 2, 3, 4, 5].map(k => ({ id: "e" + d + "_" + k, slot: M.SLOTS[k % 4], name: "Food number " + ((d * 7 + k) % 300), foodId: "f" + ((d * 7 + k) % 300), servings: 1, servingLabel: "1 serving", per: { cal: 100 }, at: NOW - d * DAY })), water: 0, note: "", updatedAt: 1 }; }
+    const words = ["chicken", "chiken", "2 large eggs", "cottage cheese", "xqzt"];
+    words.forEach(w => { for (let i = 1; i <= w.length; i++) M.search(w.slice(0, i), { pid: "nick", slot: "Lunch" }); });   /* warm up */
+    let worst = 0;
+    /* best of 3 per keystroke (other work on the machine can pause any one run) */
+    words.forEach(w => { for (let i = 1; i <= w.length; i++) { let best = Infinity; for (let k = 0; k < 3; k++) { const t0 = process.hrtime.bigint(); M.search(w.slice(0, i), { pid: "nick", slot: "Lunch" }); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); } worst = Math.max(worst, best); } });
+    assert.ok(worst < 40, "slowest keystroke " + worst.toFixed(1) + " ms");
+  });
+});
+
+t("PF-01 / CO-05: storage writes 1 byte a character; live-format data loads unchanged; older builds read it; a full phone saves today first", () => {
+  M.reset();
+  const odd = "Dave’s toast — ⅔ cup ½ “jam” 🍓 café";
+  M.log.add(today, { slot: "Breakfast", name: odd, brand: "Smucker’s", servingLabel: "⅔ cup", per: { cal: 150 } });
+  const main = localStorage.getItem(M.KEY);
+  assert.ok(!/[\u0100-\uffff]/.test(main), "no character past U+00FF on disk");
+  assert.ok(/caf\u00e9/.test(main), "Latin-1 letters stay as they are");
+  assert.strictEqual(diskState().days["nick|" + today].entries[0].name, odd, "JSON.parse reads the escapes back");
+  const inMem = canonJ(M.MS.days);
+  M.load(); assert.strictEqual(canonJ(M.MS.days), inMem, "reload gives the same data");
+  /* a main copy written by the live build (raw ’ — ⅔ characters) loads unchanged and is written back narrow */
+  const live = JSON.parse(JSON.stringify(LIVE_FIXTURE.main));
+  live.foods.f_bar.name = "Protein bar ’crunchy’ — ⅔"; live.days["nick|2026-09-26"].entries[0].name = "Chicken – grilled ½";
+  localStorage.setItem(M.KEY, JSON.stringify(live));
+  M.load();
+  ["profiles", "foods", "meals", "days", "body"].forEach(k => assert.strictEqual(canonJ(M.MS[k]), canonJ(live[k]), k + " unchanged"));
+  M.save();
+  const disk = localStorage.getItem(M.KEY);
+  assert.ok(!/[\u0100-\uffff]/.test(disk));
+  ["profiles", "foods", "meals", "days", "body"].forEach(k => assert.strictEqual(canonJ(JSON.parse(disk)[k]), canonJ(live[k]), k + " unchanged on disk"));
+  /* the previous builds (live b01144d and d757f4b) read what this build writes */
+  let olds = [];
+  try { const cp = require("child_process"); olds = ["b01144d", "d757f4b"].map(c => [c, cp.execSync("git show " + c + ":m-core.js", { cwd: path.join(__dirname, ".."), stdio: ["ignore", "pipe", "ignore"] }).toString()]); } catch (e) { olds = []; }
+  if (!olds.length) console.log("       (git not available: older builds not checked)");
+  olds.forEach(([c, src]) => {
+    const ctx = { localStorage: { getItem: k => (k in localStorage.store ? localStorage.store[k] : null), setItem() {}, removeItem() {} }, S: { profile: "nick" }, PRESETS: global.PRESETS, Date, Math, JSON, Object, Array, String, Number, Set, Map, RegExp, isFinite, parseFloat, setTimeout, clearTimeout, console };
+    ctx.window = ctx;
+    vm.createContext(ctx);
+    vm.runInContext(src, ctx, { filename: "m-core." + c + ".js" });
+    ["profiles", "foods", "meals", "days", "body"].forEach(k => assert.strictEqual(canonJ(ctx.M.MS[k]), canonJ(live[k]), c + " reads " + k));
+    assert.strictEqual(ctx.M.MS.foods.f_bar.name, "Protein bar ’crunchy’ — ⅔");
+  });
+  /* CO-05: nearly full. The backup is cut, then dropped, so today's save lands; a write that
+     fails even then puts the backup back as it was. */
+  M.reset();
+  for (let d = 90; d >= 1; d--) { const date = M.addDays(today, -d), day = M.day(date, "nick"); for (let k = 0; k < 6; k++) day.entries.push({ id: "q" + d + "_" + k, slot: M.SLOTS[k % 4], name: "Food " + k + " long name here", servings: 1, per: { cal: 100 }, at: NOW - d * DAY }); }
+  NOW -= DAY; M.save(); NOW += DAY; M.storage.bakDay = null; M.save();
+  const bak = localStorage.getItem(M.KEY + ".bak");
+  assert.ok(bak && bak.length > 1000, "daily backup written");
+  const orig = localStorage.setItem, room = localStorage.getItem(M.KEY).length + 6000;
+  const size = () => Object.keys(localStorage.store).reduce((n, k) => n + k.length + localStorage.store[k].length, 0);
+  localStorage.setItem = function (k, v) { const cur = k in this.store ? k.length + this.store[k].length : 0; if (size() - cur + k.length + String(v).length > room + 200) throw QUOTA(); return orig.call(this, k, v); };
+  for (let i = 0; i < 10; i++) M.log.add(today, { slot: "Lunch", name: "Today " + i + " " + "x".repeat(40), per: { cal: 50 } });
+  assert.strictEqual(M.storage.ok, true, "today saved: " + M.storage.lastError);
+  assert.strictEqual(diskState().days["nick|" + today].entries.length, 10, "all 10 on disk");
+  const nb = localStorage.getItem(M.KEY + ".bak");
+  assert.ok(nb == null || nb.length < bak.length, "backup cut or dropped");
+  /* nothing helps: the save fails and the backup stays */
+  localStorage.setItem = orig;
+  M.storage.bakDay = null; NOW += DAY; M.save(); const bak2 = localStorage.getItem(M.KEY + ".bak");
+  localStorage.setItem = function (k, v) { if (k === M.KEY) throw QUOTA(); return orig.call(this, k, v); };
+  M.log.add(M.today(), { slot: "Lunch", name: "No room", per: { cal: 1 } });
+  assert.strictEqual(M.storage.ok, false);
+  assert.strictEqual(localStorage.getItem(M.KEY + ".bak"), bak2, "backup put back exactly");
+  localStorage.setItem = orig;
+  M.save(); assert.strictEqual(M.storage.ok, true);
+  NOW -= DAY;
+  M.reset();
+});
+
+t("FD-02 / WK-07: a recent in a count or cup unit uses the food's numbers for that unit, not its grams", () => {
+  M.reset();
+  const bar = M.foods.add({ name: "Protein bar", serving: { qty: 1, unit: "bar", g: 60 }, per: { cal: 200, p: 20, c: 22, f: 8 }, per100g: { cal: 333.3, p: 33.3, c: 36.7, f: 13.3 } });
+  M.log.add(today, { foodId: bar.id, servings: 2, servingLabel: "1 bar (60 g)", g: 60, per: bar.per, slot: "Snacks" });
+  M.foods.update(bar.id, { serving: { qty: 1, unit: "bar", g: 44 } });   /* the grams fixed; 1 bar is still 200 */
+  let r = M.recents("nick").find(x => x.foodId === bar.id);
+  assert.strictEqual(r.per.cal, 200); assert.strictEqual(r.servingLabel, "1 bar (44 g)"); assert.strictEqual(r.g, 44);
+  M.foods.update(bar.id, { per: { cal: 190, p: 20, c: 21, f: 7 } });
+  r = M.recents("nick").find(x => x.foodId === bar.id);
+  assert.strictEqual(r.per.cal * r.servings, 380, "the food's new numbers for 2 bars");
+  /* an alt unit: the food's per scaled by that portion's grams */
+  const egg = M.foods.add({ name: "Eggs", serving: { qty: 1, unit: "large egg", g: 50 }, per: { cal: 72, p: 6.3 }, per100g: { cal: 143, p: 12.6 }, alts: [{ label: "1 cup, scrambled", g: 220 }] });
+  M.log.add(today, { foodId: egg.id, servings: 3, servingLabel: "1 large egg (50 g)", g: 50, per: { cal: 71.5 }, slot: "Breakfast" });
+  r = M.recents("nick").find(x => x.foodId === egg.id);
+  assert.strictEqual(r.per.cal, 72, "the food's own 1 large egg (216 for 3, like Log food), not per100g (214.5)");
+  /* the same amount is its own portion ("½ breast" = 88 g, not half of 175); a cook food counts by raw grams */
+  const br = M.foods.add({ name: "Chicken breast test", serving: { qty: 1, unit: "breast", g: 175 }, per: { cal: 172 }, per100g: { cal: 98.2 }, alts: [{ label: "½ breast", g: 88 }], cook: { y: 0.7258, word: "raw" } });
+  M.log.add(today, { foodId: br.id, servings: 3, servingLabel: "½ breast (88 g)", g: 88, per: { cal: 86.42 }, state: "raw", slot: "Dinner" });
+  r = M.recents("nick").find(x => x.foodId === br.id);
+  assert.strictEqual(r.g, 88); assert.strictEqual(r.servingLabel, "½ breast (88 g)"); near(r.per.cal, 86.42, 0.01);
+  /* grams stay grams */
+  M.log.add(today, { foodId: egg.id, servings: 100, servingLabel: "1 g", g: 1, per: { cal: 1.43 }, slot: "Lunch", at: NOW + 1000 });
+  r = M.recents("nick").find(x => x.foodId === egg.id);
+  near(r.per.cal * r.servings, 143, 0.01);
+  M.reset();
+});
+
+t("K1: M.log.shown adds the rows as the Diary shows them; the week summary uses the same numbers", () => {
+  M.reset();
+  M.log.add(today, { slot: "Lunch", name: "A", servings: 1, per: { cal: 100.45, p: 10.26, c: 0.04, f: 1.25, fiber: 0, sugar: 0, sodium: 5.5 } });
+  M.log.add(today, { slot: "Dinner", name: "B", servings: 3, per: { cal: 33.35, p: 0.49 } });
+  M.log.setWater(today, 24);
+  const s = M.log.shown(today, "nick");
+  /* rows as the Diary rounds them (to 0.1, then to 1): cal 100.45 → 100.5 → 101 and 100.05 → 100.1 → 100;
+     protein 10.26 → 10 and 3 × 0.49 = 1.47 → 1.5 → 2 */
+  assert.deepStrictEqual(s, { cal: 201, p: 12, c: 0, f: 1, fiber: 0, sugar: 0, sodium: 6, water: 24 });
+  assert.deepStrictEqual(M.log.shown(M.addDays(today, -5), "nick"), { cal: 0, p: 0, c: 0, f: 0, fiber: 0, sugar: 0, sodium: 0, water: 0 });
+  M.log.add(yday, { slot: "Lunch", name: "C", servings: 1, per: { cal: 10.5 } });
+  const ws = M.weekSummary("nick", 0), row = ws.daily.find(d => d.date === yday);
+  assert.strictEqual(row.cal, M.log.shown(yday, "nick").cal, "one number for the day everywhere");
+  assert.strictEqual(ws.daily.find(d => d.date === today).cal, 201);
+  M.reset();
+});
+
+t("K4: M.clean repairs or refuses records; M.import uses it; own-key lookups (CO-07, SE-01, SE-02)", () => {
+  M.reset();
+  const id = "nick|" + today;
+  const good = { id, pid: "nick", date: today, entries: [{ id: "a", slot: "Lunch", name: "Rice", brand: "", servings: 1.5, servingLabel: "1 cup", g: 158, per: { cal: 205, p: 4.3, c: 44.5, f: 0.4, fiber: 0.6, sugar: 0.1, sodium: 2 }, at: NOW }], water: 8, note: "", updatedAt: NOW };
+  assert.deepStrictEqual(M.clean("day", id, good), good, "clean data comes back the same");
+  assert.strictEqual(M.clean("day", "bob|" + today, good), null);
+  assert.strictEqual(M.clean("food", "__proto__", { name: "x" }), null);
+  assert.strictEqual(M.clean("nope", "x", {}), null);
+  const bad = M.clean("day", id, { entries: [null, 5, { name: "Neg", servings: -5, per: { cal: 100 }, slot: "Lunch" }, { name: "Big", per: { cal: 1e308, p: "12" }, slot: "Brunch", at: new Date(2026, 8, 28, 19, 0).getTime() }, { id: "a", name: "Dup", per: {}, slot: "Snacks", foodId: "__proto__", mealId: "constructor" }, { id: "a", name: "Dup2", per: { cal: -4 }, slot: "Snacks" }] });
+  assert.strictEqual(bad.entries.length, 4);
+  assert.ok(!("servings" in bad.entries[0]), "servings −5 dropped (reads as 1)");
+  assert.strictEqual(bad.entries[1].per.cal, 0); assert.strictEqual(bad.entries[1].per.p, 12);
+  assert.strictEqual(bad.entries[1].slot, "Dinner", "a bogus slot becomes the meal of its time");
+  assert.ok(bad.entries.every(e => typeof e.id === "string" && e.id), "every entry has an id");
+  assert.strictEqual(new Set(bad.entries.map(e => e.id)).size, 4, "ids are unique");
+  assert.ok(!("foodId" in bad.entries[2]) && !("mealId" in bad.entries[2]), "bad foodId / mealId dropped");
+  assert.strictEqual(bad.entries[3].per.cal, 0, "negative numbers → 0");
+  assert.deepStrictEqual(M.clean("meal", "m1", { name: "Weird", items: null }).items, []);
+  assert.deepStrictEqual(M.clean("meal", "m2", { name: "Weird2", items: [null, 5, "x", { name: "ok", per: { cal: 5 } }] }).items.map(i => i.name), ["ok"]);
+  assert.strictEqual(M.clean("body", "nick|2026-09-26", { w: 5000, at: 1 }), null, "a 5000 lb weigh-in is refused");
+  assert.strictEqual(M.clean("body", "nick|2026-09-26", { w: 5000, rhr: 55, at: 1 }).w, null);
+  assert.strictEqual(M.clean("profile", "kat", { targets: { cal: "abc", p: 150 } }).targets.cal, undefined);
+  /* import uses it */
+  M.log.add(today, { slot: "Lunch", name: "Mine", per: { cal: 500, p: 40 } });
+  assert.strictEqual(M.import({ v: 1, days: { [id]: { id, pid: "nick", date: today, updatedAt: NOW + 1e9, entries: [{ id: "n", name: "Neg", servings: -5, per: { cal: 100, p: 10 }, slot: "Brunch" }, { name: "NoId1", per: { cal: 1 }, slot: "Lunch" }, { name: "NoId2", per: { cal: 1 }, slot: "Lunch" }] } }, meals: { m1: { id: "m1", name: "Weird", items: null, per: { cal: 100 }, updatedAt: 1 } }, body: { "nick|2026-09-26": { w: 5000, at: 1 } } }), true);
+  const d = M.dayOf(today, "nick");
+  assert.strictEqual(M.log.totals(today, "nick").cal, 102);
+  assert.ok(d.entries.every(e => M.isSlot(e.slot) && e.id), "every entry in a real meal with an id");
+  const ids = d.entries.map(e => e.id); M.log.remove(today, ids[1]); assert.strictEqual(M.dayOf(today, "nick").entries.length, 2, "removing one removes one");
+  assert.ok(Array.isArray(M.meals.get("m1").items));
+  assert.strictEqual(M.body.list("nick").length, 0);
+  /* own keys only */
+  assert.strictEqual(M.foods.get("__proto__"), null); assert.strictEqual(M.foods.get("constructor"), null); assert.strictEqual(M.foods.get("toString"), null);
+  assert.strictEqual(M.meals.get("__proto__"), null); assert.strictEqual(M.meals.get("hasOwnProperty"), null);
+  assert.strictEqual(M.foods.update("__proto__", { name: "x" }), null); assert.strictEqual(M.meals.remove("constructor"), false);
+  const e = M.log.add(today, { slot: "Lunch", name: "P", foodId: "__proto__", mealId: "constructor", per: { cal: 1 } });
+  assert.ok(!("foodId" in e) && !("mealId" in e));
+  const f = M.foods.add({ id: "__proto__", name: "Sneaky", per: { cal: 1 } });
+  assert.notStrictEqual(f.id, "__proto__");
+  assert.strictEqual(({}).name, undefined, "nothing reached Object.prototype");
+  assert.ok(M.search("sneaky").length >= 1);
+  M.reset();
+});
+
+t("K8 / queued: the chicken breast reads in grams in any units; cook labels use ¼ ½ ¾; unitsFor has the food's count servings", () => {
+  withFakeDB([G("g_kb", "Chicken breast, organic", { brand: "Kirkland", staple: true, alwaysRaw: true, serving: { qty: 1, unit: "breast", g: 175 }, per: { cal: 210, p: 39 }, per100g: { cal: 120, p: 22.3 }, alts: [{ label: "½ breast", g: 87.5 }, { label: "4 oz", g: 113 }], cook: { y: 0.7258, word: "raw" } }),
+    G("g_rice", "White rice", { serving: { qty: 0.25, unit: "cup", g: 46 }, cook: { y: 2.8, word: "dry" } })], null, () => {
+    const p = M.person("nick"), keep = p.units;
+    p.units = "us";
+    const e1 = { foodId: "g_kb", servings: 1, servingLabel: "1 breast (175 g)", g: 175, state: "raw" };
+    assert.strictEqual(M.cook.entryLabel(e1, "us"), "175 g raw (127 g cooked)");
+    assert.strictEqual(M.cook.entryLabel({ foodId: "g_kb", servings: 6.2, servingLabel: "1 oz raw", g: 28.35, state: "raw" }, "us"), "176 g raw (128 g cooked)");
+    assert.strictEqual(M.cook.entryLabel({ foodId: "g_kb", servings: 1, servingLabel: "150 g", g: 150, state: "raw" }), "150 g raw (109 g cooked)");
+    p.units = keep;
+    /* ASCII fractions are gone from cook labels */
+    assert.strictEqual(M.cook.label(56.7, "raw", { y: 2.8, word: "dry" }, "us", { vol: { unit: "cup", g: 113.4 } }), "½ cup dry (5.6 oz cooked)");
+    assert.strictEqual(M.cook.fmtVolume(0.75, "cup"), "¾ cup"); assert.strictEqual(M.cook.fmtVolume(1.5, "cup"), "1 ½ cups");
+    /* the breast's own count serving as a raw unit */
+    const opts = M.cook.unitsFor(M.foods.get("g_kb"), "us");
+    const br = opts.find(o => o.key === "breast-raw");
+    assert.ok(br, "breast unit: " + opts.map(o => o.key).join(","));
+    assert.strictEqual(br.label, "breast (175 g raw)"); assert.strictEqual(br.g, 175); assert.strictEqual(br.step, 0.5);
+    near(br.per.cal, 120 * 1.75, 0.01, "grams × the raw profile, like its oz and g units");
+    assert.ok(opts.find(o => o.key === "oz-raw") && opts.find(o => o.key === "g-cooked"), "weights still there");
+    assert.ok(!M.cook.unitsFor(M.foods.get("g_rice"), "us").some(o => o.key === "cup-raw" && /\(/.test(o.label)), "cups stay volume units");
+    /* WK-07: the cup takes the food's own serving grams (¼ cup = 46 g, so 184 g a cup), not another portion's 185 g */
+    const rc = M.cook.unitsFor(Object.assign({}, M.foods.get("g_rice"), { alts: [{ label: "1 cup", g: 185 }], per100g: { cal: 367 } }), "us").find(o => o.key === "cup-raw");
+    assert.strictEqual(rc.g, 184); near(rc.per.cal * 0.25, 367 * 0.46, 0.01);
+  });
+});
+
+t("K3: barcodes: My foods, then linked codes, then built-in barcodes; linkCode saves the link", () => {
+  M.reset();
+  withFakeDB([G("g_daisy", "Cottage cheese, 2%", { brand: "Daisy", barcodes: ["073420516208"] }), G("g_jam", "Strawberry jam", { brand: "Smucker's" })], null, () => {
+    assert.strictEqual(M.foods.byCode("073420516208").id, "g_daisy");
+    assert.strictEqual(M.foods.byCode("0073420516208").id, "g_daisy", "EAN-13 with a leading zero");
+    assert.strictEqual(M.foods.byCode("051500141304"), null);
+    assert.strictEqual(M.foods.linkCode("051500141304", "g_jam").id, "g_jam");
+    assert.strictEqual(M.MS.codes["051500141304"], "g_jam");
+    assert.strictEqual(M.foods.byCode("51500141304").id, "g_jam");
+    const mine = M.foods.add({ name: "Kodiak cakes", per: { cal: 190 } });
+    M.foods.linkCode("705599012345", mine.id);
+    assert.strictEqual(M.MS.foods[mine.id].barcode, "705599012345");
+    assert.strictEqual(M.foods.byCode("0705599012345").id, mine.id);
+    M.foods.linkCode("705599099999", mine.id);   /* a second code for the same food */
+    assert.strictEqual(M.foods.byCode("705599099999").id, mine.id); assert.strictEqual(M.MS.foods[mine.id].barcode, "705599012345");
+    assert.strictEqual(M.foods.linkCode("12", "g_jam"), null); assert.strictEqual(M.foods.linkCode("051500141304", "__proto__"), null); assert.strictEqual(M.foods.linkCode("051500141304", "nope"), null);
+    /* kept across a reload */
+    M.load(); assert.strictEqual(M.MS.codes["051500141304"], "g_jam");
+  });
+  M.reset();
+  assert.ok(!("codes" in M.MS), "no codes key until a code is linked");
+});
+
+t("WK-02: check-ins come due on the morning of the day (calendar days); weeks since the last weigh-in", () => {
+  M.reset();
+  const keep = NOW;
+  const p = M.person("nick");
+  Object.assign(p, { sex: "m", age: 40, heightIn: 71, weightLb: 185, setupAt: new Date(2026, 8, 20, 21, 30).getTime(), lastBody: new Date(2026, 8, 14, 21, 30).getTime(), snooze: { refresh60: 0, body14: 0 } });
+  NOW = new Date(2026, 8, 28, 7, 0).getTime();   /* 14 days later, but 7 am: before the clock time of the last one */
+  assert.strictEqual(M.checkins.due("nick"), "body14");
+  assert.strictEqual(M.checkins.weeksSince("nick"), 2); assert.strictEqual(M.checkins.daysSince("nick"), 14);
+  NOW = new Date(2026, 8, 27, 23, 0).getTime();
+  assert.strictEqual(M.checkins.due("nick"), null, "13 days: not yet");
+  NOW = new Date(2026, 9, 26, 8, 0).getTime();
+  assert.strictEqual(M.checkins.weeksSince("nick"), 6, "6 weeks, not 'It's been 2 weeks'");
+  /* snoozed 7 days at 9 pm: due again in the morning 7 days later */
+  NOW = new Date(2026, 8, 28, 21, 0).getTime();
+  M.checkins.snooze("nick", "body14", 7);
+  NOW = new Date(2026, 9, 4, 22, 0).getTime(); assert.strictEqual(M.checkins.due("nick"), null);
+  NOW = new Date(2026, 9, 5, 6, 0).getTime(); assert.strictEqual(M.checkins.due("nick"), "body14");
+  /* the 60-day refresh too */
+  Object.assign(p, { setupAt: new Date(2026, 6, 30, 22, 0).getTime(), lastBody: new Date(2026, 9, 5, 6, 0).getTime(), snooze: { refresh60: 0, body14: 0 } });
+  NOW = new Date(2026, 8, 28, 6, 0).getTime();
+  assert.strictEqual(M.checkins.due("nick"), "refresh60");
+  NOW = keep;
+  M.reset();
+});
+
+t("WK-06: a batch reads in whole grams up to 10 kg", () => {
+  const e = { mealId: "mx", name: "Prep", state: "cooked", cook: { y: 1.2, word: "raw" }, batch: true, batchG: 1950, servingLabel: "1 g cooked", g: 1, servings: 170 };
+  assert.strictEqual(M.cook.entryLabel(e, "metric"), "170 g cooked · of 1,950 g batch");
+  assert.strictEqual(M.cook.entryLabel(Object.assign({}, e, { batchG: 12500 }), "metric"), "170 g cooked · of 12.5 kg batch");
+});
+
+t("CO-08: another tab's save is read back and redrawn (never written over); waits while a box has focus", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "m-core.js"), "utf8");
+  const store = {}, on = {}, docOn = {};
+  const ctx = { localStorage: { getItem: k => (k in store ? store[k] : null), setItem(k, v) { store[k] = String(v); }, removeItem(k) { delete store[k]; } },
+    S: { profile: "nick" }, PRESETS: global.PRESETS, setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {}, console,
+    addEventListener(n, fn) { on[n] = fn; }, document: { activeElement: null, addEventListener(n, fn) { docOn[n] = fn; } } };
+  ctx.window = ctx;
+  vm.createContext(ctx); vm.runInContext(src, ctx, { filename: "m-core.js" });
+  const T = ctx.M; T.now = () => NOW;
+  let redraws = 0; T.ui = { rerender() { redraws++; } };
+  T.log.add(today, { slot: "Lunch", name: "Mine", per: { cal: 100 } });
+  assert.ok(typeof on.storage === "function", "listens for other tabs");
+  /* the other tab adds an entry and saves */
+  const other = JSON.parse(store[T.KEY]);
+  other.days["nick|" + today].entries.push({ id: "o1", slot: "Dinner", name: "From the other tab", servings: 1, servingLabel: "1 serving", per: { cal: 50 }, at: NOW });
+  store[T.KEY] = JSON.stringify(other);
+  on.storage({ key: T.KEY });
+  assert.strictEqual(T.dayOf(today, "nick").entries.length, 2); assert.strictEqual(redraws, 1);
+  T.log.add(today, { slot: "Snacks", name: "Mine again", per: { cal: 10 } });
+  assert.strictEqual(JSON.parse(store[T.KEY]).days["nick|" + today].entries.length, 3, "the other tab's entry is kept");
+  /* typing here: wait for the box to lose focus */
+  const o2 = JSON.parse(store[T.KEY]); o2.days["nick|" + today].entries.push({ id: "o2", slot: "Dinner", name: "Later", per: { cal: 5 }, at: NOW }); store[T.KEY] = JSON.stringify(o2);
+  ctx.document.activeElement = { tagName: "INPUT" };
+  on.storage({ key: T.KEY });
+  assert.strictEqual(T.dayOf(today, "nick").entries.length, 3, "not while typing");
+  ctx.document.activeElement = null; docOn.focusout();
+  assert.strictEqual(T.dayOf(today, "nick").entries.length, 4); assert.strictEqual(redraws, 2);
+  on.storage({ key: "chalk.v1" }); assert.strictEqual(redraws, 2, "other keys are ignored");
+});
+
+t("FD-03: a batch portion's recent carries its batch: today's batch while the meal exists, its own after it's gone", () => {
+  M.reset();
+  const m = M.meals.add({ name: "Sunday prep", slot: "Dinner", items: [{ name: "Chicken", servings: 1, servingLabel: "1 g raw", g: 1, per: { cal: 1.2 }, state: "raw", cook: { y: 0.75, word: "raw" } }], batch: { cookedG: 1275 } });
+  M.log.addMeal(today, m.id, 1, "Dinner", { grams: 8 * M.cook.OZ, unit: "oz" });
+  let r = M.recents("nick").find(x => x.mealId === m.id);
+  assert.strictEqual(r.batch, true); assert.strictEqual(r.batchG, 1275);
+  M.meals.update(m.id, { batch: { cookedG: 1450 } });
+  r = M.recents("nick").find(x => x.mealId === m.id);
+  assert.strictEqual(r.batchG, 1450, "label and math use the batch as it is now");
+  M.meals.remove(m.id);
+  r = M.recents("nick").find(x => x.name === "Sunday prep");
+  assert.strictEqual(r.batchG, 1275, "the logged batch once the meal is deleted");
+  assert.strictEqual(M.cook.entryLabel(r, "us"), "8 oz cooked · of 45 oz batch");
+  M.reset();
 });
 
 t("sync is a silent no-op without window.claude", () => {

@@ -23,7 +23,7 @@ const BRANDS = ["Kirkland", "Dave's Killer Bread", "Daisy", "Smucker's Natural",
 const STAPLES = ["g_kirkland_organic_chicken", "g_pork_tenderloin", "g_dkb_21_grains", "g_dkb_good_seed", "g_dkb_thin", "g_zucchini", "g_zucchini_raw",
   "g_broccoli_raw", "g_broccoli_cooked", "g_carrots", "g_carrots_cooked", "g_roma_tomato", "g_onion", "g_sweet_onion", "g_cod", "g_shrimp", "g_scallops",
   "g_bell_pepper", "g_asparagus", "g_greek_yogurt_2", "g_quinoa", "g_cucumber", "g_banana", "g_blueberries", "g_strawberries", "g_agave", "g_lemon",
-  "g_lemon_juice", "g_lime", "g_lime_juice", "g_corn", "g_cottage_cheese_2", "g_jam", "g_deli_turkey"];
+  "g_lemon_juice", "g_lime", "g_lime_juice", "g_corn", "g_cottage_cheese_2", "g_jam", "g_deli_turkey", "g_carrots_baby"];
 /* small add-ons meal ideas may use besides staples */
 const ADDONS = ["g_olive_oil", "g_soy_sauce", "g_white_rice"];
 
@@ -303,7 +303,7 @@ t("chicken breast = the Kirkland organic breast: 1 breast = 175 g raw, alwaysRaw
   assert.strictEqual(f.brand, "Kirkland");
   assert.strictEqual(f.alwaysRaw, true); assert.strictEqual(f.staple, true);
   assert.deepStrictEqual(f.serving, { qty: 1, unit: "breast", g: 175 });
-  assert.strictEqual(f.alts.find(a => a.label === "1/2 breast").g, 88);
+  assert.strictEqual(f.alts.find(a => a.label === "½ breast").g, 88);
   ["1 oz", "4 oz", "6 oz", "100 g"].forEach(l => assert.ok(f.alts.some(a => a.label === l), "alt " + l));
   /* label: 4 oz (112 g) = 110 kcal, 24 g protein, 0 g carbs, 1 g fat, 75 mg sodium */
   const lab = k => f.per100g[k] * 112 / 100;
@@ -323,10 +323,10 @@ t("suggest: cook items say which weight they are and carry y; chicken is always 
     assert.ok(x.state === "raw" || x.state === "cooked", s.id + " " + x.name + " state");
     assert.deepStrictEqual(x.cook, { y: f.cook.y, word: f.cook.word }, s.id + " cook");
     const word = x.state === "cooked" ? "cooked" : f.cook.word;
-    assert.ok(new RegExp("^[\\d/ .]+ (oz|cup|cups|breast) (" + word + "|\\(\\d+ g " + word + "\\))$").test(x.servingLabel), s.id + " label " + x.servingLabel);
+    assert.ok(new RegExp("^[\\d¼½¾ .]+ (oz|cup|cups|breast) (" + word + "|\\(\\d+ g " + word + "\\))$").test(x.servingLabel), s.id + " label " + x.servingLabel);
     if (f.id === "g_kirkland_organic_chicken") {
       assert.strictEqual(x.state, "raw", s.id + ": chicken breast is never cooked grams");
-      assert.ok((x.g === 175 && x.servingLabel === "1 breast (175 g raw)") || (x.g === 88 && x.servingLabel === "1/2 breast (88 g raw)"), s.id + " chicken " + x.servingLabel);
+      assert.ok((x.g === 175 && x.servingLabel === "1 breast (175 g raw)") || (x.g === 88 && x.servingLabel === "½ breast (88 g raw)"), s.id + " chicken " + x.servingLabel);
     }
   }));
   assert.ok(n >= 10, "chicken, pork, fish, rice and quinoa items are cook items (" + n + ")");
@@ -354,7 +354,7 @@ const USDA = { /* id: per 100 g [kcal, protein, carbs, fat, fiber, sugar, sodium
   g_lemon_juice: [22, 0.4, 6.9, 0.2, 0.3, 2.5, 1], g_lime: [30, 0.7, 10.5, 0.2, 2.8, 1.7, 2], g_lime_juice: [25, 0.4, 8.4, 0.1, 0.4, 1.7, 2],
   g_corn: [96, 3.4, 21, 1.5, 2.4, 4.5, 1], g_broccoli_raw: [34, 2.8, 6.6, 0.4, 2.6, 1.7, 33], g_broccoli_cooked: [35, 2.4, 7.2, 0.4, 3.3, 1.4, 41],
   g_carrots: [41, 0.9, 9.6, 0.2, 2.8, 4.7, 69], g_carrots_cooked: [35, 0.8, 8.2, 0.2, 3, 3.5, 58], g_roma_tomato: [18, 0.9, 3.9, 0.2, 1.2, 2.6, 5],
-  g_onion: [40, 1.1, 9.3, 0.1, 1.7, 4.2, 4], g_sweet_onion: [32, 0.8, 7.6, 0.1, 0.9, 5, 8] };
+  g_onion: [40, 1.1, 9.3, 0.1, 1.7, 4.2, 4], g_sweet_onion: [32, 0.8, 7.6, 0.1, 0.9, 5, 8], g_carrots_baby: [35, 0.6, 8.2, 0.1, 2.9, 4.8, 78] };
 t("MyFitnessPal check: brands match the package label, plain staples match USDA", () => {
   const byId = new Map(M.DB.generic.map(f => [f.id, f]));
   Object.keys(LABEL).forEach(id => {
@@ -450,9 +450,133 @@ t("suggest: plain item labels use ½ ¼ ¾ (not 1/2) and their grams match the i
   }));
 });
 
+/* ---- fixer round 4 (F7) ---- */
+/* CP-12: every size label a person picks from reads ¼ ½ ¾, like the diary */
+t("alt labels: ¼ ½ ¾, never 1/4 1/2 3/4 (raw and cooked sizes)", () => {
+  M.DB.generic.forEach(f => {
+    f.alts.concat(f.cook ? f.cook.alts : []).forEach(a => assert.ok(!/\b[13]\/[24]\b/.test(a.label), f.id + ": " + a.label));
+    assert.ok(!/\b[13]\/[24]\b/.test(f.serving.unit), f.id + " unit " + f.serving.unit);
+  });
+  const byId = new Map(M.DB.generic.map(f => [f.id, f]));
+  assert.ok(byId.get("g_cottage_cheese_2").alts.some(a => a.label === "¼ cup" && a.g === 56.5), "Daisy ¼ cup");
+  assert.ok(byId.get("g_banana").alts.some(a => a.label === "½ banana" && a.g === 59), "½ banana");
+  assert.ok(byId.get("g_white_rice").cook.alts.some(a => a.label === "½ cup" && a.g === 79), "½ cup cooked rice");
+});
+
+/* K3: package codes on the products they buy, so a scan finds them on the phone first */
+const GTIN_OK = c => { const d = c.split("").map(Number); const sum = d.slice(0, -1).reverse().reduce((a, x, i) => a + x * (i % 2 ? 1 : 3), 0); return (10 - sum % 10) % 10 === d[d.length - 1]; };
+const CODES = { /* each checked on Open Food Facts (world.openfoodfacts.org/api/v2/product/<code>.json) */
+  g_cottage_cheese_2: ["073420516208", "073420524203"], g_jam: ["051500141304", "051500616123"],
+  g_deli_turkey: ["044500966466", "044500976502", "044500201994"],
+  g_dkb_21_grains: ["013764027053"], g_dkb_thin: ["013764027138"], g_dkb_good_seed: ["013764027039"] };
+t("barcodes (K3): Daisy, Smucker's, Hillshire and Dave's carry their package codes", () => {
+  const byId = new Map(M.DB.generic.map(f => [f.id, f]));
+  Object.keys(CODES).forEach(id => assert.deepStrictEqual(byId.get(id).barcodes, CODES[id], id + " barcodes"));
+  const seen = new Set();
+  M.DB.generic.forEach(f => {
+    assert.strictEqual(f.barcode, "", f.id + ": built-ins keep barcode empty (codes live in barcodes)");
+    if (f.barcodes === undefined) return;
+    assert.ok(CODES[f.id], f.id + " has codes it should not");
+    assert.ok(f.brand && f.staple === true, f.id + ": codes only on the brands they buy");
+    f.barcodes.forEach(c => {
+      assert.ok(/^\d{12}$/.test(c) && GTIN_OK(c), f.id + ": " + c + " is a real 12-digit UPC-A");
+      assert.ok(!seen.has(c), "code on two foods: " + c); seen.add(c);
+    });
+  });
+  assert.strictEqual(seen.size, 10, "10 codes");
+  /* the Kirkland breast is sold by weight (a price code), so it has none */
+  assert.strictEqual(byId.get("g_kirkland_organic_chicken").barcodes, undefined);
+});
+
+/* DA-08 / FX-05: "just the turkey slices, no sandwich" */
+t("ideas: turkey slices never come as a sandwich or toast", () => {
+  const byId = new Map(M.DB.generic.map(f => [f.id, f]));
+  const turkey = M.DB.suggest.filter(s => s.items.some(x => x.foodId === "g_deli_turkey"));
+  assert.ok(turkey.length >= 3, "turkey ideas");
+  turkey.forEach(s => {
+    s.items.forEach(x => assert.ok(!/bread|bun|bagel|tortilla|muffin|naan|wrap/i.test(byId.get(x.foodId).name), s.id + " puts turkey on " + x.name));
+    assert.ok(!/sandwich|toast|bread/i.test(s.name + " " + s.desc.replace(/\bno bread\b/gi, "")), s.id + ": " + s.name + " / " + s.desc);
+  });
+  assert.ok(!M.DB.suggest.some(s => s.id === "s_turkey_tomato_toast"), "the turkey toast idea is gone");
+  const plate = M.DB.suggest.find(s => s.id === "s_turkey_cottage_plate");
+  assert.ok(plate && plate.slot === "Breakfast" && plate.store === "Either", "no-bread turkey breakfast");
+  assert.deepStrictEqual(plate.items.map(x => x.foodId), ["g_deli_turkey", "g_cottage_cheese_2", "g_roma_tomato", "g_cucumber"]);
+  assert.ok(plate.per.p >= 20, "turkey plate protein " + plate.per.p);
+});
+
+/* DA-04 (data half): the other words people use for these foods */
+const WORDS2 = {
+  g_carrots_baby: ["baby carrots", "baby carrot"], g_bell_pepper: ["red bell pepper", "green bell pepper", "yellow pepper", "orange pepper"],
+  g_onion: ["red onion", "yellow onion"], g_corn: ["sweet corn", "corn on the cob", "ear of corn", "corn cob"], g_cherry_tomatoes: ["grape tomatoes"],
+  g_olive_oil: ["extra virgin olive oil", "evoo"], g_agave: ["agave nectar"], g_jam: ["preserves", "fruit spread", "strawberry preserves"],
+  g_deli_turkey: ["deli turkey", "turkey lunchmeat", "sandwich meat", "lunch meat"]
+};
+const FILLER = /^(of|the|a|an)$/;
+t("words: red / green / yellow peppers, red onion, grape tomatoes, EVOO, baby carrots, sweet corn …", () => {
+  const byId = new Map(M.DB.generic.map(f => [f.id, f]));
+  Object.keys(WORDS2).forEach(id => WORDS2[id].forEach(q => assert.ok(hits(q.split(" ").filter(w => !FILLER.test(w)).join(" "), byId.get(id)), "'" + q + "' should find " + id)));
+  /* words only help search: they never make a food a staple */
+  ["g_olive_oil", "g_cherry_tomatoes"].forEach(id => assert.ok(byId.get(id).words && byId.get(id).staple !== true, id + " has words, not a staple"));
+});
+t("search (m-core + m-data): the new words list the right food first", () => {
+  const ctx = { console, Date, Math, JSON, setTimeout, clearTimeout, Intl };
+  ctx.window = ctx; ctx.self = ctx;
+  ctx.localStorage = { store: {}, getItem(k) { return this.store[k] ?? null; }, setItem(k, v) { this.store[k] = String(v); }, removeItem(k) { delete this.store[k]; } };
+  ctx.S = { profile: "nick" }; ctx.PRESETS = { nick: { name: "Nick" }, kat: { name: "Katerina" } };
+  vm.createContext(ctx);
+  try { ["m-core.js", "m-data.js"].forEach(f => vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), ctx, { filename: f })); }
+  catch (e) { console.log("       (skipped: m-core did not load: " + e.message + ")"); return; }
+  const C = ctx.M;
+  if (!C || typeof C.search !== "function") { console.log("       (skipped: no M.search)"); return; }
+  if (typeof C.reset === "function") C.reset();
+  const top = q => { const r = C.search(q, { pid: "nick" }).filter(x => x.kind === "generic"); return r.length ? r[0].id : null; };
+  Object.keys(WORDS2).forEach(id => WORDS2[id].forEach(q => { if (!/\bof\b/.test(q)) assert.strictEqual(top(q), id, "'" + q + "' → " + top(q)); }));
+});
+
+/* queued: scallops and carrots by the piece; baby carrots are their own food */
+t("by the piece: 1 large scallop (30 g raw), carrots small / medium / large, baby carrots", () => {
+  const byId = new Map(M.DB.generic.map(f => [f.id, f]));
+  const sc = byId.get("g_scallops");
+  assert.ok(sc.alts.some(a => a.label === "1 large scallop" && a.g === 30), "1 large scallop = 30 g raw");
+  const ca = sc.cook.alts.find(a => a.label === "1 large scallop");
+  assert.ok(ca && Math.abs(ca.g - 30 * sc.cook.y) < 0.051, "cooked scallop = 30 g × y (" + (ca && ca.g) + ")");
+  const c = byId.get("g_carrots");
+  assert.deepStrictEqual(c.serving, { qty: 1, unit: "medium", g: 61 }, "1 medium carrot = 61 g (USDA)");
+  assert.ok(c.alts.some(a => a.label === "1 small" && a.g === 50) && c.alts.some(a => a.label === "1 large" && a.g === 72), "small 50 g, large 72 g");
+  assert.ok(byId.get("g_carrots_cooked").alts.some(a => a.label === "1 carrot" && a.g === 46), "1 cooked carrot = 46 g");
+  const b = byId.get("g_carrots_baby");
+  assert.deepStrictEqual([b.name, b.brand, b.serving], ["Carrots, baby", "", { qty: 10, unit: "baby carrots", g: 100 }], "10 baby carrots (100 g)");
+  assert.ok(b.alts.some(a => a.label === "1 baby carrot" && a.g === 10), "1 baby carrot = 10 g");
+  assert.strictEqual(b.per.cal, 35); assert.strictEqual(b.staple, true);
+  M.DB.generic.forEach(f => { if (f.id !== "g_carrots_baby") f.alts.forEach(a => assert.ok(!/baby/i.test(a.label), f.id + ": " + a.label)); });
+  /* ideas that say baby carrots use the baby carrot food */
+  let n = 0;
+  M.DB.suggest.forEach(s => s.items.forEach(x => { if (/baby carrot/i.test(x.servingLabel)) { n++; assert.strictEqual(x.foodId, "g_carrots_baby", s.id + " " + x.servingLabel); } }));
+  assert.ok(n >= 2, "baby carrot ideas");
+});
+
+/* DA-09: olive oil the way USDA (and MyFitnessPal) weighs it */
+t("olive oil: 1 tbsp = 13.5 g (119 cal); ideas use 1 tsp (4.5 g) or ½ tbsp (6.75 g)", () => {
+  const byId = new Map(M.DB.generic.map(f => [f.id, f]));
+  const o = byId.get("g_olive_oil");
+  assert.deepStrictEqual(o.serving, { qty: 1, unit: "tbsp", g: 13.5 }); assert.strictEqual(o.per.cal, 119);
+  assert.ok(o.alts.some(a => a.label === "1 tsp" && a.g === 4.5) && o.alts.some(a => a.label === "2 tbsp" && a.g === 27), "tsp and 2 tbsp");
+  const oils = []; M.DB.suggest.forEach(s => s.items.forEach(x => { if (x.foodId === "g_olive_oil") oils.push(x); }));
+  assert.ok(oils.length >= 10, "oil in the ideas");
+  oils.forEach(x => assert.ok((x.g === 4.5 && x.servingLabel === "1 tsp (4.5 g)") || (x.g === 6.75 && x.servingLabel === "½ tbsp (6.75 g)"), x.servingLabel));
+  assert.strictEqual(oils.find(x => x.g === 6.75).per.cal, 60, "½ tbsp = 60 cal");
+});
+
+/* queued: restaurant food out; old entries keep their own numbers (checked in "old ids" below) */
+t("no restaurant entree: Chicken Caesar salad is gone and not aliased to another food", () => {
+  assert.ok(!M.DB.generic.some(f => f.id === "g_chicken_caesar_salad" || /entree/i.test(f.name)), "entree gone");
+  assert.strictEqual(M.DB.alias.g_chicken_caesar_salad, undefined, "no alias: an alias would re-price old entries");
+});
+
 /* ---- old ids in real diaries (live d757f4b storage format) ---- */
 /* Every generic id that was live (d757f4b) is still a food or an alias, except
-   g_cottage_cheese_4, which was removed on purpose: its entries keep their own numbers. */
+   g_cottage_cheese_4 and g_chicken_caesar_salad, which were removed on purpose:
+   their entries keep their own numbers. */
 const LIVE_IDS_GONE = ["g_chicken_breast", "g_chicken_breast_raw", "g_chicken_breast_cooked", "g_cod_cooked", "g_shrimp_cooked", "g_quinoa_cooked"];
 t("old ids: a live-format diary and saved meal load, resolve and keep their own numbers", () => {
   const ctx = { console, Date, Math, JSON, setTimeout, clearTimeout, Intl };
@@ -472,7 +596,8 @@ t("old ids: a live-format diary and saved meal load, resolve and keep their own 
     E("e5", "g_shrimp_cooked", "Shrimp, cooked", "3 oz (85 g)", 1, 85, P(84, 20.4, 0.2, 0.2)),
     E("e6", "g_quinoa_cooked", "Quinoa, cooked", "1 cup (185 g)", 1, 185, P(222, 8.1, 39.4, 3.6)),
     E("e7", "g_cottage_cheese_4", "Cottage cheese, 4%", "1/2 cup (113 g)", 1, 113, P(110, 12, 5, 5)),
-    E("e8", "g_ground_beef_80_cooked", "Ground beef 80/20, cooked", "4 oz (113 g)", 1, 113, P(283, 28.3, 0, 18.1))
+    E("e8", "g_ground_beef_80_cooked", "Ground beef 80/20, cooked", "4 oz (113 g)", 1, 113, P(283, 28.3, 0, 18.1)),
+    E("e9", "g_chicken_caesar_salad", "Chicken Caesar salad, entree", "1 salad (350 g)", 1, 350, P(520, 38, 14, 34))
   ];
   const saved = entries.map(e => JSON.parse(JSON.stringify(e)));
   const meal = { id: "m_live1", name: "Chicken bowl", slot: "Lunch", items: [entries[0], entries[5], entries[6]].map(e => JSON.parse(JSON.stringify(e))), per: P(378.8, 28.9, 44.4, 9.6), uses: 3, lastUsed: 1790000000000, createdAt: 1780000000000, updatedAt: 1790000000000, pid: "nick" };
@@ -489,6 +614,7 @@ t("old ids: a live-format diary and saved meal load, resolve and keep their own 
   LIVE_IDS_GONE.forEach(id => { const f = C.foods.get(id); assert.ok(f && f.id === M.DB.alias[id].id, id + " → " + (f && f.id)); });
   assert.strictEqual(C.cook.alias("g_chicken_breast_cooked").state, "cooked");
   assert.strictEqual(C.foods.get("g_cottage_cheese_4"), null, "removed id: no food (the entry keeps its own numbers)");
+  assert.strictEqual(C.foods.get("g_chicken_caesar_salad"), null, "removed Caesar entree: no food (the entry keeps its own numbers)");
   /* the day's entries keep exactly the numbers they were saved with */
   const d = C.dayOf(today, "nick");
   assert.ok(d && d.entries.length === saved.length, "all " + saved.length + " entries load");
@@ -511,6 +637,8 @@ t("old ids: a live-format diary and saved meal load, resolve and keep their own 
     const rs = C.recents("nick", 30);
     const cc = rs.find(r => r.foodId === "g_cottage_cheese_4");
     assert.ok(cc && cc.per.cal === 110 && cc.name === "Cottage cheese, 4%", "gone food: recent keeps its snapshot");
+    const cs = rs.find(r => r.foodId === "g_chicken_caesar_salad");
+    assert.ok(cs && cs.per.cal === 520 && cs.name === "Chicken Caesar salad, entree", "gone Caesar entree: recent keeps its snapshot");
     const ch = rs.filter(r => r.foodId === "g_kirkland_organic_chicken");
     assert.ok(ch.length >= 1 && ch.every(r => r.state === "raw"), "old chicken recents come back as the Kirkland breast, raw");
     rs.forEach(r => NUT.forEach(k => assert.ok(isNum(r.per[k]), "recent " + r.name + " " + k)));

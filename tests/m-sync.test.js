@@ -491,7 +491,7 @@ t("turn on: 20-letter code, everything goes up in chunks, headers right, nothing
   const iso = A.gets().find(g => /kind=eq\.meta/.test(g.url) && g.headers["x-household"] !== code);
   assert.ok(iso && CODE_RE.test(iso.headers["x-household"]), "isolation check with another code");
   const get = A.gets().find(g => /updated_at=gt\./.test(g.url));
-  assert.ok(get.url.startsWith(URLBASE + "/rest/v1/chalk_sync?select=household,kind,id,data,deleted,client_updated,updated_at&updated_at=gt."), get.url);
+  assert.ok(get.url.startsWith(URLBASE + "/rest/v1/chalk_sync?select=household,kind,id,data,deleted,client_updated,updated_at,device&updated_at=gt."), get.url);
   assert.ok(/&order=updated_at\.asc,kind\.asc,id\.asc&limit=500$/.test(get.url), get.url);
   /* the code is a secret: only ever in the x-household header, never in a URL */
   assert.ok(A.reqs.every(r => r.url.indexOf(code) < 0), "code never in a URL");
@@ -724,8 +724,9 @@ t("restore keeps the replaced training for Undo and leaves a one-time note (BES-
   const before = P.store.get("chalk.v1");
   assert.ok((await P.M.cloud.join(code)).ok);
   assert.strictEqual(P.M.cloud.undoInfo(), null, "nothing to undo yet");
+  assert.strictEqual(P.M.cloud.training().keep, 2, "the card can say 2 workouts stay");
   assert.strictEqual(await P.M.cloud.restoreTraining(), true);
-  assert.strictEqual(P.train().log.length, 3, "restored");
+  assert.deepStrictEqual(J(P.train().log.map(x => x.id)), ["w1", "p1", "w2", "p2", "w3"], "restored, and this phone's 2 stay (SY-04)");
   assert.strictEqual(P.store.get("chalk.sync.restored"), "3", "one-time note for the toast");
   const u = P.M.cloud.undoInfo();
   assert.ok(u && u.n === 2 && u.pid === "nick" && u.at > 0, JSON.stringify(u));
@@ -744,11 +745,13 @@ t("restore keeps the replaced training for Undo and leaves a one-time note (BES-
   assert.ok((await P.sync()).ok);
   assert.deepStrictEqual(trainOf(SERVER.get(code, "train", "nick")).log.map(x => x.id), ["w1", "w2", "w3"], "backup untouched after Undo");
   assert.strictEqual(P.M.cloud.training().missing, 3, "and Restore is still offered");
-  /* the Undo copy expires after a week */
+  /* the Undo copy expires after a day (it can be big) */
   assert.strictEqual(await P.M.cloud.restoreTraining(), true);
   const real = Date.now;
-  P.M.now = () => real() + 8 * DAY;
-  assert.strictEqual(P.M.cloud.undoInfo(), null, "gone after 7 days");
+  P.M.now = () => real() + DAY / 2;
+  assert.ok(P.M.cloud.undoInfo(), "still there after 12 hours");
+  P.M.now = () => real() + 2 * DAY;
+  assert.strictEqual(P.M.cloud.undoInfo(), null, "gone after a day");
   P.M.now = () => Date.now();
   O.M.cloud.leave(); P.M.cloud.leave();
 });
@@ -1127,12 +1130,13 @@ t("each phone keeps only its own person's diary and weigh-ins; switching person 
   assert.ok(SERVER.all(code).filter(r => /^kat\|/.test(r.id)).every(r => r.deleted === false), "never deleted in the cloud");
   await K.sync();
   assert.strictEqual(rowsOf(K, "days", "kat").length, 3, "her phone still has them");
-  /* Nick's phone switches to Katerina: her rows come down, his leave (they're in the cloud) */
+  /* Nick's phone switches to Katerina: her rows come down; his stay (it's his phone: SY-01) */
   N.ctx.S.profile = "kat";
   assert.ok((await N.sync()).ok);
   assert.strictEqual(rowsOf(N, "days", "kat").length, 3, "her diary arrived");
   assert.strictEqual(rowsOf(N, "body", "kat").length, 1, "her weigh-in too");
-  assert.strictEqual(rowsOf(N, "days", "nick").length, 0, "his left the phone");
+  assert.strictEqual(rowsOf(N, "days", "nick").length, 5, "his never leave his own phone");
+  assert.strictEqual(rowsOf(N, "body", "nick").length, 5, "nor his weigh-ins");
   assert.ok(SERVER.all(code).every(r => r.deleted === false), "nothing deleted anywhere");
   /* and back */
   N.ctx.S.profile = "nick";
@@ -1594,22 +1598,333 @@ t("Delete cloud copy and Change code on a phone that switched person keep every 
   const K = katPhone("c5c-kat");
   assert.ok((await K.M.cloud.join(code)).ok);
   assert.ok((await N.sync()).ok);
-  N.ctx.S.profile = "kat";           /* Katerina borrows Nick's phone */
+  N.ctx.S.profile = "kat";           /* Katerina borrows Nick's phone ... */
   assert.ok((await N.sync()).ok);
-  assert.strictEqual(rowsOf(N, "days", "nick").length, 0, "his diary left his phone (it's in the cloud)");
-  /* Change code while switched: his diary goes to the new household too */
+  assert.strictEqual(rowsOf(N, "days", "kat").length, 3, "her diary came down");
+  N.ctx.S.profile = "nick";          /* ... and hands it back: her rows leave (they're in the cloud) */
+  assert.ok((await N.sync()).ok);
+  assert.strictEqual(rowsOf(N, "days", "kat").length, 0, "her diary left his phone (it's in the cloud)");
+  assert.strictEqual(rowsOf(N, "days", "nick").length, 5, "his never left");
+  /* Change code: her diary goes to the new household too */
   const c = await N.M.cloud.changeCode();
   assert.ok(c.ok, JSON.stringify(c));
-  assert.strictEqual(SERVER.all(c.code).filter(x => x.kind === "day" && /^nick\|/.test(x.id) && !x.deleted).length, 5, "his 5 days are in the new household");
-  assert.strictEqual(SERVER.all(c.code).filter(x => x.kind === "body" && /^nick\|/.test(x.id) && !x.deleted).length, 5, "and his weigh-ins");
-  /* Delete cloud copy while switched: his diary comes back to his phone first */
+  assert.strictEqual(SERVER.all(c.code).filter(x => x.kind === "day" && /^kat\|/.test(x.id) && !x.deleted).length, 3, "her 3 days are in the new household");
+  assert.strictEqual(SERVER.all(c.code).filter(x => x.kind === "body" && /^kat\|/.test(x.id) && !x.deleted).length, 1, "and her weigh-in");
+  assert.strictEqual(SERVER.all(c.code).filter(x => x.kind === "day" && /^nick\|/.test(x.id) && !x.deleted).length, 5, "and his 5 days");
+  /* Delete cloud copy: her diary comes back to his phone first */
   const d = await N.M.cloud.deleteCloud();
   assert.ok(d.ok, JSON.stringify(d));
-  assert.strictEqual(rowsOf(N, "days", "nick").length, 5, "his diary is on his phone");
+  assert.strictEqual(rowsOf(N, "days", "kat").length, 3, "her diary is on his phone");
+  assert.strictEqual(rowsOf(N, "body", "kat").length, 1, "and her weigh-in");
+  assert.strictEqual(rowsOf(N, "days", "nick").length, 5, "his too");
   assert.strictEqual(rowsOf(N, "body", "nick").length, 5, "and his weigh-ins");
-  assert.strictEqual(rowsOf(N, "days", "kat").length, 3, "hers too");
-  N.ctx.S.profile = "nick";
   K.M.cloud.leave();
+});
+
+/* ============================================================ round 4 (swarm #2) */
+const dayNames = (P, pid, date) => { const d = P.M.MS.days[pid + "|" + (date || P.M.today())]; return d ? J(d.entries.map(e => e.name)) : null; };
+const cloudDay = (code, id) => { const r = SERVER.all(code).find(x => x.kind === "day" && x.id === id); return r ? JSON.parse(r.data) : null; };
+
+t("SY-01 a lent phone never loses its own person's diary; logging after switching back keeps the day", async () => {
+  const { P: N, code } = await household("sy01-nick");
+  const K = katPhone("sy01-kat");
+  assert.ok((await K.M.cloud.join(code)).ok);
+  assert.ok((await N.sync()).ok);
+  assert.ok((await K.sync()).ok);
+  const kid = "kat|" + K.M.today();
+  /* Katerina lends her phone to Nick */
+  K.ctx.S.profile = "nick";
+  const r1 = await K.M.cloud.personChanged();
+  assert.ok(r1.ok, JSON.stringify(r1));
+  assert.strictEqual(rowsOf(K, "days", "nick").length, 5, "his diary came down at once (K6)");
+  assert.strictEqual(rowsOf(K, "days", "kat").length, 3, "hers never left her phone");
+  assert.strictEqual(rowsOf(K, "body", "kat").length, 1, "nor her weigh-in");
+  assert.strictEqual(K.M.cloud.catchingUp(), false);
+  /* switched back, no sync yet: her diary is right there; she logs a snack */
+  K.ctx.S.profile = "kat";
+  assert.deepStrictEqual(dayNames(K, "kat"), ["Kat dinner"], "her diary shows at once (SY-05)");
+  assert.strictEqual(K.M.cloud.catchingUp(), false, "her own diary never waits");
+  K.M.log.add(K.M.today(), { slot: "Snacks", name: "Kat snack", per: { cal: 150, p: 10, c: 15, f: 5 } });
+  assert.ok((await K.sync()).ok);
+  assert.deepStrictEqual(dayNames(K, "kat"), ["Kat dinner", "Kat snack"]);
+  assert.deepStrictEqual(cloudDay(code, kid).entries.map(e => e.name), ["Kat dinner", "Kat snack"], "the cloud keeps both");
+  assert.strictEqual(rowsOf(K, "days", "nick").length, 0, "the borrowed person's rows leave once she's back");
+  assert.strictEqual(rowsOf(K, "days", "kat").length, 3);
+  /* a phone an older build already trimmed: her day is gone here, she logs before a sync */
+  const st = K.M.cloud._.state();
+  delete K.M.MS.days[kid]; delete st.hashes["day|" + kid]; delete st.base["day|" + kid];
+  K.M.log.add(K.M.today(), { slot: "Snacks", name: "Kat apple", per: { cal: 95, p: 0.5, c: 25, f: 0.3 } });
+  assert.ok((await K.sync()).ok);
+  assert.deepStrictEqual(dayNames(K, "kat").slice().sort(), ["Kat apple", "Kat dinner", "Kat snack"], "nothing erased on her phone");
+  assert.deepStrictEqual(cloudDay(code, kid).entries.map(e => e.name).sort(), ["Kat apple", "Kat dinner", "Kat snack"], "nor in the cloud");
+  /* a borrowed person waits for their diary: catchingUp says so until it's down */
+  K.ctx.S.profile = "nick";
+  assert.strictEqual(K.M.cloud.catchingUp(), true, "show Getting your diary…");
+  assert.strictEqual(K.M.cloud.status().catchUp, true);
+  await K.M.cloud.personChanged();
+  assert.strictEqual(K.M.cloud.catchingUp(), false);
+  assert.strictEqual(rowsOf(K, "days", "nick").length, 5);
+  K.ctx.S.profile = "kat"; await K.sync();
+  assert.ok(SERVER.all(code).every(r => r.deleted === false), "nothing deleted anywhere");
+  /* the home person survives a reload of the sync state (phones that joined before this build use their training owner) */
+  const disk = JSON.parse(K.store.get("chalk.sync.v1"));
+  assert.strictEqual(disk.home, "kat");
+  N.M.cloud.leave(); K.M.cloud.leave();
+});
+
+t("SY-02 days merge entry by entry: both phones' entries stay, deletes stick, the newer edit wins, water and note on their own", async () => {
+  const { P: N, code } = await household("sy02-nick");
+  const K = katPhone("sy02-kat");
+  assert.ok((await K.M.cloud.join(code)).ok);
+  K.ctx.S.profile = "nick";                      /* her phone logs for Nick too */
+  assert.ok((await K.M.cloud.personChanged()).ok);
+  assert.ok((await N.sync()).ok);
+  const date = N.M.today(), id = "nick|" + date;
+  const same = () => { assert.deepStrictEqual(dayNames(N, "nick"), dayNames(K, "nick")); assert.deepStrictEqual(cloudDay(code, id).entries.map(e => e.name), dayNames(N, "nick")); };
+  const run = async () => { await N.sync(); await K.sync(); await N.sync(); await K.sync(); };
+  /* 1. both log at the same time (a normal 2-minute tick) */
+  N.M.log.add(date, { slot: "Snacks", name: "N snack", per: { cal: 200, p: 30, c: 5, f: 3 } });
+  await sleep(5);
+  K.M.log.add(date, { slot: "Dinner", name: "K dinner", per: { cal: 700, p: 50, c: 60, f: 20 } });
+  await run();
+  assert.deepStrictEqual(dayNames(N, "nick"), ["Chicken toast", "N snack", "K dinner"], "both entries kept, in time order");
+  same();
+  /* 2. N deletes his snack while K adds a drink: the delete sticks, the drink stays */
+  const snack = N.M.MS.days[id].entries.find(e => e.name === "N snack").id;
+  N.M.log.remove(date, snack);
+  await sleep(5);
+  K.M.log.add(date, { slot: "Snacks", name: "K drink", per: { cal: 100, p: 0, c: 25, f: 0 } });
+  await K.sync(); await N.sync(); await K.sync(); await N.sync();
+  assert.deepStrictEqual(dayNames(N, "nick"), ["Chicken toast", "K dinner", "K drink"], "deleted snack stays deleted");
+  same();
+  /* 3. the same entry edited on both: the newer edit wins; water and note merge on their own */
+  const din = N.M.MS.days[id].entries.find(e => e.name === "K dinner").id;
+  const t0 = Date.now();
+  N.M.now = () => t0 + 1000; N.M.log.update(date, din, { servings: 2 }); N.M.log.setWater(date, 40);
+  K.M.now = () => t0 + 2000; K.M.log.update(date, din, { servings: 3 }); K.M.log.setNote(date, "Big day");
+  await run();
+  N.M.now = () => Date.now(); K.M.now = () => Date.now();
+  const e3 = P => P.M.MS.days[id].entries.find(e => e.id === din);
+  assert.strictEqual(e3(N).servings, 3, "K's edit was newer");
+  assert.strictEqual(e3(K).servings, 3);
+  assert.strictEqual(N.M.MS.days[id].water, 40, "water from one phone");
+  assert.strictEqual(K.M.MS.days[id].water, 40);
+  assert.strictEqual(N.M.MS.days[id].note, "Big day", "note from the other");
+  same();
+  /* 4. nothing doubles, and the phones agree with the cloud (no echo) */
+  const ids = N.M.MS.days[id].entries.map(e => e.id);
+  assert.strictEqual(new Set(ids).size, ids.length, "no duplicate entries");
+  const before = SERVER.all(code).length, posts = N.posts().length + K.posts().length;
+  await run();
+  assert.strictEqual(N.posts().length + K.posts().length, posts, "nothing left to send");
+  assert.strictEqual(SERVER.all(code).length, before);
+  /* 5. the merge base is small (fingerprints) and only kept for recent days */
+  const b = N.M.cloud._.state().base["day|" + id];
+  assert.ok(b && b.d === 1 && Object.keys(b.e).length === 3 && b.w === 40, JSON.stringify(b));
+  const old = N.M.addDays(date, -90);
+  N.M.log.add(old, { slot: "Lunch", name: "Old lunch", per: { cal: 300, p: 20, c: 30, f: 10 } });
+  await N.sync(); await N.sync();
+  assert.ok(N.M.cloud._.state().hashes["day|nick|" + old], "old day synced");
+  assert.ok(!N.M.cloud._.state().base["day|nick|" + old], "but keeps no merge base");
+  N.M.cloud.leave(); K.M.cloud.leave();
+});
+
+t("SY-02 no base (new day on both phones): nothing counts as deleted; water and note fill from the side that has them", async () => {
+  const M1 = phone("sy02b").M;
+  const md = M1.cloud._.mergeDay;
+  const e = (id, name, at, extra) => Object.assign({ id, name, at, slot: "Lunch", servings: 1, per: { cal: 100, p: 1, c: 1, f: 1 } }, extra || {});
+  const mine = { id: "nick|2026-09-29", pid: "nick", date: "2026-09-29", entries: [e("a", "A", 1), e("b", "B", 3)], water: 0, note: "", updatedAt: 10 };
+  const theirs = { id: "nick|2026-09-29", pid: "nick", date: "2026-09-29", entries: [e("c", "C", 2), e("b", "B2", 3)], water: 24, note: "hi", updatedAt: 5 };
+  const out = J(md(null, mine, theirs, false));
+  assert.deepStrictEqual(out.entries.map(x => x.name), ["A", "C", "B"], "union by id, time order, mine newer wins B");
+  assert.strictEqual(out.water, 24); assert.strictEqual(out.note, "hi");
+  assert.strictEqual(out.updatedAt, 10);
+  /* with a base: a delete on one side sticks unless the other side edited it and is newer */
+  const base = M1.cloud._.dayBase({ entries: [e("a", "A", 1), e("b", "B", 3)], water: 0, note: "" });
+  const t2 = { entries: [e("a", "A", 1)], water: 0, note: "", updatedAt: 20 };
+  assert.deepStrictEqual(J(md(base, { entries: [e("a", "A", 1), e("b", "B", 3)], water: 0, note: "", updatedAt: 10 }, t2, true)).entries.map(x => x.name), ["A"], "delete sticks");
+  assert.deepStrictEqual(J(md(base, { entries: [e("a", "A", 1), e("b", "B edited", 3)], water: 0, note: "", updatedAt: 30 }, t2, false)).entries.map(x => x.name), ["A", "B edited"], "a newer edit beats an older delete");
+  assert.deepStrictEqual(J(md(base, { entries: [e("a", "A", 1), e("b", "B edited", 3)], water: 0, note: "", updatedAt: 10 }, t2, true)).entries.map(x => x.name), ["A"], "a newer delete beats an older edit");
+});
+
+t("SY-03 a saved meal edited on both phones: items by id, per and batch raw weight worked out again, cooked weight kept", async () => {
+  const { P: N, code } = await household("sy03-nick");
+  const K = katPhone("sy03-kat");
+  assert.ok((await K.M.cloud.join(code)).ok);
+  assert.ok((await N.sync()).ok);
+  const run = async () => { await N.sync(); await K.sync(); await N.sync(); await K.sync(); };
+  const check = (P, mid) => { const m = P.M.MS.meals[mid], exp = P.M.meals.computePer(m); assert.deepStrictEqual(J(m.per), J(exp), "per matches the items"); return m; };
+  const mid = Object.values(N.M.MS.meals).find(m => m.name === "Chicken toast").id;
+  /* A: he adds rice, she sets servings made = 2 */
+  N.M.meals.update(mid, { items: N.M.MS.meals[mid].items.concat([{ name: "White rice, cooked", servings: 1, per: { cal: 205, p: 4.3, c: 45, f: 0.4 } }]) });
+  await sleep(5);
+  K.M.meals.update(mid, { servingsMade: 2 });
+  await run();
+  [N, K].forEach(P => { const m = check(P, mid); assert.strictEqual(m.items.length, 3); assert.strictEqual(m.servingsMade, 2); assert.strictEqual(m.per.cal, 272.5); });
+  /* B: both add a different item */
+  const mid2 = Object.values(N.M.MS.meals).find(m => m.name === "Pork tenderloin plate").id;
+  N.M.meals.update(mid2, { items: N.M.MS.meals[mid2].items.concat([{ name: "Broccoli", servings: 1, per: { cal: 55, p: 3.7, c: 11, f: 0.6 } }]) });
+  await sleep(5);
+  K.M.meals.update(mid2, { items: K.M.MS.meals[mid2].items.concat([{ name: "Sweet potato", servings: 1, per: { cal: 112, p: 2, c: 26, f: 0.1 } }]) });
+  await run();
+  [N, K].forEach(P => { const m = check(P, mid2); assert.deepStrictEqual(J(m.items.map(i => i.name).sort()), ["Broccoli", "Pork tenderloin", "Sweet potato"]); });
+  /* C: batch: he changes the cooked weight, she adds an onion (150 g) */
+  N.M.meals.update(mid2, { batch: { cookedG: 900 } });
+  await run();
+  N.M.meals.update(mid2, { batch: { cookedG: 1200 } });
+  await sleep(5);
+  K.M.meals.update(mid2, { items: K.M.MS.meals[mid2].items.concat([{ name: "Onion", servings: 1, g: 150, per: { cal: 60, p: 1.6, c: 14, f: 0.2 } }]) });
+  await run();
+  [N, K].forEach(P => { const m = check(P, mid2); assert.strictEqual(m.batch.cookedG, 1200, "his cooked weight kept"); assert.strictEqual(m.batch.rawG, P.M.cook.rawTotal(m.items), "raw weight from the items"); assert.strictEqual(m.items.length, 4); });
+  /* foods: the numbers come from one side together (serving + per never mixed) */
+  const fid = Object.values(N.M.MS.foods).find(f => f.name === "Zucchini").id;
+  N.M.foods.update(fid, { serving: { qty: 1, unit: "medium", g: 196 }, per: { cal: 33, p: 2.4, c: 6.1, f: 0.6 } });
+  await sleep(5);
+  K.M.foods.update(fid, { per: { cal: 25, p: 2, c: 4, f: 0.5 }, brand: "Farm" });
+  await run();
+  [N, K].forEach(P => { const f = P.M.MS.foods[fid]; assert.strictEqual(f.serving.unit, "cup", "her numbers (newer) came together"); assert.strictEqual(f.per.cal, 25); assert.strictEqual(f.brand, "Farm"); });
+  N.M.cloud.leave(); K.M.cloud.leave();
+});
+
+t("SY-04 a training restore adds the backup to this phone's workouts; Undo keeps workouts logged since", async () => {
+  const { P: N, code } = await household("sy04-nick", { train: trainState("nick", ["n1", "n2", "n3"]) });
+  const K = katPhone("sy04-kat", { train: trainState("kat", ["k1", "k2", "k3", "k4"]) });
+  assert.ok((await K.M.cloud.join(code)).ok); assert.ok((await K.sync()).ok); assert.ok((await N.sync()).ok);
+  /* her NEW phone already has 2 workouts; one is in progress */
+  const K2 = phone("sy04-k2", { S: { profile: "kat", active: null }, train: trainState("kat", ["new1", "new2"], { active: { name: "Legs", start: Date.now() } }) });
+  assert.ok((await K2.M.cloud.join(code)).ok);
+  const info = K2.M.cloud.training();
+  assert.ok(info && info.missing === 4 && info.keep === 2, JSON.stringify(info));
+  const before = K2.store.get("chalk.v1");
+  assert.strictEqual(await K2.M.cloud.restoreTraining(), true);
+  const after = K2.train();
+  assert.deepStrictEqual(J(after.log.map(w => w.id)).sort(), ["k1", "k2", "k3", "k4", "new1", "new2"], "nothing on this phone was dropped");
+  assert.ok(after.log.every((w, i) => i === 0 || after.log[i - 1].start <= w.start), "in date order");
+  assert.strictEqual(after.active && after.active.name, "Legs", "the workout in progress stays");
+  assert.ok((await K2.sync()).ok);
+  const cloudIds = J(trainOf(SERVER.get(code, "train", "kat")).log.map(w => w.id)).sort();
+  assert.deepStrictEqual(cloudIds, ["k1", "k2", "k3", "k4", "new1", "new2"], "the backup now has all six");
+  /* she logs a workout, then taps Undo: back to her 2, plus the one logged since */
+  const t = K2.train(); t.log.push({ id: "since1", name: "Workout since1", start: Date.now(), sets: {} }); t.active = null; K2.setTrain(t);
+  assert.strictEqual(K2.M.cloud.undoRestore(), true);
+  assert.deepStrictEqual(J(K2.train().log.map(w => w.id)), ["new1", "new2", "since1"], "Undo keeps the workout logged since");
+  /* nothing logged since: Undo gives back the exact text */
+  const K3 = phone("sy04-k3", { S: { profile: "kat", active: null }, train: trainState("kat", ["x1"]) });
+  assert.ok((await K3.M.cloud.join(code)).ok);
+  const b3 = K3.store.get("chalk.v1");
+  assert.strictEqual(await K3.M.cloud.restoreTraining(), true);
+  assert.strictEqual(K3.train().log.length, 7);
+  assert.strictEqual(K3.M.cloud.undoRestore(), true);
+  assert.strictEqual(K3.store.get("chalk.v1"), b3, "byte for byte");
+  assert.ok(before);
+  [N, K, K2, K3].forEach(P => P.M.cloud.leave());
+});
+
+t("K4 / SE-01 incoming rows also go through m-core's cleaner (when it has one); bad lookup ids are blanked; lines keep steady ids", async () => {
+  const { P: N, code } = await household("k4-nick");
+  const B2 = phone("k4-b2");
+  assert.ok((await B2.M.cloud.join(code)).ok);
+  const date = "2026-01-02", now = Date.now();
+  const day = { id: "nick|" + date, pid: "nick", date, updatedAt: now, water: 0, note: "", entries: [
+    { id: "e1", name: "Evil", slot: "Lunch", servings: 1, foodId: "__proto__", mealId: "constructor", per: { cal: 10, p: 1, c: 1, f: 1 }, at: now },
+    { name: "No id", slot: "Lunch", servings: 1, per: { cal: 5, p: 0, c: 1, f: 0 }, at: now },
+    { id: "e1", name: "Same id", slot: "Lunch", servings: 1, per: { cal: 5, p: 0, c: 1, f: 0 }, at: now }] };
+  SERVER.put({ household: code, kind: "day", id: day.id, data: day, client_updated: now, device: "old-app" });
+  SERVER.put({ household: code, kind: "meal", id: "m-hostile", data: { id: "m-hostile", name: "Hostile", slot: "Lunch", servingsMade: 1, items: [{ name: "A", servings: 1, mealId: "__proto__", per: { cal: 100, p: 1, c: 1, f: 1 } }, { name: "B", servings: 2, per: { cal: 50, p: 1, c: 1, f: 1 } }], per: { cal: 200, p: 3, c: 3, f: 3 }, updatedAt: now }, client_updated: now, device: "old-app" });
+  SERVER.put({ household: code, kind: "body", id: "nick|" + date, data: { id: "nick|" + date, pid: "nick", date, w: 5000, rhr: null, at: now }, client_updated: now, device: "old-app" });
+  let calls = 0;
+  const orig = B2.M.clean;
+  assert.strictEqual(typeof orig, "function", "m-core has M.clean (K4)");
+  B2.M.clean = function () { calls++; return orig.apply(this, arguments); };
+  assert.ok((await B2.sync()).ok);
+  assert.ok(calls > 0, "m-core's cleaner ran");
+  const d = B2.M.MS.days[day.id];
+  assert.ok(d && d.entries.length === 3, "every entry kept");
+  assert.ok(!("foodId" in d.entries[0]) && !("mealId" in d.entries[0]), "no lookups by __proto__ / constructor");
+  const ids = J(d.entries.map(e => e.id));
+  assert.strictEqual(new Set(ids).size, 3, "no two entries share an id: " + ids);
+  assert.ok(!B2.M.MS.body["nick|" + date], "a 5,000 lb weigh-in is refused");
+  const m = B2.M.MS.meals["m-hostile"];
+  assert.ok(m && m.items.every(it => typeof it.id === "string" && it.id) && !("mealId" in m.items[0]), JSON.stringify(m && m.items));
+  assert.strictEqual(({}).polluted, undefined);
+  /* the same rows read again give the same ids (a merge matches lines by id: nothing doubles) */
+  B2.M.cloud._.state().cursor = "";
+  assert.ok((await B2.sync()).ok);
+  assert.deepStrictEqual(J(B2.M.MS.days[day.id].entries.map(e => e.id)), ids, "steady ids");
+  assert.strictEqual(B2.M.MS.meals["m-hostile"].items.length, 2);
+  /* without m-core's cleaner, sync's own still does all of this */
+  const B3 = phone("k4-b3");
+  B3.M.clean = undefined;
+  assert.ok((await B3.M.cloud.join(code)).ok);
+  const d3 = B3.M.MS.days[day.id];
+  assert.ok(d3 && d3.entries.length === 3 && !("foodId" in d3.entries[0]));
+  assert.strictEqual(new Set(J(d3.entries.map(e => e.id))).size, 3);
+  [N, B2, B3].forEach(P => P.M.cloud.leave());
+});
+
+t("PF-03 / PF-04 one logged food: one sync-state write per cycle, and only changed records are hashed again", async () => {
+  const { P: N, code } = await household("pf-nick");
+  for (let i = 5; i < 60; i++) N.M.log.add(N.M.addDays(N.M.today(), -i), { slot: "Lunch", name: "Day " + i, per: { cal: 300, p: 20, c: 30, f: 10 } });
+  assert.ok((await N.sync()).ok); assert.ok((await N.sync()).ok);
+  let writes = 0;
+  const set = N.ctx.localStorage.setItem;
+  N.ctx.localStorage.setItem = (k, v) => { if (k === "chalk.sync.v1") writes++; return set(k, v); };
+  N.M.log.add(N.M.today(), { slot: "Snacks", name: "One snack", per: { cal: 100, p: 5, c: 10, f: 2 } });
+  const r = await N.M.cloud._.cycle({ reason: "save" });
+  assert.ok(r.ok && r.pushed === 1, JSON.stringify(r));
+  assert.strictEqual(writes, 1, "the sync state was written once (was 4+ times)");
+  N.ctx.localStorage.setItem = set;
+  /* the per-record cache never hides a change: edits, water, a note and a deleted entry all go up */
+  const id = "nick|" + N.M.today(), d = N.M.MS.days[id];
+  const e0 = d.entries[d.entries.length - 1].id;
+  const cloudDay = () => JSON.parse(SERVER.get(code, "day", id).data);
+  N.M.log.update(N.M.today(), e0, { servings: 3 }); assert.ok((await N.sync()).ok);
+  assert.strictEqual(cloudDay().entries.find(e => e.id === e0).servings, 3);
+  N.M.log.setWater(N.M.today(), 32); assert.ok((await N.sync()).ok);
+  assert.strictEqual(cloudDay().water, 32);
+  N.M.log.remove(N.M.today(), e0); assert.ok((await N.sync()).ok);
+  assert.ok(!cloudDay().entries.some(e => e.id === e0));
+  const wd = N.M.MS.body[Object.keys(N.M.MS.body)[0]];
+  N.M.body.add({ date: wd.date, w: 181.5 }); assert.ok((await N.sync()).ok);
+  assert.strictEqual(JSON.parse(SERVER.get(code, "body", wd.id).data).w, 181.5);
+  N.M.cloud.leave();
+});
+
+t("Change code moves the other person's training backup too; if it can't, nothing changes", async () => {
+  const { P: N, code } = await household("cc-nick", { train: trainState("nick", ["n1", "n2"]) });
+  const K = katPhone("cc-kat", { train: trainState("kat", ["k1", "k2", "k3"]) });
+  assert.ok((await K.M.cloud.join(code)).ok); assert.ok((await K.sync()).ok); assert.ok((await N.sync()).ok);
+  /* the cloud can't be reached for the move: the old code keeps working */
+  N.offline(true);
+  const bad = await N.M.cloud.changeCode();
+  assert.strictEqual(bad.ok, false);
+  assert.strictEqual(N.M.cloud.status().code, code, "still the old code");
+  N.offline(false);
+  const c = await N.M.cloud.changeCode();
+  assert.ok(c.ok && c.code !== code, JSON.stringify(c));
+  const kt = SERVER.get(c.code, "train", "kat");
+  assert.ok(kt && !kt.deleted, "her training backup is in the new household");
+  assert.deepStrictEqual(J(trainOf(kt).log.map(w => w.id)), ["k1", "k2", "k3"]);
+  assert.deepStrictEqual(J(trainOf(SERVER.get(c.code, "train", "nick")).log.map(w => w.id)), ["n1", "n2"], "and his");
+  assert.ok(SERVER.all(code).every(r => r.deleted === true), "the old household is cleared");
+  N.M.cloud.leave(); K.M.cloud.leave();
+});
+
+t("SY-04 on a borrowed phone, a restore never mixes the other person's workouts into hers", async () => {
+  const { P: N, code } = await household("sy04b-nick", { train: trainState("nick", ["n1", "n2"]) });
+  const K = katPhone("sy04b-kat", { train: trainState("kat", ["k1", "k2", "k3"]) });
+  assert.ok((await K.M.cloud.join(code)).ok); assert.ok((await K.sync()).ok); assert.ok((await N.sync()).ok);
+  /* Katerina borrows Nick's phone (history stays: his 2 workouts now say kat) */
+  N.ctx.S.profile = "kat"; N.setTrain(Object.assign(N.train(), { profile: "kat", updatedAt: Date.now() }));
+  await N.M.cloud._.cycle({ reason: "tick" });
+  const info = N.M.cloud.training();
+  assert.ok(info && info.keep === 0, "none of these workouts are hers: " + JSON.stringify(info));
+  assert.strictEqual(await N.M.cloud.restoreTraining(), true);
+  assert.deepStrictEqual(J(N.train().log.map(w => w.id)), ["k1", "k2", "k3"], "only hers");
+  assert.ok((await N.sync()).ok);
+  assert.deepStrictEqual(J(trainOf(SERVER.get(code, "train", "kat")).log.map(w => w.id)), ["k1", "k2", "k3"], "her backup stays clean");
+  assert.deepStrictEqual(J(trainOf(SERVER.get(code, "train", "nick")).log.map(w => w.id)), ["n1", "n2"], "his stay in his backup");
+  N.M.cloud.leave(); K.M.cloud.leave();
 });
 
 /* =================================================================== run */

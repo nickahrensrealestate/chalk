@@ -1,12 +1,12 @@
 /* Chalk service worker.
    App shell: cache first, straight from this version's cache, so the app opens at once with no signal.
-   One version per launch: index.html asks for "m-core.js?v=16" etc. and CORE lists exactly those URLs, so a page
+   One version per launch: index.html asks for "m-core.js?v=17" etc. and CORE lists exactly those URLs, so a page
    never mixes files from two versions. A new version arrives as a new sw.js (CACHE bumped): install downloads the
    whole set (all or nothing), activate swaps it in and tells open pages, and the page reloads at a safe moment.
    To ship a change to any CORE file: bump VERSION here, APP_VERSION and every ?v= in index.html (a test checks).
    Anything not cached: network with a hard 8 s budget for the whole body, else 504. Never a cut-off file.
    Pinned CDN files (scanner, label reader) and fonts are kept after first use, so they work offline. */
-const VERSION = 16;
+const VERSION = 17;
 const CACHE = "chalk-v" + VERSION;
 const CDN = "chalk-cdn";      /* pinned jsdelivr files never change, so they outlive app versions */
 const FONTS = "chalk-fonts";
@@ -65,10 +65,27 @@ self.addEventListener("activate", e => {
     await self.clients.claim();
     const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     list.forEach(c => { try { c.postMessage({ type: "chalk-updated", cache: CACHE }); } catch (x) {} });
+    /* not awaited: fetches wait while this worker is still activating */
+    const old = new Set(list.map(c => c.id));
+    setTimeout(() => { reloadHidden(old); }, 1500);
   })());
 });
 
+/* An old page left open in the background would stay on its version for days (v15 has no update listener). So
+   1.5 s after a new version takes over, pages that were open before it and sit in the background are reloaded.
+   Workouts are saved on the phone, so a reload keeps them. Pages from v17 on answer "chalk-self" to the update
+   message: they reload themselves at a quiet moment (never mid-workout or while typing), so they're left alone. */
+const selfUpdating = new Set();
+function reloadHidden(old) {
+  return self.clients.matchAll({ type: "window" }).then(list => Promise.all(list.map(c => {
+    if (!c || !old.has(c.id) || selfUpdating.has(c.id) || c.visibilityState !== "hidden" || typeof c.navigate !== "function") return null;
+    if (!String(c.url || "").startsWith(SCOPE.href)) return null;        /* only Chalk's own pages, never another app's */
+    return Promise.resolve().then(() => c.navigate(c.url)).catch(() => {});
+  }))).catch(() => {});
+}
+
 self.addEventListener("message", e => {
+  if (e.data && e.data.type === "chalk-self" && e.source) selfUpdating.add(e.source.id);
   if (e.data && e.data.type === "chalk-version?" && e.source) { try { e.source.postMessage({ type: "chalk-version", cache: CACHE }); } catch (x) {} }
 });
 
@@ -91,7 +108,7 @@ async function shell(req, url, e) {
     const hit = await cache.match("index.html");
     if (hit) { if (req.mode === "navigate") e.waitUntil(checkForUpdate()); return hit; }
   } else {
-    /* versioned URLs make every cache safe to read: "m-ui.js?v=16" is only ever version 16 */
+    /* versioned URLs make every cache safe to read: "m-ui.js?v=17" is only ever version 17 */
     const hit = (await cache.match(req, { ignoreVary: true })) || (await caches.match(req, { ignoreVary: true }));
     if (hit) return hit;
   }

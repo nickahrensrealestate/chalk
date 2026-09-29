@@ -14,8 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=16">
-<link rel="stylesheet" href="m-trends.css?v=16">
+<link rel="stylesheet" href="m.css?v=17">
+<link rel="stylesheet" href="m-trends.css?v=17">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
@@ -60,7 +60,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .modebar button:focus-visible{outline-offset:-4px}
 .m-file:focus-within{outline:2px solid var(--acc);outline-offset:2px}
 input::placeholder,textarea::placeholder{color:var(--mut);opacity:1}
-input,select{font:inherit;color:inherit}
+input,select,textarea{font:inherit;color:inherit}
 .cond{font-family:"Barlow Condensed","Barlow",-apple-system,"Helvetica Neue",Arial,sans-serif}
 .num{font-variant-numeric:tabular-nums}
 .mut{color:var(--mut)}
@@ -76,7 +76,9 @@ input,select{font:inherit;color:inherit}
 .modebar button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;font-family:"Barlow Condensed","Barlow",sans-serif;font-weight:700;font-size:17px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
 .modebar button.on{background:var(--acc);color:var(--acc-ink)}
 .modebar svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-.modebar .mb-l{white-space:nowrap;font-variant-numeric:tabular-nums}
+.modebar .mb-l{white-space:nowrap;font-variant-numeric:tabular-nums;display:inline-flex;flex-direction:column;align-items:flex-start;line-height:1}
+.modebar .mb-sep{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.modebar .mb-s{font-family:"Barlow",sans-serif;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:none;margin-top:3px}
 /* Train | Macros reads as one two-way switch: both sides sit in one rounded frame, the side you're on is filled */
 .modebar{width:calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));max-width:536px;margin:4px auto 2px;padding:4px;gap:4px;height:auto;border:1px solid var(--line);border-radius:14px;background:var(--sur2);box-shadow:var(--shadow)}
 .modebar button{min-height:46px;height:auto;border-radius:10px;background:transparent;color:var(--mut)}
@@ -279,6 +281,18 @@ input.mini::-webkit-outer-spin-button,input.mini::-webkit-inner-spin-button{-web
 .srow:first-child{border-top:0}
 .srow .l{font-weight:500}
 .srow .s{font-size:13px;color:var(--mut)}
+/* TN-03: the choice buttons never shrink (90s stays visible at 375 px); the words wrap instead */
+.srow>div:first-child{flex:1 1 auto;min-width:0}
+.srow>.seg{flex-shrink:0}
+/* IO-04: a press shows on iPhone (the touchstart listener below turns :active on in Safari) */
+.btn:active,.opt:active,.chip:active,.m-row:active,.tabs button:active,.modebar button:active,.seg button:active{filter:brightness(.92)}
+/* IO-05: Train's choices, small buttons and muscle chips are full 44 px tap targets (Macros ones use data-m and keep their size) */
+.seg button[data-a],.btn.sm[data-a],button.chip[data-a]{min-height:44px}
+/* the goal tag on Today: a 44 px tall hit area, darker text in light mode */
+button.tag[data-a="checkin"]{position:relative;color:#7A4F06}
+button.tag[data-a="checkin"]::after{content:"";position:absolute;left:0;right:0;top:50%;height:44px;transform:translateY(-50%)}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) button.tag[data-a="checkin"]{color:var(--acc)} }
+:root[data-theme="dark"] button.tag[data-a="checkin"]{color:var(--acc)}
 .seg{display:inline-flex;background:var(--sur2);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .seg button{padding:8px 12px;font-weight:600;font-size:14px;color:var(--mut);min-width:44px}
 .seg button.on{background:var(--acc);color:var(--acc-ink)}
@@ -288,7 +302,7 @@ input.mini::-webkit-outer-spin-button,input.mini::-webkit-inner-spin-button{-web
 .toggle i{position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:var(--sur);transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 .toggle.on{background:var(--acc)}
 .toggle.on i{left:23px}
-textarea{width:100%;min-height:120px;border-radius:12px;border:1px solid var(--line);background:var(--sur2);color:var(--ink);padding:10px;font:16px/1.4 ui-monospace,Menlo,monospace}
+textarea{width:100%;min-height:120px;border-radius:12px;border:1px solid var(--line);background:var(--sur2);color:var(--ink);padding:10px;font-size:16px;line-height:1.4}
 .prog-slot{display:grid;grid-template-columns:1fr auto auto auto auto;align-items:center;gap:4px;padding:8px 14px;border-top:1px solid var(--line)}
 .prog-slot.sub{padding-left:26px;grid-template-columns:1fr auto auto}
 .prog-slot.blk{background:var(--sur2);grid-template-columns:1fr auto auto}
@@ -358,14 +372,14 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
 <div class="sheet-bg" id="sheetBg"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetT" aria-hidden="true" inert><div class="sh"><h3 id="sheetT" tabindex="-1"></h3><button class="icon" data-a="sheet-close" aria-label="Close">×</button></div><div class="sb" id="sheetB"></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<button class="upd" id="upd" data-a="upd-reload" hidden>Updated. Tap to reload</button>
+<button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=16"></script>
-<script src="m-data.js?v=16"></script>
-<script src="m-food.js?v=16"></script>
-<script src="m-ui.js?v=16"></script>
-<script src="m-trends.js?v=16"></script>
-<script src="m-sync.js?v=16"></script>
+<script src="m-core.js?v=17"></script>
+<script src="m-data.js?v=17"></script>
+<script src="m-food.js?v=17"></script>
+<script src="m-ui.js?v=17"></script>
+<script src="m-trends.js?v=17"></script>
+<script src="m-sync.js?v=17"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -635,8 +649,21 @@ function migrate(S){
 }
 /* A restored backup or a synced save is data from outside this phone: numbers must be numbers and muscle / equipment
    names must be known ones, so no field can turn into markup on screen. Real saves pass through unchanged. */
+/* names every object already has ("__proto__", "constructor", "toString"…): never a real exercise id */
+function badId(k){ k=String(k); return k==="prototype"||k in Object.prototype; }
 function cleanTrain(S){
   if(!S||typeof S!=="object") return;
+  /* SE-01: drop anything that points at an exercise id like "__proto__". Unknown but normal ids stay: old history is kept. */
+  const okEx=x=>!(x&&typeof x==="object"&&x.ex!=null&&badId(x.ex));
+  const dropBad=W=>{ if(W&&typeof W==="object"&&Array.isArray(W.items)){ if(!W.items.every(okEx)) W.items=W.items.filter(okEx); W.items.forEach(it=>{ if(it&&typeof it==="object"&&Array.isArray(it.moves)&&!it.moves.every(okEx)) it.moves=it.moves.filter(okEx); }); } };
+  const dropRec=r=>{ if(!r||typeof r!=="object") return; if(r.sets&&typeof r.sets==="object") Object.keys(r.sets).forEach(k=>{ if(badId(k)) delete r.sets[k]; });
+    if(Array.isArray(r.results)&&!r.results.every(okEx)) r.results=r.results.filter(okEx);
+    if(Array.isArray(r.blocks)) r.blocks.forEach(b=>{ if(b&&typeof b==="object"&&Array.isArray(b.moves)&&!b.moves.every(okEx)) b.moves=b.moves.filter(okEx); }); };
+  if(Array.isArray(S.log)) S.log.forEach(dropRec);
+  if(S.lastSummary&&typeof S.lastSummary==="object"){ dropRec(S.lastSummary.rec); if(Array.isArray(S.lastSummary.results)&&!S.lastSummary.results.every(okEx)) S.lastSummary.results=S.lastSummary.results.filter(okEx); }
+  ["ex","custom"].forEach(f=>{ const o=S[f]; if(o&&typeof o==="object") Object.keys(o).forEach(k=>{ if(badId(k)) delete o[k]; }); });
+  if(S.program&&typeof S.program==="object"&&S.program.workouts&&typeof S.program.workouts==="object") Object.values(S.program.workouts).forEach(dropBad);
+  dropBad(S.plan); dropBad(S.active);
   const isO=o=>o&&typeof o==="object", num=v=>{ const n=typeof v==="number"?v:Number(v); return isFinite(n)?n:0; }, numN=v=>v==null?v:num(v);
   const nums=(o,keys)=>{ if(isO(o)) keys.forEach(k=>{ if(o[k]!=null&&typeof o[k]!=="number") o[k]=num(o[k]); }); };
   const MS=new Set(MUSCLES.concat(["Other"])), musc=a=>Array.isArray(a)?a.filter(m=>MS.has(m)):[];
@@ -701,8 +728,10 @@ let saveT=null;
 let saveWarned=false;
 function save(){ S.updatedAt=Date.now(); try{ localStorage.setItem(KEY,JSON.stringify(S)); saveWarned=false; }catch(e){ if(!saveWarned){ saveWarned=true; if(typeof toast==="function") toast("Couldn't save. Phone storage is full. Save a backup in Settings."); } } clearTimeout(saveT); saveT=setTimeout(dbPush,600); }
 
-function getEx(id){ return LIB[id] || S.custom[id] || {n:id,m:"Other",t:"mc",inc:5,rest:75,guess:50}; }
-function exState(id){ return S.ex[id] || (S.ex[id]={w:null,miss:0,best:0,hist:[]}); }
+/* own keys only: an exercise id like "__proto__" from a hostile backup must never reach Object.prototype (SE-01) */
+const ownV=(o,k)=>o&&Object.prototype.hasOwnProperty.call(o,k)?o[k]:undefined;
+function getEx(id){ return ownV(LIB,id) || ownV(S.custom,id) || {n:String(id),m:"Other",t:"mc",inc:5,rest:75,guess:50}; }
+function exState(id){ const E=ownV(S.ex,id); if(E) return E; const f={w:null,miss:0,best:0,hist:[]}; if(badId(id)) return f; return (S.ex[id]=f); }
 const roundTo=(v,inc)=>Math.max(0,Math.round(v/inc)*inc);
 const fmtW=w=>{ const n=typeof w==="number"?w:Number(w); return n%1?n.toFixed(1):String(n); };
 const e1rm=(w,r)=>w*(1+r/30);
@@ -1246,7 +1275,9 @@ function tickRest(){
 function stopRest(){ T=null; clearInterval(tick); const el=document.getElementById("rest"); el.classList.remove("on"); el.classList.remove("go"); paintBadge(); }
 /* Label on the Train half of the mode bar: the rest clock while resting, the workout time while a workout runs. */
 function trainBadge(){
-  if(T&&!T.fired){ const s=Math.ceil(Math.max(0,T.end-Date.now())/1000); return "Train · "+Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+  if(T&&!T.fired){ const s=Math.ceil(Math.max(0,T.end-Date.now())/1000); return "Train · rest "+Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+  /* HIIT clock: which part of the round and how long is left (TN-06) */
+  if(CT&&S&&S.active&&!CT.paused) return "Train · "+(CT.phase==="rest"?"Rest ":"Work ")+fmtClock(Math.max(0,CT.end-Date.now()));
   if(S&&S.active) return "Train · "+elapsed(S.active.start);
   return "Train";
 }
@@ -1255,7 +1286,10 @@ function paintBadge(){
   const b=document.querySelector('#modebar [data-v="train"]'); if(!b) return;
   let l=b.querySelector(".mb-l");
   if(!l){ l=document.createElement("span"); l.className="mb-l"; Array.from(b.childNodes).forEach(n=>{ if(n.nodeType===3&&n.textContent.trim()) n.remove(); }); b.appendChild(l); }
-  const txt=trainBadge(); if(l.textContent!==txt) l.textContent=txt;
+  /* "Train" on top, the clock or workout time on a small line under it, so every label fits half the bar at 320 px */
+  const txt=trainBadge(); if(l.textContent!==txt){ const i=txt.indexOf(" · ");
+    if(i<0) l.textContent=txt;
+    else { const sep=document.createElement("span"), sub=document.createElement("span"); sep.className="mb-sep"; sep.textContent=" · "; sub.className="mb-s"; sub.textContent=txt.slice(i+3); l.replaceChildren(document.createTextNode(txt.slice(0,i)),sep,sub); } }
   document.querySelectorAll('#modebar [data-m="mode"]').forEach(x=>{ const v=x.classList.contains("on")?"true":"false"; if(x.getAttribute("aria-pressed")!==v) x.setAttribute("aria-pressed",v); });
 }
 /* background clocks (HIIT phase changes) redraw Train only; in Macros they just update the badge */
@@ -1285,7 +1319,7 @@ function fmtClock(ms){ const s=Math.ceil(ms/1000); return Math.floor(s/60)+":"+S
 function ctStart(bi){ if(CT&&CT.bi!==bi) ctEnd(); const b=S.active.items[bi]; b.status="running"; b.done=0; b.skipped=false; CT={bi,mi:0,round:1,phase:"work",end:Date.now()+b.work*1000,paused:false,remain:0,warned:false}; unlockAudio(); clearInterval(ctTick); ctTick=setInterval(ctTickFn,200); save(); render(); }
 function ctTickFn(){
   if(!CT||CT.paused||!S.active) return; const b=S.active.items[CT.bi];
-  const left=Math.max(0,CT.end-Date.now());
+  const left=Math.max(0,CT.end-Date.now()); paintBadge();
   const el=document.getElementById("ctT"); if(el) el.textContent=fmtClock(left);
   const bar=document.getElementById("ctBar"); if(bar) bar.style.width=(100*left/((CT.phase==="work"?b.work:b.rest)*1000))+"%";
   if(left>0 && left<=3300 && !CT.warned){ CT.warned=true; beep1(); }
@@ -1350,11 +1384,12 @@ function blockCard(b,bi){
 }
 function viewPicker(){
   const from=S.switchFrom&&PRESETS[S.switchFrom]?S.switchFrom:null;
-  if(from) return `<div class="card"><div class="hd"><div><div class="up mut">Switch person</div><h3>Who's training?</h3></div></div><div class="bd"><p class="hint" style="margin-bottom:10px">Pick who trains on this phone. Picking ${esc(PRESETS[from].name)} again keeps the plan as it is. History stays.</p><button class="btn block ghost" data-a="switch-cancel">Cancel</button></div></div>`+pickerCards();
-  return `<div class="card"><div class="hd"><div><div class="up mut">First time here</div><h3>Who's training?</h3></div></div><div class="bd"><p class="hint">Pick a starting point. Chalk builds your days from it, asks every 45 days how you want to train (weights, functional or HIIT), and rotates exercises so it never gets stale. Change the mix any time in Settings.</p></div></div>`+pickerCards();
+  if(from){ const nm=PRESETS[from].name, other=Object.keys(PRESETS).filter(k=>k!==from);
+    return `<div class="card"><div class="hd"><div><div class="up mut">Switch person</div><h3>Who is this?</h3></div></div><div class="bd"><p class="hint" style="margin-bottom:10px">Now: ${esc(nm)}. Workout history is kept.</p>${other.map(k=>`<button class="btn primary block" data-a="pick-profile" data-v="${k}" style="margin-bottom:8px">Switch to ${esc(PRESETS[k].name)}</button>`).join("")}<button class="btn block ghost" data-a="switch-cancel">Keep ${esc(nm)}</button></div></div>`; }
+  return `<div class="card"><div class="hd"><div><div class="up mut">First time here</div><h3>Who is this?</h3></div></div><div class="bd"><p class="hint">Pick a starting point. Chalk builds your days from it, asks every 45 days how you want to train (weights, functional or HIIT), and rotates exercises so it never gets stale. Change the mix any time in Settings.</p></div></div>`+pickerCards();
 }
 function pickerCards(){
-  return Object.keys(PRESETS).map(k=>{ const p=PRESETS[k]; return `<div class="card"><div class="hd"><div><div class="up mut">${esc(GOAL_LABEL[p.goal])}</div><h3>${esc(p.name)}</h3></div></div><div class="bd"><p class="hint" style="margin-bottom:10px">${esc(p.desc)}</p><button class="btn primary block" data-a="pick-profile" data-v="${k}">Use this</button></div></div>`; }).join("");
+  return Object.keys(PRESETS).map(k=>{ const p=PRESETS[k]; return `<div class="card"><div class="hd"><div><div class="up mut">${esc(GOAL_LABEL[p.goal])}</div><h3>${esc(p.name)}</h3></div></div><div class="bd"><p class="hint" style="margin-bottom:10px">${esc(p.desc)}</p><button class="btn primary block" data-a="pick-profile" data-v="${k}">I'm ${esc(p.name)}</button></div></div>`; }).join("");
 }
 function openBlockMenu(bi){
   const b=S.active.items[bi];
@@ -1386,7 +1421,8 @@ function render(){
   showFlash();
 }
 let lastTab=null;
-function elapsed(start){ const m=Math.floor((Date.now()-start)/60000); return m<60?m+" min":Math.floor(m/60)+"h "+(m%60)+"m"; }
+/* workout time in plain words; past 3 hours it was most likely left open, so it asks instead (FX-03/CP-01) */
+function elapsed(start){ const m=Math.floor((Date.now()-start)/60000); if(!(m>=1)) return "just started"; if(m<60) return m+" min"; if(m>=180) return "Finish workout?"; return Math.floor(m/60)+" hr"+(m%60?" "+(m%60)+" min":""); }
 /* a Train "Program updated" note waits for the first Train screen instead of popping up over Macros */
 let flashT=null;
 function showFlash(){ if(!S.flash||flashT) return; flashT=setTimeout(()=>{ flashT=null; if(!S.flash||inMacros()||sheetOn()) return; const f=S.flash; delete S.flash; save(); openSheet("Program updated",`<p class="hint" style="font-size:15px">${esc(f)}</p><button class="btn primary block" data-a="sheet-close" style="margin-top:12px">Got it</button>`); },400); }
@@ -1711,7 +1747,7 @@ function viewSettings(){
     <div class="srow"><div><div class="l">Restore from backup</div><div class="s">Pick the backup file or paste the text.</div></div><button class="btn" data-a="import">Open</button></div>
     ${S.active?"":`<div class="srow"><div><div class="l">Switch person</div><div class="s">Now: ${esc((PRESETS[S.profile]||PRESETS.nick).name)}. History stays.</div></div><button class="btn" data-a="switch-profile">Switch</button></div>`}
     <div class="srow"><div><div class="l">Erase everything</div></div><button class="btn danger" data-a="wipe">Erase</button></div></div>
-    <p class="hint" style="text-align:center">Chalk · your data lives on this phone${dbOn?" and syncs to your Claude account":""}.</p>`;
+    <p class="hint" style="text-align:center">${syncOn()?"Chalk · your data is on this phone and backed up with Sync.":`Chalk · your data lives on this phone${dbOn?" and syncs to your Claude account":""}.`}</p>`;
   return h;
 }
 
@@ -1735,7 +1771,24 @@ function openSheet(title,body){
   try{ t.focus({preventScroll:true}); }catch(e){}
   requestAnimationFrame(()=>{ if(bg.classList.contains("on")) sh.classList.add("on"); });
 }
+/* IO-01: the iPhone keyboard covers the bottom of the screen, and the sheet's main button with it. While a sheet is
+   open and the keyboard is up, the sheet sits on top of the keyboard, no taller than the space left, and the field
+   being typed in scrolls into view inside it. */
+let kbdOn=false;
+function kbdReset(){ if(!kbdOn) return; kbdOn=false; const sh=document.getElementById("sheet"); if(sh){ sh.style.bottom=""; sh.style.maxHeight=""; } }
+function kbdFit(){
+  const vv=window.visualViewport, sh=document.getElementById("sheet"); if(!vv||!sh) return;
+  const cover=Math.round(window.innerHeight-vv.height-vv.offsetTop);
+  if(!sheetOn()||cover<60){ kbdReset(); return; }
+  kbdOn=true; sh.style.bottom=cover+"px"; sh.style.maxHeight=Math.max(180,Math.round(vv.height-12))+"px";
+  const a=document.activeElement, sb=document.getElementById("sheetB");
+  if(a&&sb&&sb.contains(a)&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)){ const r=a.getBoundingClientRect(), br=sb.getBoundingClientRect();
+    if(r.bottom>br.bottom-12) sb.scrollTop+=r.bottom-br.bottom+24; else if(r.top<br.top) sb.scrollTop-=br.top-r.top+12; }
+}
+if(window.visualViewport){ visualViewport.addEventListener("resize",kbdFit); visualViewport.addEventListener("scroll",kbdFit); }
+document.addEventListener("focusin",()=>{ if(sheetOn()) setTimeout(kbdFit,60); });
 function closeSheet(){
+  kbdReset();
   CI=null; const sh=document.getElementById("sheet"), bg=document.getElementById("sheetBg");
   const was=bg.classList.contains("on")||sh.classList.contains("on");
   sh.classList.remove("on"); bg.classList.remove("on");
@@ -1872,7 +1925,7 @@ document.addEventListener("click",e=>{
     case "export": { const txt=JSON.stringify({...S, __macros:(window.M&&M.export)?M.export():undefined}); const done=()=>toast("Copied. Paste it into Notes.");
       /* a big backup goes out as a file: multi-MB text in a text box or the share sheet freezes the phone */
       const dt=new Date(), name="chalk-backup-"+dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0")+".json", big=txt.length>150000;
-      const show=()=>{ if(!big){ openSheet("Backup",`<textarea readonly aria-label="Backup text">${esc(txt)}</textarea>`); return; }
+      const show=()=>{ if(!big){ openSheet("Backup",`<p class="hint" style="margin-bottom:8px">Copy all of this text and paste it into Notes.</p><textarea readonly aria-label="Backup text">${esc(txt)}</textarea>`); return; }
         let url=""; try{ url=URL.createObjectURL(new Blob([txt],{type:"application/json"})); setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} },300000); }catch(e){}
         openSheet("Backup",`<p class="hint">Your backup is ${fmtSize(txt.length)}. That's too big to show here, so save it as a file.</p>${url?`<a class="btn primary block" style="margin-top:10px" href="${esc(url)}" download="${esc(name)}">Save file</a>`:""}`); };
       const copy=()=>{ if(!big&&navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done).catch(show); } else show(); };
@@ -1882,7 +1935,7 @@ document.addEventListener("click",e=>{
       if(canFile){ try{ shared(navigator.share({files:[file],title:"Chalk backup"})); }catch(e){ copy(); } }
       else if(navigator.share&&!big){ try{ shared(navigator.share({title:"Chalk backup",text:txt})); }catch(e){ copy(); } }
       else copy(); break; }
-    case "import": impText=null; openSheet("Restore",`<p class="hint">Paste a Chalk backup, or pick the backup file. Workouts are replaced. Food logs and meals from the backup are added back; newer changes on this phone stay.</p><label class="btn block m-file" style="margin:10px 0">Pick a backup file<input type="file" accept=".json,application/json,text/plain" data-f="imp-file" aria-label="Backup file"></label><p class="hint" id="impF" role="status"></p><textarea id="impT" placeholder="Or paste the backup text here" aria-label="Backup text"></textarea><button class="btn primary block" data-a="import-do" style="margin-top:10px">Restore</button>`); break;
+    case "import": impText=null; openSheet("Restore",`<p class="hint">Pick your backup file, or paste the backup text. Your workouts are replaced by the ones in the backup. Food logs and meals in the backup are added. Newer food changes on this phone stay.</p><label class="btn block m-file" style="margin:10px 0">Pick a backup file<input type="file" accept=".json,application/json,text/plain" data-f="imp-file" aria-label="Backup file"></label><p class="hint" id="impF" role="status"></p><textarea id="impT" placeholder="Or paste the backup text here" aria-label="Backup text"></textarea><button class="btn primary block" data-a="import-do" style="margin-top:10px">Restore</button>`); break;
     case "import-do": { const prev=S; try{ const ta=document.getElementById("impT"); const s=JSON.parse(ta&&ta.value.trim()?ta.value:(impText||"")); const mac=s&&typeof s==="object"?s.__macros:null; if(s&&typeof s==="object") delete s.__macros; if(s&&s.v===1&&s.program&&s.program.workouts&&Array.isArray(s.log)&&s.settings&&s.ex){
         /* the food part is merged on its own: if it can't be read, the workouts still come back */
         let macOk=true; if(mac!=null&&window.M&&M.import){ try{ macOk=M.import(mac)!==false; }catch(e2){ macOk=false; } }
@@ -1893,7 +1946,9 @@ document.addEventListener("click",e=>{
     case "switch-cancel": if(!S.profile&&S.switchFrom&&PRESETS[S.switchFrom]) S.profile=S.switchFrom; delete S.switchFrom; save(); render(); break;
     /* the same person picked again keeps their goal, mix, 45-day clock and program; someone else gets their own start */
     case "pick-profile": { const k=b.dataset.v, pr=PRESETS[k]; if(!pr) break; const same=!!S.switchFrom&&S.switchFrom===k; delete S.switchFrom; S.profile=k;
-      if(!same){ S.lastSummary=null; S.mix=cp(pr.mix); S.goal={mode:pr.goal,setAt:Date.now()}; S.block=0; S.cyc={}; regen(); } save(); render(); break; }
+      if(!same){ S.lastSummary=null; S.mix=cp(pr.mix); S.goal={mode:pr.goal,setAt:Date.now()}; S.block=0; S.cyc={}; regen(); } save(); render();
+      /* K6: sync catches up for this person right away (their diary, meals and trends) */
+      try{ if(window.M&&M.cloud&&typeof M.cloud.personChanged==="function") M.cloud.personChanged(); }catch(e){} break; }
     case "checkin": CI=null; openCheckin(); break;
     case "ci-goal": ciDraft().mode=b.dataset.v; openCheckin(); break;
     case "ci-mix": ciDraft().mix[b.dataset.k]=+b.dataset.v; openCheckin(); break;
@@ -1934,7 +1989,10 @@ document.addEventListener("click",e=>{
       A.items[bi].moves.push(newMove(id)); save(); closeSheet(); render(); break; }
     case "badd-block": { const d=defaultBlock(); const at=insertBeforeAbs(A.items,{...d,moves:d.moves.map(m=>newMove(m.ex)),done:0,status:"idle",skipped:false}); save(); render(); setTimeout(()=>{ const el=document.getElementById("blk"+at); el&&el.scrollIntoView({behavior:"smooth",block:"nearest"}); },50); break; }
     case "wipe": openSheet("Erase everything?",`<p class="hint">This deletes everything on this phone: workouts, weights, program, food logs, saved meals, your foods, weigh-ins and your Claude key. Save a backup first.</p><button class="btn block danger" data-a="wipe-do" style="margin-top:8px">Erase</button>`); break;
-    case "wipe-do": (S.log||[]).forEach(r=>dbDelete(r.id)); clearInterval(ctTick); CT=null; wakeOff(); S=fresh(); stopRest(); tab="today"; save(); if(window.M&&M.reset) M.reset(); try{ localStorage.removeItem("chalk.ai.key"); }catch(e){} applyTheme(); closeSheet(); render(); break;
+    case "wipe-do": (S.log||[]).forEach(r=>dbDelete(r.id)); clearInterval(ctTick); CT=null; wakeOff(); S=fresh(); stopRest(); tab="today"; save(); if(window.M&&M.reset) M.reset(); try{ localStorage.removeItem("chalk.ai.key"); }catch(e){}
+      /* TN-05: the backup copies and half-typed drafts go too, so nothing of the old data is left behind */
+      try{ ["chalk.bak","chalk.bak.d","chalk.bad"].forEach(k=>localStorage.removeItem(k)); const ks=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&(k.startsWith("chalk.macros.setupDraft.")||k.startsWith("chalk.macros.draft."))) ks.push(k); } ks.forEach(k=>localStorage.removeItem(k)); }catch(e){}
+      applyTheme(); closeSheet(); render(); break;
   }
 });
 let toastT=null;
@@ -1949,6 +2007,7 @@ function applyTheme(){ const t=S.settings.theme||"system"; if(t==="system") docu
 
 /* ================= OPTIONAL CLOUD SYNC (only inside claude.ai) ================= */
 let db=null, dbOn=false;
+function syncOn(){ try{ return !!(window.M&&M.cloud&&typeof M.cloud.status==="function"&&M.cloud.status().on); }catch(e){ return false; } }
 function dbPush(){ if(!db) return; try{ const {log,active,...rest}=S; db.doc("chalk/state").set(rest).catch(()=>{}); const recent=log.slice(0,3); recent.forEach(r=>db.doc("workouts/"+r.id).set(r).catch(()=>{})); }catch(e){} }
 function dbDelete(id){ if(!db) return; try{ db.doc("workouts/"+id).delete().catch(()=>{}); }catch(e){} }
 (async()=>{
@@ -1983,23 +2042,31 @@ function dbDelete(id){ if(!db) return; try{ db.doc("workouts/"+id).delete().catc
 })();
 
 /* ================= BOOT ================= */
+document.addEventListener("touchstart",()=>{},{passive:true});
 window.TRAIN_TABS=document.getElementById("tabs").innerHTML; if(window.M&&M.ui&&M.ui.bind) M.ui.bind(); if(window.M&&M.sync&&M.sync.init) M.sync.init(); if(window.M&&M.cloud&&M.cloud.start) M.cloud.start();
 applyTheme(); render();
 if(S.active) wakeOn();
 /* ================= UPDATES =================
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
-   says "Updated. Tap to reload". APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=16, BOOT_AT=Date.now();
+   says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
+const APP_VERSION=17, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
-function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){} return true; }
+function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
+  /* K5: Macros setup or You has typed numbers that aren't saved yet */
+  try{ if(window.M&&M.trends&&typeof M.trends.hasDraft==="function"&&M.trends.hasDraft()) return false; }catch(e){} return true; }
 function reloadApp(){ try{ location.reload(); }catch(e){} }
 /* the button waits while a workout runs (a stray tap mid-set would drop the rest clock) and shows once it's done */
 function placeUpd(){ const u=document.getElementById("upd"); if(!u) return; const show=updReady&&!S.active&&!T&&!CT; if(u.hidden===show) u.hidden=!show; if(!show) return;
-  const tabs=document.getElementById("tabs"), cta=document.getElementById("cta"); u.style.bottom=((tabs?tabs.offsetHeight:0)+(cta&&cta.classList.contains("on")?cta.offsetHeight:0)+12)+"px"; }
+  const tabs=document.getElementById("tabs"), cta=document.getElementById("cta"); const b=((tabs?tabs.offsetHeight:0)+(cta&&cta.classList.contains("on")?cta.offsetHeight:0)+12)+"px"; if(u.style.bottom!==b) u.style.bottom=b; }
+/* TN-01: Macros tabs redraw the bottom bar without going through render(), so the button follows the bar's size */
+(function(){ const again=()=>{ if(updReady) placeUpd(); };
+  try{ if(typeof ResizeObserver==="function"){ const ro=new ResizeObserver(again); ["cta","tabs"].forEach(id=>{ const el=document.getElementById(id); if(el) ro.observe(el); }); } }catch(e){}
+  try{ if(typeof MutationObserver==="function"){ const cta=document.getElementById("cta"); if(cta) new MutationObserver(again).observe(cta,{attributes:true,attributeFilter:["class","hidden","style"],childList:true}); } }catch(e){} })();
 function updateReady(){
   if(updReady) return; updReady=true;
-  if(quietNow()&&Date.now()-BOOT_AT<10000){ reloadApp(); return; }
+  /* right after launch, or while Chalk sits in the background, a quiet page reloads at once */
+  if(quietNow()&&(Date.now()-BOOT_AT<10000||document.visibilityState==="hidden")){ reloadApp(); return; }
   placeUpd();
 }
 /* only a newer version counts: "chalk-v17" while this page is 16 */
@@ -2010,7 +2077,10 @@ function checkUpdate(){ if(!("serviceWorker" in navigator)) return;
   if(Date.now()-updCheckAt<15*60000) return; updCheckAt=Date.now(); try{ navigator.serviceWorker.getRegistration().then(r=>r&&r.update()).catch(()=>{}); }catch(e){} }
 if("serviceWorker" in navigator){
   /* the listeners work with any worker; only https registers one (tests register it by hand) */
-  navigator.serviceWorker.addEventListener("message",e=>{ const d=e.data||{}; if((d.type==="chalk-updated"||d.type==="chalk-version")&&swNewer(d)) updateReady(); });
+  navigator.serviceWorker.addEventListener("message",e=>{ const d=e.data||{}; if((d.type==="chalk-updated"||d.type==="chalk-version")&&swNewer(d)){
+    /* tell the worker this page updates itself, so it never reloads it from outside (OF-02) */
+    try{ const w=e.source||navigator.serviceWorker.controller; if(w&&w.postMessage) w.postMessage({type:"chalk-self"}); }catch(x){}
+    updateReady(); } });
   document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"){ if(updReady&&quietNow()) reloadApp(); } else checkUpdate(); });
   if(location.protocol==="https:") navigator.serviceWorker.register("sw.js").then(()=>{ updCheckAt=Date.now(); }).catch(()=>{});
 }

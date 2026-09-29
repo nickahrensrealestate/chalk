@@ -13,6 +13,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
 
   /* ---------------------------------------------------------------- helpers */
   const isNum = v => typeof v === "number" && isFinite(v);
+  const own = (o, k) => typeof k === "string" && !!o && Object.prototype.hasOwnProperty.call(o, k);
   function num(v, d) { if (d === undefined) d = 0; if (typeof v === "string") v = parseFloat(v.replace(",", ".")); return isNum(v) ? v : d; }
   const r0 = v => Math.round(v);
   const r1 = v => Math.round(v * 10 + (v >= 0 ? 1e-9 : -1e-9)) / 10;
@@ -188,10 +189,15 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     }
 
     /* y domain: the data (+ the average); the goal joins only when it is near the data */
-    const vals = shown.map(p => p.v).concat(avg.map(a => a.v));
+    /* an average point whose 7 days hold 1 reading (n < 2) is just that reading: not drawn (VI-15) */
+    const lone = a => isNum(a.n) && a.n < 2;
+    const vals = shown.map(p => p.v).concat(avg.filter(a => !lone(a)).map(a => a.v));
     let lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
     const goalIn = goal != null && goal >= lo - near && goal <= hi + near;
     if (goalIn) { lo = Math.min(lo, goal); hi = Math.max(hi, goal); }
+    /* minSpan: a few beats or pounds never fill the whole height (no zigzag on an 8-bpm axis) */
+    const minSpan = isNum(opts.minSpan) ? opts.minSpan : 0;
+    if (hi - lo < minSpan) { const mid = (hi + lo) / 2; lo = mid - minSpan / 2; hi = mid + minSpan / 2; }
     const pad = Math.max((hi - lo) * 0.12, 1);
     lo -= pad; hi += pad;
     const Y = v => padT + innerH * (1 - (v - lo) / (hi - lo));
@@ -214,9 +220,15 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     }
     /* 7-day average line, broken where there is a gap of more than 10 days */
     if (avg.length >= 2) {
-      let d = "", prev = null;
-      avg.forEach(a => { d += (!prev || M.daysBetween(prev.date, a.date) > 10 ? "M" : "L") + f1(X(a.date)) + " " + f1(Y(a.v)) + " "; prev = a; });
-      s += `<path class="avg" d="${d.trim()}"/>`;
+      let d = "", prev = null, segs = 0, seg = 0;
+      avg.forEach(a => {
+        if (lone(a)) { prev = null; return; }
+        const move = !prev || M.daysBetween(prev.date, a.date) > 10;
+        if (move) { if (seg >= 2) segs++; seg = 0; }
+        d += (move ? "M" : "L") + f1(X(a.date)) + " " + f1(Y(a.v)) + " "; prev = a; seg++;
+      });
+      if (seg >= 2) segs++;
+      if (segs) s += `<path class="avg" d="${d.trim()}"/>`;
     }
     /* points (small), the latest one big */
     const r = shown.length > 120 ? 2 : shown.length > 45 ? 2.5 : 3;
@@ -282,7 +294,10 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
         tips.push({ x: x + bw / 2, y: y0 - 6, t: text });
       } else {
         const y = Y(val), h = y0 - y, rr = Math.min(4, h / 2);
-        s += `<g>${title}<path class="bar" d="M${f1(x)} ${f1(y0)} L${f1(x)} ${f1(y + rr)} Q${f1(x)} ${f1(y)} ${f1(x + rr)} ${f1(y)} L${f1(x + bw - rr)} ${f1(y)} Q${f1(x + bw)} ${f1(y)} ${f1(x + bw)} ${f1(y + rr)} L${f1(x + bw)} ${f1(y0)} Z"/></g>`;
+        /* sofar: a day still going (today) is lighter, with "so far" over it */
+        const so = !!(v && v.sofar);
+        s += `<g>${title}<path class="bar${so ? " sofar" : ""}" d="M${f1(x)} ${f1(y0)} L${f1(x)} ${f1(y + rr)} Q${f1(x)} ${f1(y)} ${f1(x + rr)} ${f1(y)} L${f1(x + bw - rr)} ${f1(y)} Q${f1(x + bw)} ${f1(y)} ${f1(x + bw)} ${f1(y + rr)} L${f1(x + bw)} ${f1(y0)} Z"/>`
+          + (so ? `<text class="sofar-t" x="${f1(x + bw / 2)}" y="${f1(Math.max(padT + 9, y - 4))}" text-anchor="middle">so far</text>` : "") + `</g>`;
         tips.push({ x: x + bw / 2, y, t: text });
       }
       if (v && v.label && (n - 1 - i) % every === 0) s += `<text x="${f1(x + bw / 2)}" y="${H - 6}" text-anchor="middle">${esc(v.label)}</text>`;
@@ -338,12 +353,21 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   /* kg always with one decimal; lb as typed (185, 185.5) */
   const dispW = (lb, u) => (!isNum(lb) ? "—" : u === "metric" ? M.units.lb2kg(lb).toFixed(1) : String(r1(lb)));
   const tile = (v, k, small, sub) => `<div class="stat"><div class="v num">${v}${small ? `<small>${small}</small>` : ""}</div><div class="k">${k}</div>${sub ? `<div class="mt-sub">${sub}</div>` : ""}</div>`;
-  /* what the weekly rate covers: M.body.ratePerWeek looks at up to 4 weeks before the latest weigh-in */
+  /* what the weekly rate covers: M.body.ratePerWeek fits the weigh-ins of the 56 days ending at
+     the latest one (8 weeks), so the words say the real span: "last 2 weeks" … "last 8 weeks" */
   function rateSpan(all) {
-    const end = all[all.length - 1].date, start = M.addDays(end, -27);
+    const end = all[all.length - 1].date, start = M.addDays(end, -55);
     const f = all.find(x => x.date >= start);
-    const wk = f ? clamp(Math.round((M.daysBetween(f.date, end) + 1) / 7), 2, 4) : 4;
+    const wk = f ? clamp(Math.round((M.daysBetween(f.date, end) + 1) / 7), 2, 8) : 8;
     return "last " + wk + " weeks";
+  }
+  /* M.body.avg7 plus how many readings each 7-day window holds (n): the chart draws the
+     average only where there are 2 or more */
+  function avgWithN(all) {
+    const avg = M.body.avg7(all);
+    if (!Array.isArray(avg) || avg.length !== all.length) return avg;
+    let j = 0;
+    return avg.map((a, i) => { while (j < i && M.daysBetween(all[j].date, all[i].date) > 6) j++; return { date: a.date, v: a.v, n: i - j + 1 }; });
   }
   /* the chart window: the chosen range, but never before the first point (short history fills the width) */
   function chartFrom(all, range) {
@@ -380,14 +404,14 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
         const dir = diff > 0 ? "to lose" : diff < 0 ? "to gain" : "";
         const weeks = rate != null && !steady ? Math.abs(diff / rate) : Infinity;
         const onTrack = rate != null && !steady && Math.abs(diff) >= 0.05 && (rate < 0) === (diff > 0) && weeks <= 104;
-        goalLine = `<p class="hint mt-goalline">Goal <b>${esc(fmtW(goal, u))}</b> · ${Math.abs(diff) < 0.05 ? "you're there" : "<b>" + esc(fmtW(Math.abs(diff), u)) + "</b> " + dir}${onTrack ? " · about " + Math.max(1, Math.round(weeks)) + " week" + (Math.round(weeks) > 1 ? "s" : "") + " at " + esc(rateWords(rate, u)) : ""}</p>`;
+        goalLine = `<p class="hint mt-goalline">Goal <b>${esc(fmtW(goal, u))}</b> · ${Math.abs(diff) < 0.05 ? "you're there" : "<b>" + esc(fmtW(Math.abs(diff), u)) + "</b> " + dir}${onTrack ? " · about " + Math.max(1, Math.round(weeks)) + " week" + (Math.round(weeks) > 1 ? "s" : "") + ' at <span class="mt-nb">' + esc(rateWords(rate, u)) + "</span>" : ""}</p>`;
       }
       const from = chartFrom(all, range);
       const to = range > 0 ? M.today() : all[all.length - 1].date;
       const win = all.filter(x => x.date >= from);
-      const conv = arr => (u === "metric" ? arr.map(x => ({ date: x.date, v: r1(M.units.lb2kg(x.v)) })) : arr);
+      const conv = arr => (u === "metric" ? arr.map(x => ({ date: x.date, v: r1(M.units.lb2kg(x.v)), n: x.n })) : arr);
       const chart = win.length
-        ? M.charts.line(conv(win), { avg: conv(avgAll), goal: goal == null ? null : (u === "metric" ? r1(M.units.lb2kg(goal)) : goal), goalNear: u === "metric" ? 9 : 20, from, to, unit: wUnit(u), label: "Weight", tone: "acc" })
+        ? M.charts.line(conv(win), { avg: conv(avgWithN(all)), goal: goal == null ? null : (u === "metric" ? r1(M.units.lb2kg(goal)) : goal), goalNear: u === "metric" ? 9 : 20, minSpan: u === "metric" ? 3 : 6, from, to, unit: wUnit(u), label: "Weight", tone: "acc" })
         : `<div class="mt-empty">No weigh-ins in the last ${range} days. Tap <b>All</b> to see older ones.</div>`;
       body = stats + goalLine + chart;
     }
@@ -413,7 +437,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       const to = range > 0 ? M.today() : all[all.length - 1].date;
       const win = all.filter(x => x.date >= from);
       const chart = win.length
-        ? M.charts.line(win, { avg: M.body.avg7(all), from, to, unit: "bpm", label: "Resting heart rate", tone: "mus", whole: true })
+        ? M.charts.line(win, { avg: avgWithN(all), minSpan: 12, from, to, unit: "bpm", label: "Resting heart rate", tone: "mus", whole: true })
         : `<div class="mt-empty">Nothing in the last ${range} days. Tap <b>All</b> to see older ones.</div>`;
       body = stats + `<p class="hint mt-goalline">Beats a minute, at rest. Lower usually means fitter.</p>` + chart;
     }
@@ -424,16 +448,20 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const ws = M.weekSummary(id, 0);
     const t = ws.target || {};
     const today = M.today();
-    const vals = ws.daily.map(d => ({ label: dow2(d.date), v: d.cal, empty: !d.logged,
-      title: fmtShort(d.date) + (d.logged ? ": " + fmtN(d.cal) + " cal · " + r0(d.p) + " g protein" + (d.date === today ? " so far" : "") : ": not logged") }));
+    /* today is still going: its bar is drawn lighter and says "so far" */
+    const vals = ws.daily.map(d => { const sofar = d.date === today && d.logged; return { label: dow2(d.date), v: d.cal, empty: !d.logged, sofar,
+      title: fmtShort(d.date) + (d.logged ? ": " + fmtN(d.cal) + " cal" + (sofar ? " so far" : "") + " · " + r0(d.p) + " g protein" : ": not logged") }; });
     const none = !ws.logged;
+    /* the count matches the average next to it (today stays out of it until the day is over) */
+    const n = isNum(ws.avgDays) ? ws.avgDays : ws.logged;
     const stats = `<div class="stats">
-      ${tile(ws.logged, "Days logged", "of 7")}
+      ${tile(n, "Days logged", "of 7")}
       ${tile(none ? "—" : fmtN(ws.avgCal), "Calories a day", "", "of " + fmtN(t.cal))}
       ${tile(none ? "—" : r0(ws.avgP), "Protein a day", none ? "" : "g", "of " + r0(t.p) + " g")}
     </div>`;
     const chart = M.charts.bars(vals, { target: t.cal, unit: "cal", label: "Calories each day, last 7 days", h: 150 });
-    const note = ws.logged ? "" : `<p class="hint">Log a day of food and the bars fill in.</p>`;
+    const note = !ws.logged ? `<p class="hint">Log a day of food and the bars fill in.</p>`
+      : ws.todayLeftOut ? `<p class="hint mt-sofarnote">Today isn't in the average yet.</p>` : "";
     return `<div class="card mt-card"><div class="hd"><h3>Last 7 days</h3><span class="small mut">${esc(fmtShort(ws.start))} to ${esc(fmtShort(ws.end))}</span></div><div class="bd">${stats}${note}${chart}</div></div>`;
   }
 
@@ -444,7 +472,8 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       const ws = M.weekSummary(id, i);
       if (target == null && ws.target) target = ws.target.cal;
       if (ws.logged) any++;
-      vals.push({ label: fmtShort(ws.start), v: ws.avgCal, empty: !ws.logged, title: fmtShort(ws.start) + " to " + fmtShort(ws.end) + (ws.logged ? ": " + fmtN(ws.avgCal) + " cal a day (" + ws.logged + " day" + (ws.logged === 1 ? "" : "s") + ")" : ": nothing logged") });
+      const n = isNum(ws.avgDays) ? ws.avgDays : ws.logged;   /* the days in the average, not today's so-far */
+      vals.push({ label: fmtShort(ws.start), v: ws.avgCal, empty: !ws.logged, title: fmtShort(ws.start) + " to " + fmtShort(ws.end) + (ws.logged ? ": " + fmtN(ws.avgCal) + " cal a day (" + n + " day" + (n === 1 ? "" : "s") + (ws.todayLeftOut ? ", not today yet" : "") + ")" : ": nothing logged") });
     }
     const chart = M.charts.bars(vals, { target, unit: "cal", label: "Average calories a day, each of the last 8 weeks", h: 150 });
     const note = any ? `<p class="hint">Average calories on the days you logged. One bar per week.</p>` : `<p class="hint">Weeks with no food logged stay empty.</p>`;
@@ -588,10 +617,13 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     return `<div class="srow"><div class="l">Units</div><div class="seg" role="group" aria-label="Units"><button ${pressed(u === "us")} ${segAttr("units")} data-v="us">lb · ft</button><button ${pressed(u === "metric")} ${segAttr("units")} data-v="metric">kg · cm</button></div></div>
       <div class="srow" data-row="sex"><div class="l">Sex</div><div class="seg" role="group" aria-label="Sex"><button ${pressed(p.sex === "m")} ${segAttr("sex")} data-v="m">Male</button><button ${pressed(p.sex === "f")} ${segAttr("sex")} data-v="f">Female</button></div></div>
       <div class="srow" data-row="age"><div class="l">Age</div><div class="mt-ctl">${box("age", 'inputmode="numeric" min="5" max="120"', isNum(p.age) ? p.age : "", "e.g. 35", "Age in years")}<span class="mt-u">years</span></div></div>
+      ${mode === "setup" ? "" : `<p class="mt-msg" id="mt-amsg-you" role="status" hidden></p>`}
       <div class="srow" data-row="height"><div class="l">Height</div><div class="mt-ctl mt-hgt">${height}</div></div>
+      <p class="mt-msg" id="mt-hmsg-${mode}" role="status" hidden></p>
       <div class="srow" data-row="weight"><div><div class="l">Weight</div><div class="s">${mode === "setup" ? "Today's weight" : "Changing it logs today's weigh-in"}</div></div><div class="mt-ctl">${box("weight", 'step="0.1" min="0" inputmode="decimal"', toDispW(p.weightLb, u), u === "metric" ? "e.g. 80" : "e.g. 180", "Weight in " + (u === "metric" ? "kilograms" : "pounds"))}<span class="mt-u">${wUnit(u)}</span></div></div>
       ${mode === "setup" ? "" : `<p class="mt-msg mt-wmsg" id="mt-wmsg" role="status" hidden></p>`}
-      <div class="srow"><div class="l">Goal weight</div><div class="mt-ctl">${box("goal", 'step="0.1" min="0" inputmode="decimal"', toDispW(p.goalWeightLb, u), u === "metric" ? "e.g. 75" : "e.g. 170", "Goal weight in " + (u === "metric" ? "kilograms" : "pounds"))}<span class="mt-u">${wUnit(u)}</span></div></div>
+      <div class="srow" data-row="goal"><div class="l">Goal weight</div><div class="mt-ctl">${box("goal", 'step="0.1" min="0" inputmode="decimal"', toDispW(p.goalWeightLb, u), u === "metric" ? "e.g. 75" : "e.g. 170", "Goal weight in " + (u === "metric" ? "kilograms" : "pounds"))}<span class="mt-u">${wUnit(u)}</span></div></div>
+      <p class="mt-msg" id="mt-gmsg-${mode}" role="status" hidden></p>
       <div class="mt-field"><label class="l" for="mt-act-${mode}">Activity</label><select class="sel" id="mt-act-${mode}" data-m="${IN}" data-f="activity">${actOpts}</select></div>
       <div class="mt-field"><label class="l" for="mt-pace-${mode}">Pace</label><select class="sel" id="mt-pace-${mode}" data-m="${IN}" data-f="pace">${paceOpts}</select><p class="hint mt-pacehint" id="mt-pacehint-${mode}"${hint ? "" : " hidden"}>${esc(hint)}</p></div>`;
   }
@@ -624,12 +656,14 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   }
   /* Put the cleaned-up values back in the boxes. Never the one being typed in, and never fill a
      box the person left empty (typing "11" into an inches box that suddenly holds "0" gives "110"). */
-  function writeBack(root, dm, p, changed) {
+  function writeBack(root, dm, p, changed, skip) {
     if (!root) return;
     const d = doc(), u = units(p), h = ftIn(p.heightIn);
     const set = (f, v) => {
       const i = root.querySelector('input[data-m="' + dm + '"][data-f="' + f + '"]');
       if (!i || (d && i === d.activeElement) || (i.value === "" && i !== changed)) return;
+      if (skip && skip.indexOf(f) >= 0) return;                             /* a number we turned down stays as typed */
+      if (i.value === "" && (f === "hft" || f === "hin" || f === "hcm")) return;   /* an emptied height box stays empty */
       if (String(i.value) !== String(v)) i.value = v;
     };
     set("age", isNum(p.age) ? p.age : "");
@@ -675,10 +709,15 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   /* The line under the hand-typed targets: says when protein, carbs and fat don't match the calories. */
   function manualNote(t, u) {
     const mc = r0(num(t.p) * 4 + num(t.c) * 4 + num(t.f) * 9), cal = num(t.cal);
-    const off = cal > 0 && Math.abs(mc - cal) / cal > 0.05;
+    const zero = !(cal > 0);
+    const off = !zero && Math.abs(mc - cal) / cal > 0.05;
     const water = "Water is in oz" + (u === "metric" ? " (" + fmtN(t.water) + " oz is about " + fmtN(M.units.oz2ml(num(t.water))) + " ml)" : "") + ".";
-    return `<p class="hint${off ? " mt-warn" : ""}" id="mt-tnote" role="status">${off ? "Protein, carbs and fat add up to " + fmtN(mc) + " cal. Your calorie target is " + fmtN(cal) + ". " : "You're typing these yourself. "}${water}</p>`;
+    const lead = zero ? "Your calorie target is 0. Type the calories you want a day. " : off ? "Protein, carbs and fat add up to " + fmtN(mc) + " cal. Your calorie target is " + fmtN(cal) + ". " : "You're typing these yourself. ";
+    return `<p class="hint${off || zero ? " mt-warn" : ""}" id="mt-tnote" role="status">${lead}${water}</p>`;
   }
+  /* TR-02: what a typed target may be. Outside it, the box shows the nearest allowed number. */
+  const TLIM = { cal: [800, 6000, "Calories should be 800 to 6,000."], p: [0, 600, "Protein should be 0 to 600 g."], c: [0, 600, "Carbs should be 0 to 600 g."],
+    f: [0, 600, "Fat should be 0 to 600 g."], fiber: [0, 100, "Fiber should be 0 to 100 g."], water: [0, 300, "Water should be 0 to 300 oz."] };
   /* The targets grid + the line under it: everything a change in "Your numbers" can move. */
   function targetsBoxHTML(p) {
     const t = p.targets || {};
@@ -689,7 +728,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const cell = (k, label, unit) => `<div class="stat"><div class="v num">${manual ? `<input class="mini" type="number" inputmode="numeric" enterkeyhint="done" min="0" data-m="t-target" data-f="${k}" value="${r0(num(t[k]))}" aria-label="${label} target${unit ? " in " + unitWord(unit) : ""}">` : fmtN(t[k])}${manual || !unit ? "" : `<small>${unit}</small>`}</div><div class="k">${label + (manual && unit ? " " + unit : "")}</div></div>`;
     const grid = `<div class="stats mt-tgrid">${cell("cal", "Calories", "")}${cell("p", "Protein", "g")}${cell("c", "Carbs", "g")}${cell("f", "Fat", "g")}${cell("fiber", "Fiber", "g")}${cell("water", "Water", "oz")}</div>`;
     let note = "";
-    if (manual) note = manualNote(t, u);
+    if (manual) note = `<p class="mt-msg" id="mt-tmsg" role="status" hidden></p>` + manualNote(t, u);
     else if (!complete) note = `<p class="hint">Fill in sex, age, height and weight above and these update on their own.</p>`;
     else { const c = M.calc.calories(p); note = `<p class="hint">Worked out from your numbers${c.floored ? ". Held at the " + fmtN(c.cal) + " calorie minimum" : ""}. Changes above update these.</p>`; }
     return grid + note;
@@ -697,25 +736,40 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
 
   function ciNumHTML(p) {
     const sn = num(p.snooze && p.snooze.refresh60);
-    if (!p.setupAt) return "Not set yet.";
-    const age = Math.floor((now() - num(p.setupAt)) / DAY);
+    if (!p.setupAt) return "Not set yet. Fill in Your numbers above.";
+    const age = Math.max(0, M.daysBetween(M.tsToKey(num(p.setupAt)), M.today()));   /* calendar days, like the check-in clock */
     const when = age <= 0 ? "Set today." : "Set " + esc(fmtDay(p.setupAt)) + " (" + age + " day" + (age === 1 ? "" : "s") + " ago).";
-    const next = sn > now() ? " Skipped until " + esc(fmtDay(sn)) + "." : age >= 60 ? ' <span class="tag warn">Time to check</span>' : " We'll ask again in " + (60 - age) + " day" + (60 - age === 1 ? "" : "s") + ".";
+    const next = snoozedTill(sn) ? " Skipped until " + esc(fmtDay(sn)) + "." : age >= 60 ? ' <span class="tag warn">Time to check</span>' : " We'll ask again in " + (60 - age) + " day" + (60 - age === 1 ? "" : "s") + ".";
     return when + next;
   }
+  /* The 2-week weigh-in clock, the same one the Diary's card uses (M.checkins.due): it runs
+     from the last check-in, or from setup when there is none. Counted in calendar days. */
+  function bodyClock(p) {
+    const last = num(p.lastBody) || num(p.setupAt);
+    if (!last) return null;
+    const lk = M.tsToKey(last), days = Math.max(0, M.daysBetween(lk, M.today()));
+    return { last, dueKey: M.addDays(lk, 14), days, weeks: Math.floor(days / 7) };
+  }
+  M.trends.bodyClock = bodyClock;
+  /* a snooze lasts until the morning of its day (the same rule as M.checkins.due) */
+  const snoozedTill = until => num(until) > 0 && M.today() < M.tsToKey(num(until));
   function ciBodyHTML(id, p) {
-    const t = now();
-    const lastBody = Math.max(num(p.lastBody), num(p.setupAt));
+    const bc = bodyClock(p);
     const lw = M.body.latest(id, "w");
     const sn = num(p.snooze && p.snooze.body14);
-    if (!lastBody && !lw) return "No weigh-in yet. We ask every 2 weeks.";
-    const due = lastBody + 14 * DAY;
-    const next = sn > t ? "Skipped until " + esc(fmtDay(sn)) + "." : due <= t ? '<span class="tag warn">Due now</span>' : "Next one " + esc(fmtDay(due)) + ".";
-    return (lw ? "Last weigh-in " + esc(fmtShort(lw.date)) : "Last check-in " + esc(fmtDay(lastBody))) + ". " + next;
+    if (!bc && !lw) return "No weigh-in yet. We ask every 2 weeks.";
+    let due = null; try { due = M.checkins.due(id); } catch (e) { due = null; }
+    /* "Due now" exactly when the Diary shows the card; a due 60-day card hides it there, so count days then */
+    const dueNow = due === "body14" || (due === "refresh60" && !!bc && bc.days >= 14 && !snoozedTill(sn));
+    const next = snoozedTill(sn) ? "Skipped until " + esc(fmtDay(sn)) + "." : dueNow ? '<span class="tag warn">Due now</span>'
+      : !bc ? "" : bc.dueKey <= M.today() ? "Next one today." : "Next one " + esc(fmtShort(bc.dueKey)) + ".";
+    return ((lw ? "Last weigh-in " + esc(fmtShort(lw.date)) : "Last check-in " + esc(fmtDay(bc.last))) + ". " + next).trim();
   }
   function checkinsCard(id, p) {
+    /* before setup there is nothing to call "still right" (CP-08) */
+    const still = p.setupAt ? `<button class="btn mt-nowrap" data-m="t-reviewed">Still right</button>` : "";
     return `<div class="card mt-card"><div class="hd"><h3>Check-ins</h3></div>
-      <div class="srow"><div><div class="l">Your numbers</div><div class="s" id="mt-ci-num">${ciNumHTML(p)}</div></div><button class="btn mt-nowrap" data-m="t-reviewed">Still right</button></div>
+      <div class="srow"><div><div class="l">Your numbers</div><div class="s" id="mt-ci-num">${ciNumHTML(p)}</div></div>${still}</div>
       <div class="srow"><div><div class="l">Weight and heart rate</div><div class="s" id="mt-ci-body">${ciBodyHTML(id, p)}</div></div><button class="btn mt-nowrap" data-m="t-log-body">Log now</button></div>
     </div>`;
   }
@@ -758,6 +812,19 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   /* ------------------------------------------------------ sync & backup */
   /* M.cloud comes from m-sync.js (loaded after this file), so always look it up lazily. */
   const cloud = () => (M.cloud && typeof M.cloud.status === "function" && typeof M.cloud.configured === "function" ? M.cloud : null);
+  /* Nothing of Macros on this phone yet (no setup, foods, meals, food logs or weigh-ins): most likely the second phone. */
+  function phoneEmpty() {
+    try {
+      const p = person(); if (p && p.setupAt) return false;
+      if (M.foods && typeof M.foods.list === "function" && M.foods.list().length) return false;
+      if (M.meals && typeof M.meals.list === "function" && M.meals.list().length) return false;
+      const MS = M.MS || {};
+      if (Object.values(MS.days || {}).some(d => d && Array.isArray(d.entries) && d.entries.length)) return false;
+      if (Object.keys(MS.body || {}).length) return false;
+      return true;
+    } catch (e) { return false; }
+  }
+  M.trends.phoneEmpty = phoneEmpty;
   function agoText(ts) {
     const d = now() - num(ts);
     if (d < 45e3) return "just now";
@@ -802,7 +869,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     return `<div class="mt-restore" id="mt-restore">
       <p class="mt-text">${lead}</p>
       <button class="btn block" data-m="t-sync-restore"${tr.busy ? " disabled" : ""}>Restore training backup</button>
-      <p class="hint">${tr.busy ? "Finish today's workout first. " : ""}This replaces the workouts on this phone with the backup (${esc(n)}).</p>
+      <p class="hint">${tr.busy ? "Finish today's workout first. " : ""}Restore brings back ${esc(n)} from the backup.${num(tr.keep) > 0 ? " Your " + esc(num(tr.keep)) + " workout" + (num(tr.keep) === 1 ? "" : "s") + " on this phone stay." : ""}</p>
     </div>`;
   }
   /* After a training restore: Undo puts back the training it replaced (m-sync keeps it for a week). */
@@ -832,6 +899,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   function syncMoreHTML(C) {
     const item = (btn, hint) => `<div class="mt-moreitem">${btn}<p class="hint">${hint}</p></div>`;
     return `<details class="mt-more"${moreOpen ? " open" : ""}><summary data-m="t-sync-more">More options</summary>
+      ${item(`<button class="btn block ghost" data-m="t-sync-rejoin">Join another phone's code instead</button>`, "Use this if the other phone started sync first. This phone stops using its code and joins that one. Nothing is deleted.")}
       ${item(`<button class="btn block ghost danger mt-off" data-m="t-sync-off">Turn off sync</button>`, "This phone stops syncing. Nothing is deleted.")}
       ${typeof C.changeCode === "function" ? item(`<button class="btn block ghost" data-m="t-sync-newcode">Change code</button>`, "Use this if someone else saw your code. The other phone then has to join again with the new code.") : ""}
       ${typeof C.deleteCloud === "function" ? item(`<button class="btn block ghost danger" data-m="t-sync-delete">Delete cloud copy</button>`, "Deletes the backup in the cloud and turns sync off. Both phones keep their data.") : ""}
@@ -849,10 +917,15 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     if (!s.on) {
       justOnAt = 0; joinedAt = 0; codeShown = false; moreOpen = false;
       const note = s.note ? `<p class="mt-next">${esc(s.note)}</p>` : "";
+      /* FX-06: Start never outweighs Join (a second Start makes a second code and the phones
+         quietly stop sharing). A phone with nothing on it yet is most likely the second one: Join first. */
+      const fresh = phoneEmpty();
+      const startBtn = `<button class="btn block" data-m="t-sync-on">First phone: start sync</button>`;
+      const joinBtn = `<button class="btn${fresh ? " primary" : ""} block" data-m="t-sync-joinshow"${join ? " hidden" : ""}>Other phone: join with code</button>`;
       return `<div class="card mt-card mt-sync" id="mt-sync" data-on="0">${head}<div class="bd">
         ${note}<p class="mt-text">Share foods and meals between your phones. Food logs, weight and workouts are backed up too.</p>
-        <p class="hint mt-synchow">Start on one phone. Then join on the other phone with the code it shows.</p>
-        <div class="mt-syncbtns"><button class="btn${join ? "" : " primary"} block" data-m="t-sync-on">First phone: start sync</button><button class="btn block" data-m="t-sync-joinshow"${join ? " hidden" : ""}>Other phone: join with code</button></div>
+        <p class="hint mt-synchow">${fresh ? "New phone? Tap <b>Other phone: join with code</b> and type the code from your first phone." : "Start on one phone. Then join on the other phone with the code it shows."}</p>
+        <div class="mt-syncbtns">${fresh ? joinBtn + startBtn : startBtn + joinBtn}</div>
         <div class="mt-join" id="mt-join"${join ? "" : " hidden"}>
           <label class="lbl" for="mt-join-code">Code from the first phone</label>
           <p class="hint">It's on the first phone under You → Sync &amp; backup. Codes never use the letters I or O, or the numbers 0 or 1.</p>
@@ -944,16 +1017,57 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   };
 
   /* ============================================================== check-ins */
-  let setupDraft = null;
+  let setupDraft = null, draftTyped = false;
+  /* K5: a half-filled setup survives a reload (an app update, iOS closing the app).
+     One small key per person; cleared on Save. */
+  const DRAFT_KEY = id => "chalk.macros.setupDraft." + id;
+  function keepDraft(d) {
+    try { if (d && d.pid && typeof localStorage !== "undefined") localStorage.setItem(DRAFT_KEY(d.pid), JSON.stringify(Object.assign({}, d, { at: now() }))); } catch (e) {}
+  }
+  function dropDraft(id) { try { if (id && typeof localStorage !== "undefined") localStorage.removeItem(DRAFT_KEY(id)); } catch (e) {} }
+  /* only the known fields, each checked; older than 7 days is dropped */
+  function loadDraft(id) {
+    let o = null;
+    try { const v = typeof localStorage !== "undefined" ? localStorage.getItem(DRAFT_KEY(id)) : null; o = v ? JSON.parse(v) : null; } catch (e) { o = null; }
+    if (!o || typeof o !== "object" || o.pid !== id || !(now() - num(o.at) < 7 * DAY)) { if (o) dropDraft(id); return null; }
+    const pos = v => (isNum(v) && v > 0 ? v : null);
+    return { pid: id, id, sex: o.sex === "m" || o.sex === "f" ? o.sex : null, age: pos(o.age), heightIn: pos(o.heightIn), weightLb: pos(o.weightLb), goalWeightLb: pos(o.goalWeightLb),
+      activity: own(M.calc.ACT, o.activity) ? o.activity : "moderate", pace: M.calc.PACES.indexOf(num(o.pace)) >= 0 ? num(o.pace) : 0,
+      units: o.units === "metric" ? "metric" : "us", split: own(M.calc.SPLITS, o.split) && o.split !== "custom" ? o.split : "highprotein", paceSet: !!o.paceSet, paceAuto: !!o.paceAuto };
+  }
   function draft() {
     const id = pid();
     if (setupDraft && setupDraft.pid === id) return setupDraft;
     const p = person(id);
+    draftTyped = false;
+    const kept = !p.setupAt ? loadDraft(id) : null;
+    if (p.setupAt) dropDraft(id);
+    if (kept) { draftTyped = true; setupDraft = kept; return setupDraft; }
     setupDraft = { pid: id, id, sex: p.sex || null, age: p.age, heightIn: p.heightIn, weightLb: p.weightLb, goalWeightLb: p.goalWeightLb, activity: p.activity || "moderate", pace: num(p.pace, 0), units: units(p), split: p.split || "highprotein" };
     return setupDraft;
   }
   M.trends.draft = draft;
-  M.trends.resetDraft = () => { setupDraft = null; };
+  M.trends.resetDraft = () => { if (setupDraft) dropDraft(setupDraft.pid); setupDraft = null; draftTyped = false; };
+  /* forget the draft in memory only, as a reload does (the kept copy stays) */
+  M.trends.forget = () => { setupDraft = null; draftTyped = false; };
+  /* K5 (F6's quietNow): true while setup or You holds numbers that are typed but not saved,
+     so an update never reloads them away. */
+  M.trends.hasDraft = function () {
+    try {
+      const id = pid();
+      if (setupDraft && draftTyped && setupDraft.pid === id && !person(id).setupAt) return true;
+      const d = doc(), app = d && d.getElementById("app");
+      if (!app) return false;
+      const boxes = app.querySelectorAll('input[data-m^="t-"], input[id^="mt-"]');
+      for (let k = 0; k < boxes.length; k++) {
+        const i = boxes[k];
+        if (i.type === "hidden" || i.type === "date") continue;
+        if (i === d.activeElement) return true;                       /* typing right now */
+        if (String(i.value) !== String(i.defaultValue)) return true;  /* typed, not saved yet */
+      }
+    } catch (e) {}
+    return false;
+  };
 
   function previewHTML(d) {
     if (!M.calc.complete(d)) return `<div class="mt-preview"><span class="small mut">Fill in sex, age, height and weight to see your targets.</span></div>`;
@@ -993,11 +1107,15 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   function body14HTML(id, p) {
     const u = units(p);
     const lw = M.body.latest(id, "w"), lr = M.body.latest(id, "rhr");
+    let wk = null;   /* "It's been 6 weeks", not always 2 (F1's M.checkins.weeksSince when it's there) */
+    try { if (M.checkins && typeof M.checkins.weeksSince === "function") wk = num(M.checkins.weeksSince(id, "body14"), NaN); } catch (e) { wk = null; }
+    if (!isNum(wk)) { const bc = bodyClock(p); wk = bc ? bc.weeks : 2; }
+    wk = Math.max(2, wk);
     return `<div class="card mt-card mt-banner"><div class="hd"><h3>Time to weigh in</h3></div><div class="bd">
-      <p class="mt-text">It's been 2 weeks. Log your weight and resting heart rate. Either one is fine.</p>
+      <p class="mt-text">It's been ${wk} weeks. Log your weight and resting heart rate. Either one is fine.</p>
       <div class="mt-b14">
         <div><label class="lbl" for="mt-b14-w">Weight (${wUnit(u)})</label><input class="mini" id="mt-b14-w" type="number" step="0.1" min="0" inputmode="decimal" enterkeyhint="done" placeholder="${lw ? toDispW(lw.value, u) : "e.g. " + (u === "metric" ? "80" : "180")}"></div>
-        <div><label class="lbl" for="mt-b14-rhr">Heart rate at rest</label><input class="mini" id="mt-b14-rhr" type="number" min="0" inputmode="numeric" enterkeyhint="done" placeholder="${lr ? r0(lr.value) : "e.g. 60"}"></div>
+        <div><label class="lbl" for="mt-b14-rhr">Resting heart rate</label><input class="mini" id="mt-b14-rhr" type="number" min="0" inputmode="numeric" enterkeyhint="done" placeholder="${lr ? r0(lr.value) : "e.g. 60"}"></div>
       </div>
       <p class="mt-msg" id="mt-b14-msg" role="status" hidden></p>
       <div class="mt-row"><button class="btn primary" data-m="t-save-body14">Save</button><button class="btn ghost" data-m="t-snooze" data-kind="body14" data-days="14">Skip</button></div>
@@ -1093,11 +1211,57 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   /* Text / number / select changes never re-render the view: on iPhone that would throw away
      the field the person just tapped (and the keyboard with it). Update the profile, put the
      cleaned-up values back in the boxes, and patch only what depends on them. */
-  function showNumbers(el, p) {
+  /* boxes whose typo message is showing keep what was typed, whichever box changed */
+  function typoSkip(mode, skip) {
+    const out = (skip || []).slice(), on = n => { const m = $(n); return !!(m && !m.hidden); };
+    if (on("mt-hmsg-" + mode)) out.push("hft", "hin", "hcm");
+    if (on("mt-gmsg-" + mode)) out.push("goal");
+    if (on("mt-amsg-" + mode)) out.push("age");
+    return out;
+  }
+  function showNumbers(el, p, skip) {
     const card = el && el.closest ? el.closest(".card") : null;
     if (!card) return;
-    writeBack(card, "t-num", p, el);
+    skip = typoSkip("you", skip);
+    writeBack(card, "t-num", p, el, skip);
     showPaceHint(card, p, "you");
+    if (!skip || !skip.length) markClean(card);
+  }
+  /* Height from the boxes: {h} in inches, {empty} while a box is blank (someone is retyping),
+     or {bad} with a message. The same 3 to 9 feet (36 to 108 in) check as setup's Save. */
+  const H_LO = 36, H_HI = 108;
+  function heightRead(el, u) {
+    const val = i => (i ? String(i.value == null ? "" : i.value).trim() : "");
+    let h;
+    if (u === "metric") {
+      const box = el && el.closest ? el.closest(".mt-hgt") : null;
+      const raw = val(box ? box.querySelector('[data-f="hcm"]') : el);
+      if (!raw) return { empty: true };
+      const c = num(raw, NaN); if (!isNum(c)) return { empty: true };
+      h = M.units.cm2in(c);
+    } else {
+      const box = el && el.closest ? el.closest(".mt-hgt") : null;
+      const ft = val(box ? box.querySelector('[data-f="hft"]') : null), inch = val(box ? box.querySelector('[data-f="hin"]') : null);
+      if (!ft || !inch) return { empty: true };
+      const a = num(ft, NaN), b = num(inch, NaN);
+      if (!isNum(a) || !isNum(b)) return { empty: true };
+      h = a * 12 + b;
+    }
+    if (!(h >= H_LO - 0.05 && h <= H_HI + 0.05)) return { bad: u === "metric" ? "Height should be 92 to 274 cm." : "Height should be 3 to 9 feet." };
+    return { h: r1(h) };
+  }
+  /* A goal weight box: "" clears the goal; else the same range as a weigh-in. */
+  function goalRead(raw, u) {
+    raw = String(raw == null ? "" : raw).trim();
+    if (!raw) return { lb: null };
+    const c = bodyCheck(raw, "w", u);
+    if (!c.ok) return { bad: c.msg.replace(/^Weight/, "Goal weight") };
+    const lb = M.units.parseW(raw, u);
+    return lb ? { lb } : { bad: "Goal weight should be a number." };
+  }
+  /* You: boxes whose numbers are saved count as clean again (K5: M.trends.hasDraft). */
+  function markClean(root) {
+    try { Array.prototype.forEach.call(root.querySelectorAll("input"), i => { if (i.type !== "password" && i.defaultValue !== i.value) i.defaultValue = i.value; }); } catch (e) {}
   }
   function patchYou(id, p) {
     const box = $("mt-tbox");
@@ -1106,7 +1270,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const b = $("mt-ci-body"); if (b) b.innerHTML = ciBodyHTML(id, p);
   }
   /* Everything that follows an edit in You. */
-  function edited(id, p) { touchP(p); M.calc.applyTargets(p); numbersChanged(id); setupDraft = null; }
+  function edited(id, p) { touchP(p); M.calc.applyTargets(p); numbersChanged(id); setupDraft = null; draftTyped = false; dropDraft(id); }
   /* The weight box in You: range check, a second tap for a big jump, then today's weigh-in. */
   function youWeight(el, id, p, lbSure) {
     const u = units(p);
@@ -1132,15 +1296,35 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   }
   C["t-num"] = el => {
     const id = pid(); if (!id || !el) return;
-    const p = person(id), f = el.dataset.f;
-    let changed;
+    const p = person(id), f = el.dataset.f, u = units(p);
+    let changed, skip = null;
     if (f === "weight") {
       const r = youWeight(el, id, p, null);
       if (r === "wait") return;             /* the box keeps what they typed until they confirm */
       changed = r === "ok";
+    } else if (f === "hft" || f === "hin" || f === "hcm") {
+      /* TR-01: a typo (55 ft, 1.78 cm) never reaches the targets; a blank box is someone retyping */
+      const r = heightRead(el, u);
+      say("mt-hmsg-you", r.bad || "");
+      if (r.bad) skip = ["hft", "hin", "hcm"];
+      changed = r.h != null && r.h !== p.heightIn;
+      if (changed) p.heightIn = r.h;
+    } else if (f === "goal") {
+      const r = goalRead(el.value, u);
+      say("mt-gmsg-you", r.bad || "");
+      if (r.bad) skip = ["goal"];
+      changed = !r.bad && r.lb !== p.goalWeightLb;
+      if (changed) p.goalWeightLb = r.lb;
+    } else if (f === "age") {
+      const raw = String(el.value == null ? "" : el.value).trim(), n = r0(num(raw, NaN));
+      const ok = raw !== "" && isNum(n) && n >= 5 && n <= 120;
+      say("mt-amsg-you", raw !== "" && !ok ? "Age should be 5 to 120." : "");
+      if (raw !== "" && !ok) skip = ["age"];
+      changed = ok && n !== p.age;
+      if (changed) p.age = n;                /* a blank box keeps the age */
     } else changed = applyField(p, f, el, false);
     if (changed) edited(id, p);
-    showNumbers(el, p);
+    showNumbers(el, p, skip);
     patchYou(id, p);
   };
   A["t-wsure"] = el => {
@@ -1157,7 +1341,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     toast("Saved " + fmtW(lb, u));
   };
   A["t-sex"] = el => { const id = pid(); if (!id) return; const p = person(id); const v = el.dataset.v; if (v !== "m" && v !== "f") return; p.sex = v; edited(id, p); rerender(); };
-  A["t-units"] = el => { const id = pid(); if (!id) return; const p = person(id); p.units = el.dataset.v === "metric" ? "metric" : "us"; touchP(p); setupDraft = null; M.save(); rerender(); };
+  A["t-units"] = el => { const id = pid(); if (!id) return; const p = person(id); p.units = el.dataset.v === "metric" ? "metric" : "us"; touchP(p); setupDraft = null; draftTyped = false; dropDraft(id); M.save(); rerender(); };
 
   /* --- you: split + targets --- */
   A["t-split"] = el => {
@@ -1203,13 +1387,22 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   C["t-target"] = el => {
     const id = pid(); if (!id || !el) return;
     const p = person(id), f = el.dataset.f;
-    if (["cal", "p", "c", "f", "fiber", "water"].indexOf(f) < 0) return;
-    p.targets[f] = Math.max(0, r0(num(el.value)));
+    if (!TLIM[f]) return;
+    if (!p.targets || typeof p.targets !== "object") p.targets = {};
+    const raw = String(el.value == null ? "" : el.value).trim(), n = raw === "" ? NaN : num(raw, NaN);
+    const old = r0(num(p.targets[f]));
+    /* an empty box or not a number keeps the old target */
+    if (!isNum(n)) { el.value = String(old); say("mt-tmsg", ""); markClean(el.closest ? el.closest(".card") || el : el); return; }
+    const lim = TLIM[f], v = clamp(r0(n), lim[0], lim[1]);
+    if (v !== r0(n)) { el.value = String(v); say("mt-tmsg", lim[2] + " We saved " + fmtN(v) + "."); }
+    else say("mt-tmsg", "");
+    p.targets[f] = v;
     p.targetsManual = true;
     touchP(p);
     M.save();
     numbersChanged(id);
     const note = $("mt-tnote"); if (note) note.outerHTML = manualNote(p.targets, units(p));
+    const card = el.closest ? el.closest(".card") : null; if (card) markClean(card);
   };
 
   /* --- you: check-ins --- */
@@ -1295,7 +1488,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const Cl = cloud();
     if (!Cl || !Cl.configured()) { toast("Cloud sync isn't set up yet"); return; }
     if (!Cl.create()) { toast("Couldn't turn on sync. Try again."); return; }
-    justOnAt = now(); joinedAt = 0; moreOpen = false;
+    justOnAt = now(); joinedAt = 0; moreOpen = false; wantJoin = false;
     toast("Sync is on");
     rerender();
   };
@@ -1378,6 +1571,16 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     toast("Sync is off. Your data stays on this phone.");
     rerender();
   };
+  /* FX-06: this phone started sync too (two codes). Drop this phone's code and open the Join box. */
+  A["t-sync-rejoin"] = el => {
+    const Cl = cloud(); if (!Cl || !Cl.status().on) return;
+    if (!armTap(el, "Tap again to switch")) return;
+    Cl.leave();
+    justOnAt = 0; joinedAt = 0; codeShown = false; moreOpen = false; wantJoin = true;
+    toast("Type the code from the other phone.");
+    rerender();
+    setTimeout(() => { try { const c = $("mt-join"); if (c && c.scrollIntoView) c.scrollIntoView({ block: "center" }); const i = $("mt-join-code"); if (i) i.focus({ preventScroll: true }); } catch (e) {} }, 0);
+  };
   /* Show / Hide the code in place */
   function showCode(on) {
     const Cl = cloud(); if (!Cl) return;
@@ -1447,12 +1650,19 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     applyField(d, f, el, true);
     if (f === "pace") { d.paceSet = true; d.paceAuto = false; }
     else autoPace(d);
+    draftTyped = true; keepDraft(d);
     const card = $("mt-setup");
-    if (commit && card) writeBack(card, "t-setup", d, el);
+    let skip = null;
+    if (commit) {
+      /* say a typo right away (Save checks the same) */
+      if (f === "hft" || f === "hin" || f === "hcm") { const r = heightRead(el, units(d)); say("mt-hmsg-setup", r.bad || ""); if (r.bad) skip = ["hft", "hin", "hcm"]; }
+      if (f === "goal") { const r = goalRead(el.value, units(d)); say("mt-gmsg-setup", r.bad || ""); if (r.bad) skip = ["goal"]; }
+    }
+    if (commit && card) writeBack(card, "t-setup", d, el, typoSkip("setup", skip));
     if (card) {
       showPaceHint(card, d, "setup");
       const row = el.closest ? el.closest("[data-row]") : null;
-      if (row) row.classList.remove("mt-need");
+      if (row && !skip) row.classList.remove("mt-need");
     }
     const pv = $("mt-preview"); if (pv) pv.innerHTML = previewHTML(d);
   }
@@ -1463,9 +1673,10 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     if (f === "sex" && (v === "m" || v === "f")) d.sex = v;
     else if (f === "units") d.units = v === "metric" ? "metric" : "us";
     else return;
+    draftTyped = true; keepDraft(d);
     rerender();
   };
-  A["t-setup-split"] = el => { const d = draft(); if (M.calc.SPLITS[el.dataset.v]) d.split = el.dataset.v; rerender(); };
+  A["t-setup-split"] = el => { const d = draft(); if (M.calc.SPLITS[el.dataset.v]) { d.split = el.dataset.v; draftTyped = true; keepDraft(d); } rerender(); };
   /* "Join sync" on the setup card: You, with the code box open and in view */
   A["t-setup-join"] = () => {
     wantJoin = true;
@@ -1483,17 +1694,20 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     if (card) Array.prototype.forEach.call(card.querySelectorAll('input[data-m="t-setup"], select[data-m="t-setup"]'), i => applyField(d, i.dataset.f, i, true));
     autoPace(d);
     const u = units(d);
-    const missing = [];
-    if (d.sex !== "m" && d.sex !== "f") missing.push("sex");
-    if (!(num(d.age) >= 5)) missing.push("age");
-    if (!(num(d.heightIn) >= 36 && num(d.heightIn) <= 108)) missing.push("height");
-    let bad = "";
-    if (!(num(d.weightLb) > 0)) missing.push("weight");
-    else { const c = bodyCheck(u === "metric" ? r1(M.units.lb2kg(d.weightLb)) : d.weightLb, "w", u); if (!c.ok) { bad = c.msg; missing.push("weight"); } }
+    const need = [], bads = [], rows = [];
+    if (d.sex !== "m" && d.sex !== "f") need.push("sex");
+    if (!(num(d.age) >= 5)) need.push("age");
+    if (!(num(d.heightIn) > 0)) need.push("height");
+    else if (!(num(d.heightIn) >= H_LO - 0.05 && num(d.heightIn) <= H_HI + 0.05)) { bads.push(u === "metric" ? "Height should be 92 to 274 cm." : "Height should be 3 to 9 feet."); rows.push("height"); }
+    if (!(num(d.weightLb) > 0)) need.push("weight");
+    else { const c = bodyCheck(u === "metric" ? r1(M.units.lb2kg(d.weightLb)) : d.weightLb, "w", u); if (!c.ok) { bads.push(c.msg); rows.push("weight"); } }
+    /* TR-03: a goal typo (1750 lb) is caught here too; an empty goal is fine */
+    if (num(d.goalWeightLb) > 0) { const c = bodyCheck(u === "metric" ? r1(M.units.lb2kg(d.goalWeightLb)) : d.goalWeightLb, "w", u); if (!c.ok) { bads.push(c.msg.replace(/^Weight/, "Goal weight")); rows.push("goal"); } }
+    const missing = need.concat(rows);
     if (missing.length) {
-      const text = bad && missing.length === 1 ? bad : "Still need: " + listWords(missing) + "." + (bad ? " " + bad : "");
-      toast("Fill in " + listWords(missing));
-      const pv = $("mt-preview"); if (pv) pv.innerHTML = `<div class="mt-preview"><span class="small mt-warn">${esc(text)}</span></div>`;
+      const text = (need.length ? "Still need: " + listWords(need) + ". " : "") + bads.join(" ");
+      toast(need.length ? "Fill in " + listWords(need) : bads[0]);
+      const pv = $("mt-preview"); if (pv) pv.innerHTML = `<div class="mt-preview"><span class="small mt-warn">${esc(text.trim())}</span></div>`;
       if (card) {
         Array.prototype.forEach.call(card.querySelectorAll("[data-row]"), r => r.classList.toggle("mt-need", missing.indexOf(r.dataset.row) >= 0));
         const first = card.querySelector('[data-row="' + missing[0] + '"]');
@@ -1517,7 +1731,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     M.calc.applyTargets(p);
     M.body.add({ date: M.today(), w: p.weightLb, pid: id });
     M.checkins.done(id, "setup");
-    setupDraft = null;
+    setupDraft = null; draftTyped = false; dropDraft(id);
     toast("Targets set: " + fmtN(p.targets.cal) + " cal a day");
     rerender();
     const sc = $("scroll"); if (sc) sc.scrollTop = 0;

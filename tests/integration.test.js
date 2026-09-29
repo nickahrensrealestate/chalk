@@ -217,7 +217,7 @@ function swRig(opts) {
     addEventListener: (t, f) => { listeners[t] = f; }, skipWaiting: async () => {},
     location: { href: BASE + "sw.js", origin: new URL(BASE).origin },
     registration: { scope: BASE, update: async () => { updates++; } },
-    clients: { claim: async () => {}, matchAll: async () => [{ postMessage: m => posted.push(m) }] }
+    clients: { claim: async () => {}, matchAll: async () => opts.clients || [{ postMessage: m => posted.push(m) }] }
   };
   const src = SWSRC.replace("const NET_MS = 8000;", "const NET_MS = " + (opts.netMs || 120) + ";");
   vm.runInNewContext(src, { self, caches, fetch, Request: R, Response, Headers, URL, AbortController, ReadableStream, TextEncoder, setTimeout, clearTimeout, Promise, console });
@@ -229,7 +229,8 @@ function swRig(opts) {
     return { took: !!p, res: p, waits };
   };
   const ext = type => new Promise((res, rej) => { const waits = []; listeners[type]({ waitUntil: w => waits.push(w) }); Promise.all(waits).then(res, rej); });
-  return { BASE, abs, stores, fetched, posted, fire, install: () => ext("install"), activate: () => ext("activate"), updates: () => updates };
+  const message = (data, source) => listeners.message({ data, source });
+  return { BASE, abs, stores, fetched, posted, fire, message, install: () => ext("install"), activate: () => ext("activate"), updates: () => updates };
 }
 const coreOf = src => { const m = src.match(/const CORE = \[([\s\S]*?)\];/); return m ? m[1] : ""; };
 t("sw.js: one version everywhere — CACHE, CORE ?v=, index.html's files and APP_VERSION agree", () => {
@@ -494,6 +495,23 @@ async function runSwPass() {
     await next.activate();
     assert.deepStrictEqual([...next.stores.keys()].sort(), ["chalk-v" + (SWV - 1), "chalk-v" + SWV].sort());
   });
+  await ta("OF-02: 1.5 s after taking over, old pages in the background reload onto the new version; open, newer and self-updating pages don't", async () => {
+    const nav = [];
+    const win = (id, vis, posted) => ({ id, visibilityState: vis, url: "https://nickahrensrealestate.github.io/chalk/", postMessage: m => posted && posted.push(m), navigate: u => { nav.push(id); return Promise.resolve(null); } });
+    const said = [];
+    const list = [win("v15-hidden", "hidden", said), win("v15-open", "visible", said), win("v17-hidden", "hidden", said), Object.assign(win("other-app", "hidden", said), { url: "https://nickahrensrealestate.github.io/apollo/" })];
+    const rig = swRig({ clients: list });
+    await rig.activate();
+    assert.ok(said.every(m => m.type === "chalk-updated") && said.length === 4, "every open page is told first");
+    rig.message({ type: "chalk-self" }, { id: "v17-hidden" });   /* a v17+ page answers: it reloads itself when quiet */
+    assert.deepStrictEqual(nav, [], "nothing reloaded straight away (fetches never wait on it either)");
+    list.push(win("new-page", "hidden"));                        /* opened after the update: already on the new version */
+    await sleep(1700);
+    assert.deepStrictEqual(nav, ["v15-hidden"], "only the old page in the background");
+    /* a page that can't be reloaded from outside is left alone, without an error */
+    const bad = swRig({ clients: [{ id: "x", visibilityState: "hidden", url: "u", postMessage() {}, navigate: () => Promise.reject(new TypeError("not controlled")) }, { postMessage() {} }] });
+    await bad.activate(); await sleep(1700);
+  });
   await ta("a page still loading the version before gets its own files from the kept cache, even offline", async () => {
     const P = SWV - 1, rig = swRig({ net: () => "down" });
     rig.stores.set("chalk-v" + P, new Map([[rig.abs("m-core.js?v=" + P), new Response("OLD CORE")], [rig.abs("m-core.js"), new Response("OLDER CORE")]]));
@@ -599,7 +617,9 @@ async function runSyncPass() {
       });
     });
     await sleep(20);
+    let nPick = 0;
     t("You tab: Sync & backup card shows the code in groups of 4 (hidden behind Show when m-sync can mask it)", () => {
+      nPick = fetches.length;
       click(w, q(d, '#app [data-a="pick-profile"][data-v="nick"]'));
       w.M.setMode("macros"); w.M.ui.tab = "you"; w.render();
       assert.ok(q(d, "#mt-sync"), "card rendered");
@@ -614,6 +634,8 @@ async function runSyncPass() {
       assert.ok(/Synced just now|Syncing/.test(q(d, "#mt-sync-status").textContent), q(d, "#mt-sync-status").textContent);
     });
     await ta("a macro change is uploaded about 1.5 s later", async () => {
+      /* picking the person above starts a catch-up right away (K6): let it finish first */
+      let last = -1; for (let i = 0; i < 40 && fetches.length !== last; i++) { last = fetches.length; await sleep(300); }
       const n = fetches.length;
       w.M.foods.add({ name: "Integration zucchini" });
       await sleep(600);
@@ -626,7 +648,8 @@ async function runSyncPass() {
         assert.strictEqual(p.headers.Prefer, "resolution=merge-duplicates,return=minimal");
         JSON.parse(p.body).forEach(row => assert.strictEqual(row.household, CODE));
       });
-      assert.ok(posts.some(p => JSON.parse(p.body).some(row => row.kind === "train" && row.id === "nick")), "Chalk training backed up too");
+      /* the training row may already have gone up with the catch-up that picking the person started */
+      assert.ok(fetches.slice(nPick).filter(f => f.method === "POST").some(p => JSON.parse(p.body).some(row => row.kind === "train" && row.id === "nick")), "Chalk training backed up too");
     });
     await ta("Turn off sync (two taps) stops the network", async () => {
       w.M.ui.tab = "you"; w.render();
@@ -719,6 +742,150 @@ async function runF6Pass() {
       });
     } finally { dom.window.close(); }
   }
+  /* round 4: updates never wipe typed numbers (K5), background pages reload, the button follows the bar (TN-01) */
+  {
+    const { dom, w, d, errors } = boot({ real: true, hook: swHook });
+    try {
+      t("K5: an update while Macros setup/You has typed numbers doesn't reload; the button waits instead", () => {
+        let n = 0; w.reloadApp = () => { n++; };
+        assert.ok(w.quietNow(), "quiet before");
+        w.M.trends = w.M.trends || {}; const had = w.M.trends.hasDraft; w.M.trends.hasDraft = () => true;
+        assert.strictEqual(w.quietNow(), false, "typed numbers: not quiet");
+        swSays(w, { type: "chalk-updated", cache: "chalk-v" + (APPV + 1) });
+        assert.strictEqual(n, 0, "no reload"); assert.ok(!d.getElementById("upd").hidden, "the button shows");
+        w.M.trends.hasDraft = () => { throw new Error("broken"); }; assert.ok(w.quietNow(), "a throwing hasDraft never blocks updates for good");
+        w.M.trends.hasDraft = had;
+        assert.deepStrictEqual(errors, []);
+      });
+      await ta("TN-01: the update button moves up when the bottom bar grows, without a render() (Macros tab switches)", async () => {
+        const u = d.getElementById("upd"), cta = d.getElementById("cta");
+        Object.defineProperty(cta, "offsetHeight", { configurable: true, get: () => 64 });
+        cta.classList.remove("on"); await sleep(0); w.placeUpd(); assert.strictEqual(u.style.bottom, "12px");
+        cta.classList.add("on"); await sleep(0);
+        assert.strictEqual(u.style.bottom, "76px", "above the Log food bar");
+        cta.classList.remove("on"); await sleep(0); assert.strictEqual(u.style.bottom, "12px");
+        assert.strictEqual(u.textContent, "New version ready. Tap to update.");
+      });
+    } finally { dom.window.close(); }
+  }
+  {
+    const { dom, w, d, errors } = boot({ real: true, hook: swHook });
+    try {
+      t("OF-02: a quiet page in the background reloads on its own and tells the worker it updates itself", () => {
+        let n = 0; w.reloadApp = () => { n++; }; const told = [];
+        w.navigator.serviceWorker.controller = { postMessage: m => told.push(m) };
+        w.eval("window.BOOT_AT0=BOOT_AT"); Object.defineProperty(d, "visibilityState", { configurable: true, get: () => "hidden" });
+        w.eval("S.active=null");
+        /* past the 10 s launch window, so only "in the background" can reload it */
+        const orig = w.Date.now; w.Date.now = () => orig() + 60000;
+        try { swSays(w, { type: "chalk-updated", cache: "chalk-v" + (APPV + 1) }); } finally { w.Date.now = orig; }
+        assert.strictEqual(n, 1, "reloaded"); assert.strictEqual(JSON.stringify(told), JSON.stringify([{ type: "chalk-self" }]));
+        assert.deepStrictEqual(errors, []);
+      });
+    } finally { dom.window.close(); }
+  }
+  {
+    const { dom, w, d, errors } = boot({ real: true, hook: swHook });
+    try {
+      t("OF-02: in the background mid-workout it doesn't reload (the rest clock would stop); K6 on pick-profile", () => {
+        let n = 0; w.reloadApp = () => { n++; };
+        let pc = 0; w.M.cloud = w.M.cloud || {}; const had = w.M.cloud.personChanged; w.M.cloud.personChanged = () => { pc++; };
+        click(w, q(d, '#app [data-a="pick-profile"][data-v="nick"]'));
+        assert.strictEqual(pc, 1, "K6: picking a person starts a sync catch-up for them");
+        w.M.cloud.personChanged = () => { throw new Error("offline"); };
+        click(w, q(d, '#tabs [data-tab="settings"]')); click(w, q(d, '#app [data-a="switch-profile"]')); click(w, q(d, '#app [data-a="pick-profile"][data-v="kat"]'));
+        assert.strictEqual(w.eval("S.profile"), "kat", "a failing catch-up never blocks the switch");
+        if (had) w.M.cloud.personChanged = had; else delete w.M.cloud.personChanged;
+        click(w, q(d, '#tabs [data-tab="today"]')); click(w, q(d, '#cta [data-a="start"]'));
+        Object.defineProperty(d, "visibilityState", { configurable: true, get: () => "hidden" });
+        swSays(w, { type: "chalk-updated", cache: "chalk-v" + (APPV + 1) });
+        assert.strictEqual(n, 0); assert.ok(w.eval("!!S.active"));
+        assert.deepStrictEqual(errors, []);
+      });
+    } finally { dom.window.close(); }
+  }
+  /* round 4: plain workout time, the keyboard never hides a sheet's button, hostile exercise ids */
+  {
+    const vvHook = win => { swHook(win); win.scrollTo = () => {}; const vv = new win.EventTarget(); vv.height = 768; vv.offsetTop = 0; win.visualViewport = vv; };
+    const { dom, w, d, errors } = boot({ real: true, hook: vvHook });
+    try {
+      t("FX-03/CP-01: workout time in plain words; past 3 hours it asks to finish; rest and HIIT clocks say which (TN-06)", () => {
+        const ago = m => w.Date.now() - m * 60000;
+        assert.strictEqual(w.elapsed(ago(0)), "just started"); assert.strictEqual(w.elapsed(ago(25)), "25 min");
+        assert.strictEqual(w.elapsed(ago(60)), "1 hr"); assert.strictEqual(w.elapsed(ago(85)), "1 hr 25 min");
+        assert.strictEqual(w.elapsed(ago(179)), "2 hr 59 min"); assert.strictEqual(w.elapsed(ago(527)), "Finish workout?");
+        click(w, q(d, '#app [data-a="pick-profile"][data-v="nick"]')); click(w, q(d, '#cta [data-a="start"]'));
+        w.eval("S.active.start=Date.now()-527*60000; render()");
+        assert.strictEqual(w.trainBadge(), "Train · Finish workout?"); assert.strictEqual(d.getElementById("subtitle").textContent, "Finish workout?");
+        w.eval("S.active.start=Date.now()-25*60000; render()"); assert.strictEqual(w.trainBadge(), "Train · 25 min");
+        w.eval("CT={bi:0,mi:0,round:1,phase:'work',end:Date.now()+12000,paused:false,remain:0,warned:true}");
+        assert.strictEqual(w.trainBadge(), "Train · Work 0:12");
+        w.eval("CT.phase='rest'; CT.end=Date.now()+8000"); assert.strictEqual(w.trainBadge(), "Train · Rest 0:08");
+        w.eval("CT.paused=true"); assert.strictEqual(w.trainBadge(), "Train · 25 min", "paused: the workout time");
+        w.eval("CT=null; S.active=null; save(); render()"); assert.strictEqual(w.trainBadge(), "Train");
+      });
+      t("IO-01: with the keyboard up, an open sheet sits on top of it and fits the space left; back to normal when it closes", () => {
+        const vv = w.visualViewport, sh = d.getElementById("sheet");
+        w.openSheet("Amount", '<input id="kb-in" inputmode="decimal"><button class="btn primary">Add</button>');
+        vv.height = 420; vv.dispatchEvent(new w.Event("resize"));
+        assert.strictEqual(sh.style.bottom, (w.innerHeight - 420) + "px"); assert.strictEqual(sh.style.maxHeight, "408px");
+        vv.offsetTop = 30; vv.dispatchEvent(new w.Event("scroll"));
+        assert.strictEqual(sh.style.bottom, (w.innerHeight - 450) + "px", "follows iOS scrolling the page up");
+        vv.height = w.innerHeight; vv.offsetTop = 0; vv.dispatchEvent(new w.Event("resize"));
+        assert.strictEqual(sh.style.bottom, "", "keyboard down: normal again");
+        vv.height = 420; vv.dispatchEvent(new w.Event("resize")); assert.ok(sh.style.bottom);
+        w.closeSheet(); assert.strictEqual(sh.style.bottom, ""); assert.strictEqual(sh.style.maxHeight, "");
+        vv.dispatchEvent(new w.Event("resize")); assert.strictEqual(sh.style.bottom, "", "no sheet: nothing moves");
+        vv.height = w.innerHeight;
+      });
+      t("SE-01: a backup with exercise id \"__proto__\" can't touch Object.prototype, and Finish workout still saves", () => {
+        const bk = JSON.parse(w.eval("JSON.stringify(S)")); const W0 = bk.program.order[0];
+        bk.program.workouts[W0].items[0].ex = "__proto__";
+        bk.log = [{ id: "r1", wid: W0, name: "Pull day", start: Date.now() - 864e5, end: Date.now() - 864e5 + 3600e3, sets: { bb_row: [{ w: 135, r: 8 }] }, volume: 1080, nsets: 1, blocks: [], abs: false, results: [{ ex: "bb_row", from: 130, to: 135, kind: "up", chg: "", pr: false, range: null, dsets: 0 }] }];
+        let txt = JSON.stringify(bk);
+        txt = txt.replace('"sets":{"bb_row"', '"sets":{"__proto__":[{"w":1,"r":1}],"bb_row"').replace('"ex":{', '"ex":{"__proto__":{"w":5,"miss":0,"best":0,"hist":[]},"constructor":{"w":7},').replace(/"custom":\{(\}?)/, (m0, end) => '"custom":{"__proto__":{"n":"Evil","m":"Back","t":"bb"}' + (end ? "}" : ","));
+        assert.ok(txt.includes('"sets":{"__proto__"') && txt.includes('"ex":{"__proto__"') && txt.includes('"custom":{"__proto__"'), "hostile backup built");
+        click(w, q(d, '#tabs [data-tab="settings"]')); click(w, q(d, '#app [data-a="import"]'));
+        d.getElementById("impT").value = txt; click(w, q(d, '#sheetB [data-a="import-do"]'));
+        assert.strictEqual(w.eval("S.program.workouts[" + JSON.stringify(W0) + "].items.some(it=>it.ex==='__proto__')"), false, "the bad lift is dropped");
+        assert.strictEqual(w.eval("Object.keys(S.ex).filter(k=>k==='__proto__'||k==='constructor').length"), 0);
+        assert.strictEqual(w.eval("Object.prototype.hasOwnProperty.call(S.log[0].sets,'__proto__')"), false);
+        assert.strictEqual(w.eval("S.log[0].sets.bb_row.length"), 1, "real history kept");
+        assert.strictEqual(w.eval("getEx('__proto__')===Object.prototype"), false); assert.strictEqual(w.eval("getEx('__proto__').n"), "__proto__");
+        assert.strictEqual(w.eval("exState('__proto__')===Object.prototype||exState('constructor')===Object"), false);
+        assert.strictEqual(w.eval("getEx('zz_retired_lift').m"), "Other", "an unknown normal id still works");
+        const c = JSON.parse('{"v":1,"log":[{"id":"x","sets":{"old_lift":[{"w":50,"r":5}]}}],"ex":{"old_lift":{"w":50,"miss":0,"best":0,"hist":[]}}}'); const before = JSON.stringify(c);
+        w.cleanTrain(c); assert.strictEqual(JSON.stringify(c), before, "history of a lift that's no longer in the list is kept");
+        click(w, q(d, '#tabs [data-tab="today"]')); click(w, q(d, '#cta [data-a="start"]'));
+        const n = w.eval("S.log.length"); click(w, q(d, '#app [data-a="log"]')); w.eval("stopRest()");
+        click(w, q(d, '#app [data-a="finish"]')); const fin = q(d, '#sheetB [data-a="finish-do"]'); if (fin) click(w, fin);
+        assert.strictEqual(w.eval("S.log.length"), n + 1, "the workout saved"); assert.strictEqual(w.eval("S.active"), null);
+        assert.strictEqual(w.eval("(()=>{ const k=[]; for (const x in {}) k.push(x); return k.join(','); })()"), "", "Object.prototype clean");
+        w.closeSheet();
+      });
+      t("CP-06: with Sync on, the Settings footer says the data is backed up with Sync; CP-05 backup text box says what to do", () => {
+        const had = w.M.cloud; w.M.cloud = Object.assign({}, had || {}, { status: () => ({ on: true }) });
+        try { click(w, q(d, '#tabs [data-tab="settings"]')); assert.ok(d.getElementById("app").textContent.includes("Chalk · your data is on this phone and backed up with Sync.")); }
+        finally { w.M.cloud = had; }
+        w.render(); assert.ok(d.getElementById("app").textContent.includes("Chalk · your data lives on this phone"), "sync off: the old line");
+        assert.ok(HTML.includes('<p class="hint" style="margin-bottom:8px">Copy all of this text and paste it into Notes.</p><textarea readonly'));
+      });
+      t("IO-05: Train's choices, small buttons and muscle chips are 44 px tap targets; the goal tag has a 44 px hit area", () => {
+        assert.ok(HTML.includes(".seg button[data-a],.btn.sm[data-a],button.chip[data-a]{min-height:44px}"));
+        assert.ok(HTML.includes('button.tag[data-a="checkin"]::after{content:"";position:absolute;left:0;right:0;top:50%;height:44px;transform:translateY(-50%)}'));
+        assert.ok(HTML.includes('button.tag[data-a="checkin"]{position:relative;color:#7A4F06}'));
+      });
+      t("IO-04: presses show on iPhone (touchstart listener + :active)", () => {
+        assert.ok(HTML.includes('document.addEventListener("touchstart",()=>{},{passive:true});'));
+        assert.ok(HTML.includes(".btn:active,.opt:active,.chip:active,.m-row:active,.tabs button:active,.modebar button:active,.seg button:active{filter:brightness(.92)}"));
+      });
+      t("TN-03: Settings choice buttons never shrink (90s visible at 375 px); TN-04: text boxes use the app font", () => {
+        assert.ok(HTML.includes(".srow>div:first-child{flex:1 1 auto;min-width:0}") && HTML.includes(".srow>.seg{flex-shrink:0}"));
+        assert.ok(HTML.includes("input,select,textarea{font:inherit;color:inherit}") && !/textarea\{[^}]*monospace/.test(HTML));
+      });
+      t("no errors in the round-4 page", () => assert.deepStrictEqual(errors.map(String), [], errors.map(String).join(" | ")));
+    } finally { dom.window.close(); }
+  }
   for (const bad of ["{\"v\":1,\"log\":[{\"id\":\"cut", "{\"v\":2,\"log\":[]}"]) {
     const { dom, w, errors } = boot({ real: true, hook: swHook, store: { "chalk.v1": bad, "chalk.bak.d": "2000-01-01" } });
     try {
@@ -776,19 +943,19 @@ async function runF6Pass() {
     });
     t("workout running: the Train half reads the workout time (TRN-09)", () => {
       click(w, q(d, '#cta [data-a="start"]')); assert.ok(w.eval("!!S.active"));
-      assert.strictEqual(w.trainBadge(), "Train · 0 min");
-      assert.strictEqual(q(d, '#modebar [data-v="train"] .mb-l').textContent, "Train · 0 min");
+      assert.strictEqual(w.trainBadge(), "Train · just started");
+      assert.strictEqual(q(d, '#modebar [data-v="train"] .mb-l').textContent, "Train · just started");
     });
     t("resting: overlay on, mode bar tappable; in Macros the overlay hides and the clock runs on the Train half (UX2-05/TRN-05)", () => {
       click(w, q(d, '#app [data-a="log"]')); assert.ok(w.eval("!!T"), "rest started");
-      assert.ok(d.getElementById("rest").classList.contains("on")); assert.match(w.trainBadge(), /^Train · \d+:\d\d$/);
+      assert.ok(d.getElementById("rest").classList.contains("on")); assert.match(w.trainBadge(), /^Train · rest \d+:\d\d$/);
       mode("macros");
       assert.ok(!d.getElementById("rest").classList.contains("on"), "overlay hidden in Macros"); assert.ok(w.eval("!!T"), "clock still running");
-      assert.match(q(d, '#modebar [data-v="train"] .mb-l').textContent, /^Train · \d+:\d\d$/);
+      assert.match(q(d, '#modebar [data-v="train"] .mb-l').textContent, /^Train · rest \d+:\d\d$/);
     });
     t("rest ends while in Macros: a toast says so, the badge goes back to the workout time", () => {
       w.eval("T.end=Date.now()-1; tickRest()");
-      assert.match(toastEl().textContent, /^Rest is over\. Next: /); assert.strictEqual(w.trainBadge(), "Train · 0 min");
+      assert.match(toastEl().textContent, /^Rest is over\. Next: /); assert.strictEqual(w.trainBadge(), "Train · just started");
       w.eval("stopRest()");
     });
     t("back in Train before rest ends: the overlay is there again", () => {
@@ -812,7 +979,7 @@ async function runF6Pass() {
       assert.strictEqual(n, 0); assert.ok(w.eval("!!S.active")); assert.ok(u.hidden, "no button while the workout runs");
       w.eval("render()"); assert.ok(u.hidden, "still waiting after a redraw");
       w.eval("window.__act=S.active; S.active=null; render()");
-      assert.ok(!u.hidden, "workout over: the button shows"); assert.strictEqual(u.textContent, "Updated. Tap to reload");
+      assert.ok(!u.hidden, "workout over: the button shows"); assert.strictEqual(u.textContent, "New version ready. Tap to update.");
       click(w, u); assert.strictEqual(n, 1);
       swSays(w, { type: "chalk-version", cache: "chalk-v" + (APPV + 1) }); assert.strictEqual(n, 1, "only once");
       w.eval("S.active=window.__act; delete window.__act; render()"); assert.ok(u.hidden);
@@ -822,20 +989,23 @@ async function runF6Pass() {
       act("switch-profile"); assert.strictEqual(w.eval("S.profile"), "nick"); assert.strictEqual(toastEl().textContent, "Finish your workout first");
       w.eval("S.active=null; save(); render()");
     });
-    t("same person picked again keeps the plan; Cancel goes back; the other person gets their own start", () => {
+    t("CP-07: Switch says who is on now; Keep goes back with the plan as it was; the other person gets their own start", () => {
       const plan = () => w.eval("JSON.stringify({program:S.program,mix:S.mix,goal:S.goal,block:S.block,cyc:S.cyc})");
       const before = plan();
       tab("settings"); click(w, q(d, '#app [data-a="switch-profile"]'));
-      assert.strictEqual(w.eval("S.profile"), null); click(w, q(d, '#app [data-a="switch-cancel"]'));
-      assert.strictEqual(w.eval("S.profile"), "nick"); assert.strictEqual(plan(), before);
-      tab("settings"); click(w, q(d, '#app [data-a="switch-profile"]')); click(w, q(d, '#app [data-a="pick-profile"][data-v="nick"]'));
+      assert.strictEqual(w.eval("S.profile"), null);
+      assert.ok(app().textContent.includes("Who is this?") && app().textContent.includes("Now: Nick. Workout history is kept."));
+      assert.strictEqual(q(d, '#app [data-a="pick-profile"][data-v="kat"]').textContent, "Switch to Katerina");
+      assert.strictEqual(q(d, '#app [data-a="switch-cancel"]').textContent, "Keep Nick");
+      assert.ok(!q(d, '#app [data-a="pick-profile"][data-v="nick"]'), "no second way to keep Nick");
+      click(w, q(d, '#app [data-a="switch-cancel"]'));
       assert.strictEqual(w.eval("S.profile"), "nick"); assert.strictEqual(plan(), before, "program, mix, goal, 45-day clock kept");
       tab("settings"); click(w, q(d, '#app [data-a="switch-profile"]')); click(w, q(d, '#app [data-a="pick-profile"][data-v="kat"]'));
       assert.strictEqual(w.eval("S.profile"), "kat"); assert.strictEqual(w.eval("JSON.stringify(S.mix)"), w.eval("JSON.stringify(PRESETS.kat.mix)"));
     });
     t("Restore says what happens; if the food part can't be read the workouts still come back (CPY-35/TRN-08/TRN-13)", () => {
       tab("settings"); click(w, q(d, '#app [data-a="import"]'));
-      assert.ok(d.getElementById("sheetB").textContent.includes("Workouts are replaced. Food logs and meals from the backup are added back; newer changes on this phone stay."));
+      assert.ok(d.getElementById("sheetB").textContent.includes("Pick your backup file, or paste the backup text. Your workouts are replaced by the ones in the backup. Food logs and meals in the backup are added. Newer food changes on this phone stay."));
       const bk = JSON.parse(w.eval("JSON.stringify(S)")); bk.settings.restC = 90; bk.__macros = { v: 1 };
       const orig = w.M.import; w.M.import = () => { throw new Error("unreadable"); };
       try { d.getElementById("impT").value = JSON.stringify(bk); click(w, q(d, '#sheetB [data-a="import-do"]')); } finally { w.M.import = orig; }
@@ -867,13 +1037,19 @@ async function runF6Pass() {
       assert.strictEqual(w.eval("S.custom[" + JSON.stringify("c_x" + X) + "].m"), "Other", "unknown muscle name dropped");
       w.eval("S.active=null; save(); render()");
     });
-    t("Erase names everything it deletes and removes the Claude key too (CPY-04/TRN-07/TRN-14)", () => {
+    t("Erase names everything it deletes and removes the Claude key too (CPY-04/TRN-07/TRN-14); backups and drafts go too (TN-05)", () => {
       w.localStorage.setItem("chalk.ai.key", "sk-test");
+      ["chalk.bak", "chalk.bak.d", "chalk.bad", "chalk.macros.setupDraft.nick", "chalk.macros.draft.food", "chalk.macros.draft.meal.x"].forEach(k => w.localStorage.setItem(k, "x"));
+      w.localStorage.setItem("apollo.other.app", "keep");
       tab("settings"); click(w, q(d, '#app [data-a="wipe"]'));
       const txt = d.getElementById("sheetB").textContent;
       ["workouts", "food logs", "saved meals", "your foods", "weigh-ins", "Claude key"].forEach(s => assert.ok(txt.includes(s), s));
       click(w, q(d, '#sheetB [data-a="wipe-do"]'));
       assert.strictEqual(w.localStorage.getItem("chalk.ai.key"), null); assert.ok(!w.eval("S.profile"));
+      ["chalk.bak", "chalk.bak.d", "chalk.bad", "chalk.macros.setupDraft.nick", "chalk.macros.draft.food", "chalk.macros.draft.meal.x"].forEach(k => assert.strictEqual(w.localStorage.getItem(k), null, k));
+      assert.strictEqual(w.localStorage.getItem("apollo.other.app"), "keep", "other apps' keys stay");
+      assert.strictEqual(q(d, '#app [data-a="pick-profile"][data-v="nick"]').textContent, "I'm Nick", "CP-07");
+      assert.ok(d.getElementById("app").textContent.includes("Who is this?"));
     });
     t("no errors during the F6 pass", () => assert.deepStrictEqual(errors.map(String), [], errors.map(String).join(" | ")));
   } finally { dom.window.close(); }

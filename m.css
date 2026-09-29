@@ -227,13 +227,16 @@
 .m-warnline{color:var(--warn);margin:6px 0 0}
 
 /* ---- F2a ---- */
-/* Log food: one compact row of tools; while the search box is in use the tools and the
-   Recent / Meals / Foods row step aside so results sit above the keyboard */
-.m-tools{display:flex;grid-template-columns:none;gap:6px;overflow-x:auto;margin:8px -2px 8px;padding:0 2px 2px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.m-tools::-webkit-scrollbar{display:none}
-.m-tools button{flex:none;flex-direction:row;gap:6px;min-height:44px;padding:0 12px;border-radius:22px;font-size:13px;color:var(--ink);white-space:nowrap}
-.m-tools button span{font-size:16px}
+/* Log food: all seven tools in two rows of four, a stroke icon over each name (DY-03);
+   while the search box is in use the tools and the Recent / Meals / Foods row step aside
+   so results sit above the keyboard (on Meals that row stays, so the way back shows: DY-01) */
+.m-tools{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;overflow:visible;margin:10px 0;padding:0}
+.m-tools button{flex-direction:column;gap:4px;min-height:58px;padding:6px 2px;border-radius:12px;font-size:12px;line-height:1.1;white-space:normal;color:var(--ink);min-width:0}
+.m-tools button svg{width:22px;height:22px;flex:none;fill:none;stroke:var(--acc);stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.m-tools button .m-tool-l{font-size:12px;line-height:1.1;color:var(--ink);overflow-wrap:anywhere}
 .m-add.m-typing .m-tools,.m-add.m-typing .m-seg{display:none}
+.m-add.m-typing.m-inmeals .m-seg{display:flex;margin-top:10px}
+@media (max-width:340px){ .m-pills{-webkit-mask-image:linear-gradient(90deg,#000 82%,transparent);mask-image:linear-gradient(90deg,#000 82%,transparent)} }
 .m-searchbox{position:relative}
 .m-searchbox .m-search{padding-right:48px}
 .m-clear{position:absolute;right:2px;top:50%;transform:translateY(-50%);width:44px;height:44px;font-size:22px;color:var(--mut);border-radius:22px}
@@ -261,11 +264,55 @@
 /* Train → Today summary: labels shrink before they overflow */
 .m-ts-k{overflow:hidden;text-overflow:ellipsis;text-transform:none;letter-spacing:0;font-size:12px}
 .m-quick .m-f3{grid-template-columns:repeat(3,minmax(0,1fr))}
-/* short phones: the slot cards have their own + Add, so the big bottom button steps aside */
-@media (max-height:700px){ #cta:has([data-m="add"]){display:none} }
-/* light theme: a darker fat color reads on white */
-:root:not([data-theme="dark"]){ --fat:#A85A16; }
-@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --fat:#F0A25C; } }
+/* short phones (VI-04): the big "+ Log food" button stays, just a bit smaller */
+@media (max-height:700px){ #cta:has([data-m="add"]){padding-top:6px;padding-bottom:4px} #cta:has([data-m="add"]) .btn{min-height:46px;font-size:19px} }
+/* fat is violet, so it never looks like carbs or like "over" (decision 5) */
+:root:not([data-theme="dark"]){ --fat:#7B4FC4; }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --fat:#B69CF5; --ring-bg:#2F363F; } }
+:root[data-theme="dark"]{ --fat:#B69CF5; --ring-bg:#2F363F; }
+/* over (decision 3): protein over is good news (green number); carbs and fat keep their
+   color with a small red end-cap and a red number; only the calorie ring turns red */
+.m-bar.pro{--c:var(--pro)} .m-bar.carb{--c:var(--carb)} .m-bar.fat{--c:var(--fat)}
+.m-bar.over .m-bar-t i{background:var(--c)}
+.m-bar.carb.over .m-bar-t i,.m-bar.fat.over .m-bar-t i{box-shadow:inset -8px 0 0 var(--warn)}
+.m-bar.carb.over .m-bar-h .num,.m-bar.fat.over .m-bar-h .num{color:var(--warn)}
+.m-bar.pro.over .m-bar-h .num{color:var(--ok)}
+.m-ts-c.pro.over .m-ts-bar i{background:var(--pro)}
+.m-bar-t,.m-ts-bar{background:var(--ring-bg)}
+/* Log food keeps one height while typing, so the search box never jumps (VI-07) */
+.sheet:has(#m-search){height:84%}
+/* meal cards (VI-05, VI-19): a centered ⋯, calories in the number font, an empty meal is one line with a small + */
+.m-slot .ex-row{padding-right:14px}
+.m-slot .hd{padding-right:6px}
+.m-slot-kcal{font:600 18px/1 "Barlow Condensed","Barlow",sans-serif;color:var(--mut);font-variant-numeric:tabular-nums}
+.m-slot .icon{display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.m-slot.m-empty .hd{padding-bottom:8px}
+.m-slot .icon.m-slot-plus{font-size:28px;font-weight:500;color:var(--acc)}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .m-slot-add .btn{border-color:var(--mut)} }
+:root[data-theme="dark"] .m-slot-add .btn{border-color:var(--mut)}
+/* batch portion: one line under the stepper ("12 oz cooked · of 51 oz batch") */
+.m-det-line{margin:10px 2px 0;text-align:center;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.m-det-line .m-det-amt,.m-det-line .m-det-of{display:inline;margin:0;font-size:15px}
+.m-det-line .m-det-of{color:var(--mut)}
+.m-det-line .m-det-of:not(:empty)::before{content:" · "}
+/* Log food: group headers in grey; a small "Meal" tag on saved meals (VI-20) */
+.m-results .ex-div{color:var(--mut)}
+.m-mealtag{display:inline-block;vertical-align:2px;margin-left:6px;padding:1px 7px;border-radius:999px;background:var(--acc-soft);color:var(--acc);font:700 11px/1.5 "Barlow",sans-serif;letter-spacing:.04em;text-transform:uppercase}
+/* CP-03: typed words keep their own case on the big buttons */
+.btn.primary.m-keepcase,.btn.m-keepcase,.m-keepcase{text-transform:none;letter-spacing:0}
+/* day card (VI-09): eaten and target side by side */
+.m-daynums{flex-direction:row;justify-content:space-evenly;align-items:center;text-align:center}
+/* servings screen: labels line up on the left (VI-06); ‹ Back and the name on one row (VI-12) */
+.m-det .lbl,.m-quick .lbl,.m-det-grid .lbl{text-align:left;margin:0 0 4px 2px}
+.m-det-top{display:flex;align-items:center;gap:6px;margin:-6px 0 8px}
+.m-det-top .m-back{flex:none;margin:0 0 0 -6px}
+.m-det-top .m-det-name{flex:1;min-width:0;margin:0}
+.stats.m-live .stat .k,.stats.m-stats4 .stat .k{font-size:11px}
+/* streak chip (VI-18) */
+.m-foot .chip.m-streak{background:var(--acc-soft);color:var(--acc);border-color:transparent;min-height:44px}
+.m-foot .btn{min-height:44px}
+/* Train → Today calories row on a narrow phone (VI-13) */
+@media (max-width:360px){ .m-ts{grid-template-columns:1fr 1fr} .m-ts-go{grid-column:1/-1} }
 
 /* ---- F2b ---- */
 /* parts hidden with the hidden attribute (a display rule would otherwise keep them on screen) */
@@ -308,3 +355,19 @@
 .m-undo>.btn{flex:0 0 auto;min-height:44px}
 /* meal description: two lines, the whole text shows */
 .m-f textarea.m-mbdesc{min-height:64px;resize:none;font:17px/1.35 "Barlow",-apple-system,sans-serif;font-weight:500;padding:10px 12px;border-radius:10px}
+/* ---- F2b round 4 ---- */
+/* Saved meals: meal-time chips under the search box (FD-06), counts in the headers, the other person's tag (FX-09) */
+.m-mslots{margin:-2px 0 4px}
+.m-mslots .chip{min-height:44px;padding:0 14px}
+@media (max-width:420px){ .m-mslots{-webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);mask-image:linear-gradient(90deg,#000 88%,transparent)} }
+.sec .m-cnt{color:var(--mut);font-weight:600}
+.tag.m-who{margin-left:6px;vertical-align:2px;font-size:11px}
+.btn.m-inline{display:flex;margin:10px auto 0;min-height:44px}
+/* scan: what to do after a failed lookup or a blocked camera (SC-02, OF-01, IO-02) */
+#m-scan-act{margin:6px 0 10px}
+.btn.m-codepick{margin-top:8px}
+#m-scan-act:empty{display:none}
+/* the camera never grows past the sheet (landscape, IO-06); the aiming box follows the video's box */
+#sheetB .m-scan video{max-height:min(56dvh,420px);width:100%;object-fit:cover}
+/* batch: "That's 2250 oz cooked…" with a "Use 2250 g" button (WK-04) */
+#m-mb-warn .btn.m-usealt{display:flex;margin-top:8px;min-height:44px;text-transform:none;letter-spacing:0;color:var(--ink)}

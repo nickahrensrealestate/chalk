@@ -213,7 +213,7 @@ t("views.trends: real numbers after 10 weigh-ins (+ rhr), range chips, delete fl
   for (let i = 27; i >= 10; i--) M.body.add({ date: M.addDays(M.today(), -i), w: 195 - (27 - i) * 0.3 });
   const rh = M.ui.views.trends();
   assert.ok(/<div class="k">Per week<\/div>/.test(rh) && !/\/wk/.test(rh), "rate per week shown, in words");
-  assert.ok(/about \d+ weeks? at [\d.]+ lb a week/.test(rh), "weeks-to-goal estimate");
+  assert.ok(/about \d+ weeks? at <span class="mt-nb">[\d.]+ lb a week<\/span>/.test(rh), "weeks-to-goal estimate, the rate kept on one line (VI-14)");
   /* log sheet */
   click((() => { const b = document.createElement("button"); b.dataset.m = "t-log-body"; return b; })());
   assert.strictEqual(sheetOpen, "Log weight or heart rate");
@@ -267,11 +267,13 @@ t("views.trends: This week + Last 8 weeks use logged food", () => {
   M.log.add(M.addDays(today, -14), { slot: "Dinner", name: "Old", per: { cal: 1500, p: 100, c: 40, f: 30 } });
   const html = M.ui.views.trends();
   const ws = M.weekSummary("nick", 0);   /* m-core decides what counts (today may be left out of the averages) */
-  assert.ok(new RegExp(">" + ws.logged + '<small>of 7</small></div><div class="k">Days logged</div>').test(html), "days logged");
+  assert.ok(new RegExp(">" + ws.avgDays + '<small>of 7</small></div><div class="k">Days logged</div>').test(html), "days logged = the days in the average (TR-06)");
+  if (ws.todayLeftOut) assert.ok(/Today isn't in the average yet\./.test(html), "says today is left out");
   assert.ok(new RegExp(">" + fmt(ws.avgCal) + '</div><div class="k">Calories a day</div><div class="mt-sub">of 2,000</div>').test(html), "avg calories vs 2,000");
   assert.ok(new RegExp(">" + Math.round(ws.avgP) + '<small>g</small></div><div class="k">Protein a day</div><div class="mt-sub">of 150 g</div>').test(html), "avg protein");
   assert.ok(count(html, /<path class="bar"/g) >= 3, "this-week bars + week bars");
-  assert.ok(/Sep 28: 600 cal · 60 g protein so far/.test(html), "day title, today marked so far");
+  assert.ok(/Sep 28: 600 cal so far · 60 g protein/.test(html), "day title, today marked so far");
+  assert.ok(/<path class="bar sofar"/.test(html) && />so far<\/text>/.test(html), "today's bar is lighter and says so far");
   assert.ok(/not logged/.test(html));
   assert.ok(/>Su<\/text>/.test(html) && />Mo<\/text>/.test(html), "two-letter day labels");
   assert.ok(!/kcal/.test(html), "cal, not kcal");
@@ -641,8 +643,12 @@ t("You form: a field change never re-renders — values and targets patch in pla
   assert.ok(/Last weigh-in Sep 28/.test($("#mt-ci-body").innerHTML), "check-in line patched");
   assert.strictEqual(p.updatedAt, NOW, "edit time stamped for sync");
   /* cleaned-up values go back into the boxes */
+  const age0 = p.age;
   change(age, 150);
-  assert.strictEqual(p.age, 120); assert.strictEqual(age.value, "120");
+  assert.strictEqual(p.age, age0, "a typo age is not saved"); assert.strictEqual(age.value, "150", "the box keeps what was typed");
+  assert.ok(!$("#mt-amsg-you").hidden && /Age should be 5 to 120/.test($("#mt-amsg-you").textContent), "message under Age");
+  change(age, 41);
+  assert.strictEqual(p.age, 41); assert.ok($("#mt-amsg-you").hidden, "message gone once it's right");
   change(weight, "");
   assert.strictEqual(p.weightLb, 180, "blank weight ignored"); assert.strictEqual(weight.value, "180", "box shows the kept weight");
   q("hft").value = "5"; change(q("hin"), 13);
@@ -656,7 +662,8 @@ t("You form: a field change never re-renders — values and targets patch in pla
   assert.ok(p.targets.cal < cal1 && $("#mt-tbox").innerHTML.indexOf(fmt(p.targets.cal)) > 0);
   /* incomplete numbers → the note says so, in place */
   change(q("age"), "");
-  assert.strictEqual(p.age, null);
+  assert.strictEqual(p.age, 41, "a blank age box keeps the age"); assert.strictEqual(q("age").value, "41");
+  p.age = null; M.save(); show(M.ui.views.you());
   assert.ok(/Fill in sex, age, height and weight/.test($("#mt-tbox").innerHTML));
   change(q("age"), 38);
   /* manual targets: the grid holds inputs, so a numbers change leaves it alone */
@@ -765,7 +772,7 @@ t("Sync & backup card: not set up · off · join · on · sync now · restore (t
     let rb = $('[data-m="t-sync-restore"]');
     assert.ok(rb, "restore button added");
     assert.ok(/<b>150 workouts<\/b> in the cloud aren't on this phone\./.test($("#mt-restore").innerHTML));
-    assert.ok(/replaces the workouts on this phone/.test($("#mt-restore").textContent));
+    assert.ok(/Restore brings back \d+ workouts? from the backup\./.test($("#mt-restore").textContent));
     assert.strictEqual($("#mt-restore").previousElementSibling, $("#mt-restore-at"), "in its place");
     assert.ok($("#mt-restore").nextElementSibling.classList.contains("mt-more"), "above More options");
     fake.restoreResult = false;
@@ -1296,10 +1303,11 @@ t("C3: the other phone changed the code → this phone's card opens the code box
     /* this phone deleted the copy itself: starting again is the next step */
     st.note = "Your cloud copy is deleted. Everything is still on this phone.";
     show(M.ui.views.you());
-    assert.ok($("#mt-join").hidden && $('[data-m="t-sync-on"]').classList.contains("primary"), "own delete: Start is the main button");
+    const same = () => $('[data-m="t-sync-on"]').className === $('[data-m="t-sync-joinshow"]').className;
+    assert.ok($("#mt-join").hidden && same() && !$('[data-m="t-sync-on"]').classList.contains("primary"), "own delete: Start and Join look the same (FX-06)");
     st.note = "";
     show(M.ui.views.you());
-    assert.ok($("#mt-join").hidden && $('[data-m="t-sync-on"]').classList.contains("primary"), "plain off: Start is the main button");
+    assert.ok($("#mt-join").hidden && same(), "plain off: Start and Join look the same");
   } finally { if (had) M.cloud = had; else delete M.cloud; }
 });
 
@@ -1441,7 +1449,7 @@ t("Sync flow reads in order: Start → steps + code → join on the other phone 
     /* 4. the other phone: join with the code → "This phone is joined", status first */
     click('[data-m="t-sync-off"]'); click('[data-m="t-sync-off"]');
     show(M.ui.views.you());
-    assert.ok($('[data-m="t-sync-on"]').classList.contains("primary"));
+    assert.strictEqual($('[data-m="t-sync-on"]').className, $('[data-m="t-sync-joinshow"]').className, "Start never outweighs Join (FX-06)");
     click('[data-m="t-sync-joinshow"]');
     assert.ok($('label[for="mt-join-code"]'), "the code box has a label");
     assert.ok(!$('[data-m="t-sync-on"]').classList.contains("primary"), "Join is the one bold button once the code box is open");
@@ -1456,6 +1464,257 @@ t("Sync flow reads in order: Start → steps + code → join on the other phone 
     NOW += 11 * 60e3; show(M.ui.views.you());
     assert.ok(!/This phone is joined/.test(words()), "the note goes away later");
   } finally { if (had) M.cloud = had; else delete M.cloud; M.ui.tab = "you"; NOW = base; }
+});
+
+/* ======================================================================= */
+/* fixer round 4 (F3): TR-01..06, FX-06, K5, CP-08, CP-11, VI-15 */
+t("TR-01: You height — a typo or an emptied box never saves broken targets; message under Height; no '0' written back", () => {
+  M.ui.tab = "you"; M.reset(); M.trends.resetDraft();
+  const p = setupNick(); const t0 = JSON.stringify(p.targets);
+  show(M.ui.views.you());
+  const q = f => $('[data-m="t-num"][data-f="' + f + '"]');
+  change(q("hft"), 55);
+  assert.strictEqual(p.heightIn, 71, "55 ft is not saved"); assert.strictEqual(JSON.stringify(p.targets), t0, "targets untouched");
+  assert.ok(!$("#mt-hmsg-you").hidden && /Height should be 3 to 9 feet/.test($("#mt-hmsg-you").textContent), "message under Height");
+  assert.strictEqual(q("hft").value, "55", "the typo stays in the box to fix");
+  change(q("goal"), 172);
+  assert.strictEqual(q("hft").value, "55", "another box's change doesn't hide the typo"); assert.ok(!$("#mt-hmsg-you").hidden);
+  assert.strictEqual(M.trends.hasDraft(), true, "a typo not saved yet counts as a draft");
+  change(q("hft"), 5);
+  assert.ok($("#mt-hmsg-you").hidden, "message gone once it's right"); assert.strictEqual(p.heightIn, 71);
+  /* emptied feet box, then the inches box changes: ignored, and the feet box stays empty (no "0") */
+  q("hft").value = ""; change(q("hin"), 1);
+  assert.strictEqual(p.heightIn, 71, "blank feet: height kept"); assert.strictEqual(JSON.stringify(p.targets), t0);
+  assert.strictEqual(q("hft").value, "", "nothing written into the emptied box");
+  change(q("hft"), "");
+  assert.strictEqual(q("hft").value, "", "still empty"); assert.strictEqual(p.heightIn, 71);
+  q("hft").value = "5"; change(q("hin"), 11);
+  assert.strictEqual(p.heightIn, 71); change(q("hin"), 10); assert.strictEqual(p.heightIn, 70, "a real change saves");
+  /* metric: 1.78 (meters typed as cm) */
+  p.units = "metric"; M.save(); show(M.ui.views.you());
+  const hBefore = p.heightIn, tB = JSON.stringify(p.targets);
+  change($('[data-m="t-num"][data-f="hcm"]'), "1.78");
+  assert.strictEqual(p.heightIn, hBefore); assert.strictEqual(JSON.stringify(p.targets), tB);
+  assert.ok(/Height should be 92 to 274 cm/.test($("#mt-hmsg-you").textContent));
+  change($('[data-m="t-num"][data-f="hcm"]'), "180");
+  assert.strictEqual(p.heightIn, r1t(180 / 2.54)); assert.ok($("#mt-hmsg-you").hidden);
+});
+
+t("TR-02: typed targets — empty keeps the old value; out of range is clamped with a message; 0 calories warns", () => {
+  M.ui.tab = "you"; M.reset(); M.trends.resetDraft();
+  const p = setupNick();
+  show(M.ui.views.you()); click('[data-m="t-manual"]'); show(M.ui.views.you());
+  const q = f => $('[data-m="t-target"][data-f="' + f + '"]');
+  const cal0 = p.targets.cal;
+  change(q("cal"), "");
+  assert.strictEqual(p.targets.cal, cal0, "empty box keeps the calories"); assert.strictEqual(q("cal").value, String(cal0), "and shows them again");
+  change(q("cal"), "abc");
+  assert.strictEqual(p.targets.cal, cal0, "not a number keeps it");
+  change(q("p"), 1850);
+  assert.strictEqual(p.targets.p, 600, "protein clamped to 600"); assert.strictEqual(q("p").value, "600");
+  assert.ok(!$("#mt-tmsg").hidden && /Protein should be 0 to 600 g\. We saved 600\./.test($("#mt-tmsg").textContent));
+  change(q("cal"), 300);
+  assert.strictEqual(p.targets.cal, 800, "calories at least 800");
+  change(q("cal"), 2200); assert.strictEqual(p.targets.cal, 2200); assert.ok($("#mt-tmsg").hidden, "message clears");
+  change(q("water"), 900); assert.strictEqual(p.targets.water, 300);
+  change(q("fiber"), 250); assert.strictEqual(p.targets.fiber, 100);
+  /* an old saved 0 (from before this check) shows as a warning */
+  p.targets.cal = 0; M.save(); show(M.ui.views.you());
+  assert.ok(/Your calorie target is 0\./.test($("#mt-tnote").textContent) && $("#mt-tnote").classList.contains("mt-warn"));
+});
+
+t("TR-03: goal weight is checked in You and setup; setup Save stops on a goal typo", () => {
+  M.ui.tab = "you"; M.reset(); M.trends.resetDraft();
+  const p = setupNick();
+  show(M.ui.views.you());
+  const g = () => $('[data-m="t-num"][data-f="goal"]');
+  change(g(), 1750);
+  assert.strictEqual(p.goalWeightLb, 175, "1750 not saved"); assert.ok(/Goal weight should be 50 to 700 lb/.test($("#mt-gmsg-you").textContent) && !$("#mt-gmsg-you").hidden);
+  assert.strictEqual(g().value, "1750", "typo stays in the box");
+  change(g(), 172); assert.strictEqual(p.goalWeightLb, 172); assert.ok($("#mt-gmsg-you").hidden);
+  change(g(), ""); assert.strictEqual(p.goalWeightLb, null, "an empty goal box clears the goal");
+  /* setup */
+  M.reset(); M.trends.resetDraft(); M.ui.tab = "diary";
+  show(M.ui.setupCardHTML());
+  click('[data-m="t-setup-seg"][data-f="sex"][data-v="f"]'); show(M.ui.setupCardHTML());
+  const sf = f => $('#mt-setup [data-f="' + f + '"]');
+  change(sf("age"), 35); change(sf("hft"), 5); change(sf("hin"), 6); change(sf("weight"), 140);
+  change(sf("goal"), "1300");
+  assert.ok(/Goal weight should be 50 to 700 lb/.test($("#mt-gmsg-setup").textContent), "said right away");
+  click('[data-m="t-save-setup"]');
+  assert.ok(!M.person("nick").setupAt, "not saved with a goal typo");
+  assert.ok(/Goal weight should be 50 to 700 lb/.test($("#mt-preview").textContent));
+  assert.ok($('#mt-setup [data-row="goal"]').classList.contains("mt-need"), "goal row marked");
+  sf("goal").value = "130"; click('[data-m="t-save-setup"]');
+  assert.ok(M.person("nick").setupAt, "saved once the goal is right"); assert.strictEqual(M.person("nick").goalWeightLb, 130);
+  /* setup height out of range says so (not "Still need: height") */
+  M.reset(); M.trends.resetDraft(); show(M.ui.setupCardHTML());
+  click('[data-m="t-setup-seg"][data-f="sex"][data-v="m"]'); show(M.ui.setupCardHTML());
+  change(sf("age"), 40); change(sf("weight"), 185); change(sf("hft"), 55); change(sf("hin"), 0);
+  assert.ok(/Height should be 3 to 9 feet/.test($("#mt-hmsg-setup").textContent), "said right away");
+  click('[data-m="t-save-setup"]');
+  assert.ok(!M.person("nick").setupAt && /Height should be 3 to 9 feet/.test($("#mt-preview").textContent));
+});
+
+t("TR-04: You → Check-ins agrees with the Diary card (same clock, calendar days); the card counts the weeks", () => {
+  M.ui.tab = "you"; M.reset(); M.trends.resetDraft();
+  const base = NOW;
+  NOW = new Date(2026, 8, 28, 12, 0, 0).getTime();
+  try {
+    const p = setupNick();
+    p.setupAt = NOW - 70 * DAY; p.lastBody = NOW - 20 * DAY;
+    M.body.add({ date: M.addDays(M.today(), -20), w: 185, pid: "nick" }); p.lastBody = NOW - 20 * DAY; M.save();
+    show(M.ui.views.you()); click('[data-m="t-reviewed"]');
+    assert.strictEqual(M.checkins.due("nick"), "body14");
+    show(M.ui.views.you());
+    assert.ok(/Due now/.test($("#mt-ci-body").innerHTML), "You says due now, like the Diary: " + $("#mt-ci-body").textContent);
+    /* 6 weeks since the last weigh-in: the card says 6, not 2 */
+    p.lastBody = NOW - 42 * DAY; M.save();
+    assert.ok(/It's been 6 weeks\./.test(M.ui.bannerHTML()), "weeks counted");
+    /* not due yet: the next day by the calendar */
+    p.lastBody = new Date(2026, 8, 20, 21, 30).getTime(); p.snooze = { refresh60: 0, body14: 0 }; M.save();
+    show(M.ui.views.you());
+    assert.ok(/Next one Oct 4\./.test($("#mt-ci-body").textContent), $("#mt-ci-body").textContent);
+    /* a snooze lasts until the morning of its day, like the Diary card */
+    p.lastBody = NOW - 20 * DAY; p.snooze = { refresh60: 0, body14: new Date(2026, 9, 2, 18, 0).getTime() }; M.save();
+    show(M.ui.views.you()); assert.ok(/Skipped until Oct 2\./.test($("#mt-ci-body").textContent), $("#mt-ci-body").textContent);
+    NOW = new Date(2026, 9, 2, 8, 0).getTime();
+    show(M.ui.views.you());
+    if (typeof M.checkins.weeksSince === "function") assert.ok(/Due now/.test($("#mt-ci-body").innerHTML), "snooze over on the morning of Oct 2: " + $("#mt-ci-body").textContent);
+    NOW = new Date(2026, 8, 28, 12, 0, 0).getTime();
+    /* no weigh-in ever: the clock runs from setup */
+    M.reset(); const q = setupNick(); q.lastBody = 0; q.setupAt = NOW - 3 * DAY; M.save();
+    show(M.ui.views.you());
+    assert.ok(/Next one Oct 9\./.test($("#mt-ci-body").textContent), $("#mt-ci-body").textContent);
+  } finally { NOW = base; }
+});
+
+t("CP-08 + CP-11: before setup, no 'Still right' button; 'Resting heart rate' on the 2-week card", () => {
+  M.ui.tab = "you"; M.reset(); M.trends.resetDraft();
+  show(M.ui.views.you());
+  assert.ok(/Not set yet\. Fill in Your numbers above\./.test($("#mt-ci-num").textContent));
+  assert.ok(!$('[data-m="t-reviewed"]'), "no Still right before setup");
+  setupNick(); const p = M.person("nick"); p.lastBody = NOW - 15 * DAY; M.save();
+  const b = M.ui.bannerHTML();
+  assert.ok(/Resting heart rate/.test(b) && !/Heart rate at rest/.test(b));
+});
+
+t("TR-05: 'Per week' names the real span of weigh-ins the rate uses (up to 8 weeks)", () => {
+  M.ui.tab = "trends"; M.reset();
+  setupNick();
+  for (let i = 0; i <= 55; i += 7) M.body.add({ date: M.addDays(M.today(), -55 + i), w: 195 - i * 0.25, pid: "nick" });
+  M.body.add({ date: M.today(), w: 181, pid: "nick" });
+  const html = M.ui.views.trends();
+  assert.ok(/last 8 weeks/.test(html), "8 weeks, not 4");
+  M.reset(); setupNick();
+  M.body.add({ date: M.addDays(M.today(), -20), w: 186, pid: "nick" }); M.body.add({ date: M.today(), w: 185, pid: "nick" });
+  assert.ok(/last 3 weeks/.test(M.ui.views.trends()));
+});
+
+t("TR-06/WK-09: 7-day card counts the days in the average; today is lighter and 'so far'; 8-week title too", () => {
+  M.ui.tab = "trends"; M.reset(); setupNick();
+  const add = (d, cal) => M.log.add(d, { slot: "Lunch", name: "X", servings: 1, per: { cal, p: 100, c: 0, f: 0 } });
+  add(M.addDays(M.today(), -2), 2000); add(M.addDays(M.today(), -1), 2200); add(M.today(), 300);
+  const ws = M.weekSummary("nick", 0);
+  const html = M.ui.views.trends();
+  assert.ok(new RegExp(">" + ws.avgDays + '<small>of 7</small></div><div class="k">Days logged</div>').test(html));
+  assert.strictEqual(ws.avgDays, 2);
+  assert.ok(/Today isn't in the average yet\./.test(html));
+  assert.strictEqual(count(html, /class="bar sofar"/g), 1, "one lighter bar: today");
+  assert.ok(/: 2,100 cal a day \(2 days, not today yet\)/.test(html), "8-week title uses the days in the average");
+  /* no today: no note, no lighter bar */
+  M.reset(); setupNick(); add(M.addDays(M.today(), -1), 2200);
+  const h2 = M.ui.views.trends();
+  assert.ok(!/Today isn't in the average/.test(h2) && !/bar sofar/.test(h2));
+});
+
+t("VI-15: heart rate chart keeps at least a 12-bpm axis; the 7-day line only where a week has 2+ readings", () => {
+  const pts = [{ date: "2026-09-20", v: 60 }, { date: "2026-09-21", v: 64 }, { date: "2026-09-22", v: 61 }];
+  const ys = svg => (svg.match(/<text x="\d+(?:\.\d)?" y="[\d.]+" text-anchor="end">(\d+)<\/text>/g) || []).map(s => +s.replace(/.*>(\d+)<.*/, "$1"));
+  const a = ys(M.charts.line(pts, { whole: true, minSpan: 12 })), b = ys(M.charts.line(pts, { whole: true }));
+  assert.ok(Math.max.apply(null, a) - Math.min.apply(null, a) >= 10, "wide axis: " + a);
+  assert.ok(Math.max.apply(null, b) - Math.min.apply(null, b) < Math.max.apply(null, a) - Math.min.apply(null, a), "narrower without minSpan");
+  /* readings 2 weeks apart: each 7-day window holds 1 → no average line */
+  const sparse = [{ date: "2026-08-31", v: 190 }, { date: "2026-09-14", v: 188 }, { date: "2026-09-28", v: 186 }];
+  const avgN = sparse.map(x => ({ date: x.date, v: x.v, n: 1 }));
+  assert.ok(!/class="avg"/.test(M.charts.line(sparse, { avg: avgN })), "no line from lone readings");
+  M.ui.tab = "trends"; M.reset(); setupNick();
+  sparse.forEach(x => M.body.add({ date: M.addDays(M.today(), -M.daysBetween(x.date, "2026-09-28")), rhr: 60, w: x.v, pid: "nick" }));
+  assert.ok(!/class="avg"/.test(M.ui.views.trends()), "Trends: no 7-day line for weigh-ins 2 weeks apart");
+});
+
+t("FX-06: Start never outweighs Join; an empty phone shows Join first; 'Join another phone's code instead' under More options", async () => {
+  M.ui.tab = "you"; M.reset(); M.trends.resetDraft();
+  const had = M.cloud;
+  try {
+    const st = { on: false, code: "", lastSync: 0, lastError: "", pending: 0, busy: false, note: "" };
+    let left = 0;
+    M.cloud = { configured: () => true, status: () => Object.assign({}, st), create() { st.on = true; st.code = "ABCDEFGHJKLMNPQRSTUV"; return st.code; },
+      join: () => Promise.resolve({ ok: true }), leave() { left++; st.on = false; st.code = ""; }, fmtCode: c => String(c).replace(/(.{4})(?=.)/g, "$1-"), training: () => null };
+    /* a phone with nothing on it: Join is first and the main button */
+    assert.ok(M.trends.phoneEmpty());
+    show(M.ui.views.you());
+    const btns = [...document.querySelectorAll("#mt-sync .mt-syncbtns .btn")];
+    assert.strictEqual(btns[0].dataset.m, "t-sync-joinshow", "Join first"); assert.ok(btns[0].classList.contains("primary") && !btns[1].classList.contains("primary"));
+    assert.ok(/New phone\? Tap Other phone: join with code/.test($("#mt-sync").textContent));
+    /* a phone with data: same weight */
+    setupNick(); show(M.ui.views.you());
+    assert.ok(!M.trends.phoneEmpty());
+    assert.strictEqual($('[data-m="t-sync-on"]').className, $('[data-m="t-sync-joinshow"]').className);
+    /* started by mistake → More options → Join another phone's code instead (two taps) → join row open */
+    click('[data-m="t-sync-on"]'); show(M.ui.views.you());
+    const rj = $('[data-m="t-sync-rejoin"]');
+    assert.ok(rj && /Join another phone's code instead/.test(rj.textContent));
+    click(rj); assert.strictEqual(left, 0, "first tap only arms"); assert.strictEqual(rj.textContent, "Tap again to switch");
+    click(rj); assert.strictEqual(left, 1, "second tap leaves this code");
+    if (!$("#mt-join")) show(M.ui.views.you());   /* the action redraws You with the code box open */
+    assert.ok(!$("#mt-join").hidden, "the code box is open"); assert.ok($('[data-m="t-sync-joinshow"]').hidden);
+    assert.ok($('[data-m="t-sync-join"]').classList.contains("primary") && !$('[data-m="t-sync-on"]').classList.contains("primary"));
+  } finally { if (had) M.cloud = had; else delete M.cloud; }
+});
+
+t("K5: M.trends.hasDraft — setup typed but not saved, or a You box typed but not saved; the setup draft survives a reload", () => {
+  M.ui.tab = "diary"; M.reset(); M.trends.resetDraft();
+  localStorage.removeItem("chalk.macros.setupDraft.nick");
+  show(M.ui.setupCardHTML());
+  assert.strictEqual(M.trends.hasDraft(), false, "nothing typed yet");
+  const sf = f => $('#mt-setup [data-f="' + f + '"]');
+  change(sf("age"), 41);
+  assert.strictEqual(M.trends.hasDraft(), true, "setup typed");
+  change(sf("hft"), 5); change(sf("hin"), 9);
+  click('[data-m="t-setup-seg"][data-f="sex"][data-v="f"]');
+  const kept = JSON.parse(localStorage.getItem("chalk.macros.setupDraft.nick"));
+  assert.ok(kept && kept.age === 41 && kept.heightIn === 69 && kept.sex === "f", "kept on the phone");
+  /* "reload": the page's memory is gone, the kept draft comes back into the boxes */
+  M.trends.forget();
+  show(M.ui.setupCardHTML());
+  assert.strictEqual(sf("age").value, "41"); assert.strictEqual(sf("hft").value, "5"); assert.strictEqual(sf("hin").value, "9");
+  assert.ok($('[data-m="t-setup-seg"][data-f="sex"][data-v="f"]').classList.contains("on"));
+  assert.strictEqual(M.trends.hasDraft(), true);
+  /* junk in the kept copy never gets in */
+  localStorage.setItem("chalk.macros.setupDraft.nick", JSON.stringify({ pid: "nick", at: NOW, age: "x", heightIn: -4, sex: "q", activity: "__proto__", split: "nope", pace: 9 }));
+  M.trends.forget();
+  const d = M.trends.draft();
+  assert.ok(d.age === null && d.heightIn === null && d.sex === null && d.activity === "moderate" && d.split === "highprotein" && d.pace === 0);
+  /* Save clears it */
+  M.trends.forget(); localStorage.removeItem("chalk.macros.setupDraft.nick");
+  show(M.ui.setupCardHTML());
+  click('[data-m="t-setup-seg"][data-f="sex"][data-v="m"]'); show(M.ui.setupCardHTML());
+  sf("age").value = "40"; sf("hft").value = "5"; sf("hin").value = "11"; sf("weight").value = "185";
+  click('[data-m="t-save-setup"]');
+  assert.ok(M.person("nick").setupAt);
+  assert.strictEqual(localStorage.getItem("chalk.macros.setupDraft.nick"), null, "cleared on save");
+  assert.strictEqual(M.trends.hasDraft(), false);
+  /* You: a typed, unsaved box counts; once saved it doesn't */
+  M.ui.tab = "you"; show(M.ui.views.you());
+  assert.strictEqual(M.trends.hasDraft(), false);
+  const age = $('[data-m="t-num"][data-f="age"]');
+  age.value = "42";
+  assert.strictEqual(M.trends.hasDraft(), true, "typed, not saved");
+  change(age, 42);
+  assert.strictEqual(M.person("nick").age, 42); assert.strictEqual(M.trends.hasDraft(), false, "saved");
+  age.focus(); assert.strictEqual(M.trends.hasDraft(), true, "typing right now"); age.blur();
+  assert.strictEqual(M.trends.hasDraft(), false);
 });
 
 /* ======================================================================= */
