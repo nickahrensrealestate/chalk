@@ -711,13 +711,47 @@ t("suggestion cards list items with amounts, cook items raw first; Log it keeps 
   const txt = $("m-sug-list").textContent;
   assert.ok(/oz raw \(\d+(\.\d)? oz cooked\)/.test(txt), "suggestion items read raw first");
   const cards = qa(".m-sug");
-  const i = cards.findIndex(c => /Kirkland|Chicken breast|Pork tenderloin/.test(c.textContent));
+  /* a built-in idea card (saved meals of your own log as one entry and have no "Save as meal") */
+  const i = cards.findIndex(c => c.querySelector('[data-m="sug-save"]') && /Kirkland|Chicken breast|Pork tenderloin/.test(c.textContent));
   assert.ok(i >= 0);
   const n = M.log.slotEntries(M.today(), "Dinner").length;
   click(cards[i].querySelector('[data-m="sug-log"]'));
   const added = M.log.slotEntries(M.today(), "Dinner").slice(n);
   assert.ok(added.some(e => e.state && e.cook), "cook items logged with their state");
   added.forEach(e => M.log.remove(M.today(), e.id)); M.ui.render();
+});
+
+t("suggest: your own saved meal shows 'Your meal', has no 'Save as meal', and logs as one meal entry", async () => {
+  M.ui.tab = "diary"; M.ui.render();
+  const m = M.meals.add({ name: "Pork and zucchini night", desc: "Our Tuesday dinner.", slot: "Dinner", servingsMade: 1, items: [{ name: "Zucchini, raw", servings: 1, servingLabel: "1 medium (196 g)", g: 196, per: { cal: 33, p: 2.4, c: 6.1, f: 0.6, fiber: 2, sugar: 4.9, sodium: 16 } }] });
+  click(q('[data-m="suggest"]'));
+  click(q('[data-m="sug-slot"][data-v="Dinner"]'));
+  await sleep(50);
+  const card = qa(".m-sug").find(c => /Pork and zucchini night/.test(c.textContent));
+  assert.ok(card, "saved meal offered first-class");
+  assert.ok(/Your meal/.test(card.textContent), "tagged Your meal");
+  assert.ok(!card.querySelector('[data-m="sug-save"]'), "no Save as meal on your own meal");
+  const n = M.log.slotEntries(M.today(), "Dinner").length;
+  click(card.querySelector('[data-m="sug-log"]'));
+  const added = M.log.slotEntries(M.today(), "Dinner").slice(n);
+  assert.strictEqual(added.length, 1, "one entry");
+  assert.strictEqual(added[0].mealId, m.id, "linked to the saved meal");
+  added.forEach(e => M.log.remove(M.today(), e.id)); M.meals.remove(m.id); M.ui.render();
+});
+
+t("barcode known but no nutrition → straight to the label photo with the product name shown", async () => {
+  M.ui.tab = "diary"; M.ui.render();
+  const real = M.food.lookup;
+  M.food.lookup = () => Promise.resolve({ status: "no_nutrition", code: "012345678905", product: { name: "Green chile salsa", brand: "Good Co" } });
+  try {
+    click(q('[data-m="add"][data-slot="Lunch"]'));
+    click(q('[data-m="open-scan"]'));
+    input($("m-code"), "012345678905");
+    click(q('[data-m="code-lookup"]'));
+    await sleep(30);
+    assert.strictEqual($("sheetT").textContent, "Scan label");
+    assert.ok(/Green chile salsa: Open Food Facts has no nutrition numbers for this\. Take a photo of the label\./.test($("m-label-status").textContent), $("m-label-status").textContent);
+  } finally { M.food.lookup = real; M.ui.close(); M.ui.render(); }
 });
 
 t("focus-safe render: typing across fields defers, renders once when focus leaves; a button tap flushes", async () => {

@@ -223,3 +223,5 @@
   .stats.m-live .stat .v,.stats.m-stats4 .stat .v{font-size:20px}
   .stats.m-live .stat .v small,.stats.m-stats4 .stat .v small{font-size:11px;margin-left:1px}
 }
+
+.m-warnline{color:var(--warn);margin:6px 0 0}

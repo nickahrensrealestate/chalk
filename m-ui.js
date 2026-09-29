@@ -727,6 +727,7 @@ window.M = window.M || {};
     if (add.q) add.seg = "foods";
     UI.sheet(add.onPick ? "Add item" : "Log food", addHTML());
     paintResults();
+    try { if (M.food && M.food.scanner && typeof M.food.scanner.preload === "function") M.food.scanner.preload(); } catch (e) {}
     if (!add.q) { const inp = $("m-search"); if (inp && opt.focus !== false) { try { inp.focus(); } catch (e) {} } }
     else scheduleOFF(add.q);
   };
@@ -795,20 +796,32 @@ window.M = window.M || {};
       '<button class="btn ghost block" data-m="close" style="margin-top:8px">Cancel</button>');
     const el = $("m-scan"), st = $("m-scan-status");
     let busy = false;
-    M.food.scanner.start(el, code => { if (busy) return; busy = true; if (st) st.textContent = "Found " + code + " — looking up…"; lookupCode(code, ctx).then(ok => { busy = false; if (!ok && st) st.textContent = "Point the camera at the barcode"; }); })
+    M.food.scanner.start(el, code => { if (busy) return; busy = true; if (st) st.textContent = "Found " + code + " — looking up…"; lookupCode(code, ctx).then(() => { busy = false; }); })
       .then(() => { if (st) st.textContent = "Point the camera at the barcode"; },
         e => { if (st) st.textContent = errMsg(e); if (el) el.classList.add("off"); });
   };
   function lookupCode(code, ctx) {
     const st = $("m-scan-status");
-    return M.food.barcode(code).then(f => {
-      if (!f) { notFound(code, ctx); return true; }
+    const find = M.food.lookup ? M.food.lookup(code) : M.food.barcode(code).then(f => (f ? { status: "found", food: f } : { status: "not_found" }));
+    return find.then(r => {
+      if (r.status === "no_nutrition") { noNutrition(code, r.product || {}, ctx); return true; }
+      if (r.status !== "found" || !r.food) { notFound(code, ctx); return true; }
+      const f = r.food;
       let saved = f;
       if (!M.MS.foods[f.id]) { const have = M.foods.findByBarcode(f.barcode || code); saved = have || M.foods.add(f); }
       UI.close();
       UI.openDetail(Object.assign({ kind: "food", foodId: saved.id, sub: M.fmtServing(saved.serving), ref: saved }, saved), { slot: ctx.slot, date: ctx.date, onPick: ctx.onPick, mode: ctx.onPick ? "pick" : "log" });
       return true;
     }, e => { if (st) st.textContent = errMsg(e); else UI.toast(errMsg(e)); return false; });
+  }
+  /* Open Food Facts knows the product but has no numbers: go straight to the label photo, name kept. */
+  function noNutrition(code, product, ctx) {
+    UI.close();
+    add = add || Object.assign({ q: "", seg: "recent", req: 0, off: [], list: [] }, ctx);
+    A["open-label"]({ dataset: { code: String(code) } });
+    if (ff) { ff.food.name = product.name || ""; ff.food.brand = product.brand || ""; }
+    const st = $("m-label-status");
+    if (st) st.textContent = (product.name ? product.name + ": " : "") + "Open Food Facts has no nutrition numbers for this. Take a photo of the label.";
   }
   function notFound(code, ctx) {
     UI.close();
@@ -930,12 +943,12 @@ window.M = window.M || {};
     M.food.label.fromImage(file, { onProgress: m => { if (st) st.textContent = m; } }).then(res => {
       if (ff !== ctx) return;
       const f = res.food || {};
-      ff.food = { name: f.name || "", brand: f.brand || "", barcode: ff.food.barcode || "", serving: f.serving || { qty: 1, unit: "serving", g: null }, per: f.per || {}, source: "label" };
+      ff.food = { name: f.name || ff.food.name || "", brand: f.brand || ff.food.brand || "", barcode: ff.food.barcode || "", serving: f.serving || { qty: 1, unit: "serving", g: null }, per: f.per || {}, source: "label" };
       ff.method = res.method;
       const badge = res.method === "ai" ? '<span class="tag ok">Read by Claude</span>' : '<span class="tag warn">Read by OCR — check the numbers</span>';
       if (st) st.textContent = "";
       const box = $("m-label-form");
-      if (box) box.innerHTML = formHTML({ badge: '<div class="m-badge">' + badge + "</div>", buttons: '<button class="btn primary block" data-m="ff-save-add">Save &amp; add to ' + esc(ff.slot) + '</button><button class="btn block" data-m="ff-save">Save to my foods</button>' });
+      if (box) box.innerHTML = formHTML({ badge: '<div class="m-badge">' + badge + "</div>" + (res.warning ? '<p class="hint m-warnline">' + esc(res.warning) + '</p>' : ""), buttons: '<button class="btn primary block" data-m="ff-save-add">Save &amp; add to ' + esc(ff.slot) + '</button><button class="btn block" data-m="ff-save">Save to my foods</button>' });
     }, e => { if (ff !== ctx) return; if (st) st.innerHTML = esc(errMsg(e)); const box = $("m-label-form"); if (box) box.innerHTML = '<button class="btn block" data-m="open-form" data-code="' + esc(ff.food.barcode) + '" style="margin-top:8px">Type it in</button>'; });
   };
 
@@ -1024,10 +1037,10 @@ window.M = window.M || {};
   }
   function sugCard(s, i) {
     const per = s.per || M.foodMath.blank();
-    return '<div class="card m-sug"><div class="hd"><div><h3>' + esc(s.name) + '</h3><div class="m-sugtags">' + (s.source === "ai" ? '<span class="tag acc">Claude</span>' : "") + (s.store ? '<span class="tag">' + esc(s.store) + '</span>' : "") + (num(s.prepMin) > 0 ? '<span class="tag">' + r0(num(s.prepMin)) + ' min</span>' : '<span class="tag">no cook</span>') + '</div></div><div class="m-kcal num">' + kcal(per.cal) + '</div></div>' +
+    return '<div class="card m-sug"><div class="hd"><div><h3>' + esc(s.name) + '</h3><div class="m-sugtags">' + (s.source === "mine" ? '<span class="tag ok">Your meal</span>' : s.source === "often" ? '<span class="tag ok">You eat this often</span>' : (s.source === "claude" || s.source === "ai") ? '<span class="tag acc">Claude</span>' : "") + (s.store ? '<span class="tag">' + esc(s.store) + '</span>' : "") + (num(s.prepMin) > 0 ? '<span class="tag">' + r0(num(s.prepMin)) + ' min</span>' : '<span class="tag">no cook</span>') + '</div></div><div class="m-kcal num">' + kcal(per.cal) + '</div></div>' +
       '<div class="bd"><p class="m-sugdesc">' + esc(s.desc || "") + '</p><div class="mut small num">' + macroLine(per) + ' per serving</div>' +
       '<ul class="m-sugitems">' + (s.items || []).map(it => '<li><span class="n">' + esc(it.name) + '</span><span class="a num">' + itemAmount(it) + '</span></li>').join("") + '</ul>' +
-      '<div class="m-btnrow"><button class="btn primary" data-m="sug-log" data-i="' + i + '">Log it</button><button class="btn" data-m="sug-save" data-i="' + i + '">Save as meal</button></div></div></div>';
+      '<div class="m-btnrow"><button class="btn primary" data-m="sug-log" data-i="' + i + '">Log it</button>' + (s.source === "mine" ? "" : '<button class="btn" data-m="sug-save" data-i="' + i + '">Save as meal</button>') + '</div></div></div>';
   }
   function sugHTML() {
     const r = sug.remaining;
@@ -1045,7 +1058,7 @@ window.M = window.M || {};
       if (!sug || sug.req !== my) return;
       sug.list = Array.isArray(list) ? list : [];
       sug.list.forEach(s => { if (s.id && !String(s.id).startsWith("ai_")) sug.shown.push(s.id); });
-      box.innerHTML = sug.list.length ? sug.list.map(sugCard).join("") : '<div class="empty">No ideas fit what\'s left. Try another meal slot.</div>';
+      box.innerHTML = (sug.list.length ? sug.list.map(sugCard).join("") : '<div class="empty">No ideas fit what\'s left. Try another meal slot.</div>') + (list && list.aiError ? '<p class="hint">Claude: ' + esc(list.aiError) + '</p>' : "");
       if (more) more.disabled = false;
     }, e => { if (!sug || sug.req !== my) return; box.innerHTML = '<div class="empty">' + esc(errMsg(e)) + '</div>'; if (more) more.disabled = false; });
   }
@@ -1057,9 +1070,10 @@ window.M = window.M || {};
   };
   A["sug-slot"] = el => { if (!sug) return; sug.slot = el.dataset.v; sug.shown = []; qsa('[data-m="sug-slot"]').forEach(b => b.classList.toggle("on", b.dataset.v === sug.slot)); const h = qs(".m-sughd b"); if (h) h.textContent = sug.slot; runSuggest(); };
   A["sug-more"] = () => runSuggest();
-  const sugItems = s => (s.items || []).map(it => Object.assign({ name: it.name, brand: it.brand || "", servings: servingsOf(it), servingLabel: it.servingLabel || "1 serving", g: (M.cook ? M.cook.unitGrams(it) : 0) || it.g || null, per: it.per, foodId: it.foodId && M.foods.get(it.foodId) ? it.foodId : undefined, source: s.source === "ai" ? "ai" : undefined }, cookOf(it)));
+  const sugItems = s => (s.items || []).map(it => Object.assign({ name: it.name, brand: it.brand || "", servings: servingsOf(it), servingLabel: it.servingLabel || "1 serving", g: (M.cook ? M.cook.unitGrams(it) : 0) || it.g || null, per: it.per, foodId: it.foodId && M.foods.get(it.foodId) ? it.foodId : undefined, source: (s.source === "claude" || s.source === "ai") ? "ai" : undefined }, cookOf(it)));
   A["sug-log"] = el => {
     const s = sug.list[num(el.dataset.i)]; if (!s) return;
+    if (s.source === "mine" && s.mealId && M.meals.get(s.mealId)) { const slot1 = sug.slot; M.log.addMeal(sug.date, s.mealId, 1, slot1); UI.close(); UI.toast("Logged " + s.name + " to " + slot1); UI.render(); return; }
     const slot = sug.slot, list = sugItems(s); list.forEach(it => M.log.add(sug.date, Object.assign(it, { slot })));
     UI.close(); UI.toast("Logged " + list.length + " item" + (list.length === 1 ? "" : "s") + " to " + slot); UI.render();
   };
