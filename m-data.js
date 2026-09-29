@@ -81,13 +81,25 @@ window.M = window.M || {}; M.DB = M.DB || {};
   /* a package label (values per `g` grams) → per 100 g, to 0.01 */
   const lab = (v, g) => v.map(x => Math.round(x * 100 / g * 100) / 100);
   const OZ = ["1 oz", 28, "100 g", 100];
-  const MEAT = ["1 oz", 28, "3 oz", 85, "6 oz", 170, "8 oz", 227, "100 g", 100];
+  /* MF-06: an ounce is 28.3495 g, the same ounce the serving editor uses, so a
+     "4 oz" row and 4 oz typed in the editor show the same calories. Old entries
+     keep the grams they were saved with ("4 oz (113 g)"). */
+  const ozG = n => Math.round(n * 28.349523125 * 100) / 100;
+  const MEAT = ["1 oz", ozG(1), "3 oz", ozG(3), "6 oz", ozG(6), "8 oz", ozG(8), "100 g", 100];
+  const OZ4 = ozG(4);
+  /* Plain cooked meats (no raw/cooked units) keep whole grams: their rows read
+     "4 oz (113 g)", and the editor offers only these sizes. */
+  const MEAT_W = ["1 oz", 28, "3 oz", 85, "6 oz", 170, "8 oz", 227, "100 g", 100];
   /* Chicken breast cook yield from USDA (raw 22.5 g protein per 100 g, roasted
      31 g): 1 g raw → 0.7258 g cooked, so 175 g raw ≈ 127 g cooked. */
   const CHICKEN_Y = r4(22.5 / 31);
   /* Kirkland Signature organic chicken breast label: 4 oz (112 g) = 110 kcal,
      24 g protein, 0 g carbs, 1 g fat, 75 mg sodium. */
   const KIRKLAND_RAW = lab([110, 24, 0, 1, 0, 0, 75], 112);
+  /* Shrimp by the piece (raw, then cooked = raw × y; see the shrimp food). */
+  const SHRIMP_Y = r4(20.1 / 24);
+  const SHRIMP = ["1 large shrimp, 31–40 per lb", 10, "1 jumbo shrimp, 21–25 per lb", 18, "1 medium shrimp, 41–50 per lb", 8];
+  const SHRIMP_COOKED = [SHRIMP[0], r1(10 * SHRIMP_Y), SHRIMP[2], 15, SHRIMP[4], r1(8 * SHRIMP_Y)];
 
   const G = [];
   /* ------------------------------------------------------------ PROTEINS */
@@ -95,49 +107,54 @@ window.M = window.M || {}; M.DB = M.DB || {};
     /* Nick: chicken breast is always Kirkland organic, about 175 g raw each, and
        the grams they type are raw grams. One food; old ids alias here. */
     CK("kirkland_organic_chicken", "Chicken breast, organic", "Kirkland", 1, "breast", 175, KIRKLAND_RAW, CHICKEN_Y, ["½ breast", 88, "1 oz", 28, "4 oz", 112, "6 oz", 170, "100 g", 100], "raw", [], { staple: true, alwaysRaw: true }),
-    CK("chicken_thigh", "Chicken thigh, boneless skinless", "", 4, "oz", 113, [121, 19.7, 0, 4.1, 0, 0, 95], [179, 24.8, 0, 8.2, 0, 0, 106], MEAT, "raw"),
+    CK("chicken_thigh", "Chicken thigh, boneless skinless", "", 4, "oz", OZ4, [121, 19.7, 0, 4.1, 0, 0, 95], [179, 24.8, 0, 8.2, 0, 0, 106], MEAT, "raw"),
     /* USDA: ground beef raw / crumbles, pan-browned; ground turkey raw / pan-broiled crumbles */
-    CK("ground_beef_80", "Ground beef 80/20", "", 4, "oz", 113, [254, 17.2, 0, 20, 0, 0, 66], [272, 27, 0, 17.4, 0, 0, 91], MEAT, "raw"),
-    CK("ground_beef_85", "Ground beef 85/15", "", 4, "oz", 113, [215, 18.6, 0, 15, 0, 0, 66], [256, 27.7, 0, 15.3, 0, 0, 89], MEAT, "raw"),
-    CK("ground_beef_90", "Ground beef 90/10", "", 4, "oz", 113, [176, 20, 0, 10, 0, 0, 66], [230, 28.5, 0, 12, 0, 0, 87], MEAT, "raw"),
-    CK("ground_beef_93", "Ground beef 93/7", "", 4, "oz", 113, [152, 20.9, 0, 7, 0, 0, 66], [209, 28.9, 0, 9.5, 0, 0, 86], MEAT, "raw"),
-    W("sirloin_cooked", "Sirloin steak, cooked (trimmed)", "", 6, "oz", 170, [206, 29.5, 0, 9, 0, 0, 60], MEAT),
-    W("ribeye_cooked", "Ribeye steak, cooked", "", 6, "oz", 170, [291, 24, 0, 21, 0, 0, 55], MEAT),
-    W("pork_chop_cooked", "Pork chop, boneless, cooked", "", 4, "oz", 113, [197, 27.8, 0, 8.9, 0, 0, 58], MEAT),
-    CK("pork_tenderloin", "Pork tenderloin", "", 4, "oz", 113, [109, 21, 0, 2.2, 0, 0, 53], [143, 26.2, 0, 3.5, 0, 0, 57], MEAT, "raw", [], ST),
+    CK("ground_beef_80", "Ground beef 80/20", "", 4, "oz", OZ4, [254, 17.2, 0, 20, 0, 0, 66], [272, 27, 0, 17.4, 0, 0, 91], MEAT, "raw"),
+    CK("ground_beef_85", "Ground beef 85/15", "", 4, "oz", OZ4, [215, 18.6, 0, 15, 0, 0, 66], [256, 27.7, 0, 15.3, 0, 0, 89], MEAT, "raw"),
+    CK("ground_beef_90", "Ground beef 90/10", "", 4, "oz", OZ4, [176, 20, 0, 10, 0, 0, 66], [230, 28.5, 0, 12, 0, 0, 87], MEAT, "raw", [], WD("lean")),
+    CK("ground_beef_93", "Ground beef 93/7", "", 4, "oz", OZ4, [152, 20.9, 0, 7, 0, 0, 66], [209, 28.9, 0, 9.5, 0, 0, 86], MEAT, "raw", [], WD("lean extra")),
+    W("sirloin_cooked", "Sirloin steak, cooked (trimmed)", "", 6, "oz", 170, [206, 29.5, 0, 9, 0, 0, 60], MEAT_W),
+    W("ribeye_cooked", "Ribeye steak, cooked", "", 6, "oz", 170, [291, 24, 0, 21, 0, 0, 55], MEAT_W),
+    W("pork_chop_cooked", "Pork chop, boneless, cooked", "", 4, "oz", 113, [197, 27.8, 0, 8.9, 0, 0, 58], MEAT_W),
+    CK("pork_tenderloin", "Pork tenderloin", "", 4, "oz", OZ4, [109, 21, 0, 2.2, 0, 0, 53], [143, 26.2, 0, 3.5, 0, 0, 57], MEAT, "raw", [], ST),
     W("bacon_cooked", "Bacon, cooked", "", 2, "slices", 16, [541, 37, 1.4, 42, 0, 0, 1900], ["1 slice", 8, "3 slices", 24, "1 oz", 28, "100 g", 100]),
     L("turkey_bacon", "Turkey bacon, cooked", "", 2, "slices", 30, [60, 5, 1, 4.5, 0, 0, 340], ["1 slice", 15, "100 g", 100]),
     L("pork_sausage_links", "Breakfast sausage links, pork, cooked", "", 3, "links", 64, [180, 9, 1, 15, 0, 0, 470], ["1 link", 21, "2 links", 43, "100 g", 100]),
     L("chicken_sausage", "Chicken sausage link, cooked", "", 1, "link", 85, [170, 13, 4, 11, 0, 3, 560], ["½ link", 43, "100 g", 100]),
     L("hot_dog", "Hot dog, beef (no bun)", "", 1, "frank", 45, [150, 5, 2, 13, 0, 1, 500], ["100 g", 100]),
-    W("turkey_breast_cooked", "Turkey breast, roasted, no skin", "", 4, "oz", 113, [145, 30, 0, 2.1, 0, 0, 99], MEAT),
-    CK("ground_turkey_93", "Ground turkey 93/7", "", 4, "oz", 113, [150, 18.7, 0, 8.3, 0, 0, 69], [213, 27.1, 0, 11.6, 0, 0, 90], MEAT, "raw"),
+    W("turkey_breast_cooked", "Turkey breast, roasted, no skin", "", 4, "oz", 113, [145, 30, 0, 2.1, 0, 0, 99], MEAT_W),
+    CK("ground_turkey_93", "Ground turkey 93/7", "", 4, "oz", OZ4, [150, 18.7, 0, 8.3, 0, 0, 69], [213, 27.1, 0, 11.6, 0, 0, 90], MEAT, "raw", [], WD("lean")),
     /* Hillshire Farm Ultra Thin oven roasted turkey breast label: 2 oz (56 g,
        about 6 slices) = 60 kcal, 10 g protein, 2 g carbs, 1.5 g fat, 490 mg sodium.
        Codes: 16 oz, 9 oz and 22 oz packs. */
     L("deli_turkey", "Turkey slices, oven roasted", "Hillshire Farm", 6, "slices", 56, [60, 10, 2, 1.5, 0, 0, 490], ["1 slice", 9.3, "3 slices", 28, "2 oz", 56, "100 g", 100], STB(["044500966466", "044500976502", "044500201994"], "sliced deli lunch meat lunchmeat sandwich meat thin")),
     L("deli_ham", "Deli ham, sliced", "", 2, "oz", 56, [60, 10, 2, 1.5, 0, 1, 520], ["1 slice", 28, "3 oz", 85, "100 g", 100]),
-    CK("salmon", "Salmon, Atlantic", "", 4, "oz", 113, [208, 20.4, 0, 13.4, 0, 0, 59], [206, 22.1, 0, 12.4, 0, 0, 61], MEAT, "raw"),
-    W("sockeye_salmon_cooked", "Salmon, wild sockeye, cooked", "", 6, "oz", 170, [156, 26.5, 0, 5.6, 0, 0, 78], MEAT),
-    W("tilapia_cooked", "Tilapia, cooked", "", 4, "oz", 113, [128, 26.2, 0, 2.7, 0, 0, 56], MEAT),
+    CK("salmon", "Salmon, Atlantic", "", 4, "oz", OZ4, [208, 20.4, 0, 13.4, 0, 0, 59], [206, 22.1, 0, 12.4, 0, 0, 61], MEAT, "raw"),
+    W("sockeye_salmon_cooked", "Salmon, wild sockeye, cooked", "", 6, "oz", 170, [156, 26.5, 0, 5.6, 0, 0, 78], MEAT_W),
+    W("tilapia_cooked", "Tilapia, cooked", "", 4, "oz", 113, [128, 26.2, 0, 2.7, 0, 0, 56], MEAT_W),
     /* USDA: cod, Atlantic, raw / cooked dry heat */
-    CK("cod", "Cod", "", 4, "oz", 113, [82, 17.8, 0, 0.7, 0, 0, 54], [105, 22.8, 0, 0.9, 0, 0, 78], MEAT, "raw", [], ST),
+    CK("cod", "Cod", "", 4, "oz", OZ4, [82, 17.8, 0, 0.7, 0, 0, 54], [105, 22.8, 0, 0.9, 0, 0, 78], MEAT, "raw", [], ST),
     W("tuna_canned_water", "Tuna, canned in water, drained", "", 1, "can (4 oz drained)", 113, [116, 25.5, 0, 0.8, 0, 0, 320], ["½ can", 56, "1 oz", 28, "100 g", 100]),
-    /* USDA: shrimp, raw / cooked; one large shrimp 15 g cooked, one medium 10 g
-       cooked (FNDDS), so about 18 g and 12 g raw */
-    CK("shrimp", "Shrimp", "", 4, "oz", 113, [85, 20.1, 0, 0.5, 0, 0, 119], [99, 24, 0.2, 0.3, 0, 0, 111], ["1 large shrimp", 18, "1 medium shrimp", 12, "1 oz", 28, "3 oz", 85, "6 oz", 170, "8 oz", 227, "100 g", 100], "raw", ["1 large shrimp", 15, "1 medium shrimp", 10, "3 oz", 85, "100 g", 100], ST),
+    /* USDA: shrimp, raw / cooked. By the piece, sized by count per pound (MF-04):
+       large (31–40 per lb) 10 g raw; jumbo (21–25 per lb) 18 g raw, 15 g cooked
+       (FNDDS "1 large/jumbo shrimp" = 15 g cooked); medium (41–50 per lb) 8 g raw.
+       Cooked = raw × y. Large is the first size, so "12 shrimp" means 12 large.
+       The count range sits after a comma, not in brackets, so these sizes don't
+       read as the old "1 large shrimp" (18 g): entries and recents saved with that
+       label keep their 18 g. */
+    CK("shrimp", "Shrimp", "", 4, "oz", OZ4, [85, 20.1, 0, 0.5, 0, 0, 119], [99, 24, 0.2, 0.3, 0, 0, 111], SHRIMP.concat(MEAT), "raw", SHRIMP_COOKED.concat(["3 oz", ozG(3), "100 g", 100]), ST),
     /* USDA: scallops, raw / steamed. By the piece: one large sea scallop is about
        30 g raw. The sea scallops sold near them come 10–20 per pound (King
        Soopers, about 30 g each) or 15–20 per pound (Costco, about 26 g each).
        USDA's own "2 large or 5 small = 30 g" (15 g each) is for mixed species,
        mostly bay-size, so it is too small for these. Cooked weight uses the same
        yield (30 g × y). "sea" and "bay" are search words. */
-    CK("scallops", "Scallops", "", 4, "oz", 113, [69, 12.1, 3.2, 0.5, 0, 0, 392], [111, 20.5, 5.4, 0.8, 0, 0, 667], ["1 large sea scallop", 30].concat(MEAT), "raw", ["1 large sea scallop", r1(30 * r4(12.1 / 20.5)), "3 oz", 85, "100 g", 100], STW("sea bay")),
+    CK("scallops", "Scallops", "", 4, "oz", OZ4, [69, 12.1, 3.2, 0.5, 0, 0, 392], [111, 20.5, 5.4, 0.8, 0, 0, 667], ["1 large sea scallop", 30].concat(MEAT), "raw", ["1 large sea scallop", r1(30 * r4(12.1 / 20.5)), "3 oz", ozG(3), "100 g", 100], STW("sea bay")),
     W("egg_large", "Eggs, whole", "", 1, "large egg", 50, [143, 12.6, 0.7, 9.5, 0, 0.4, 142], ["2 eggs", 100, "3 eggs", 150, "100 g", 100]),
     W("egg_hard_boiled", "Egg, hard-boiled", "", 1, "large egg", 50, [155, 12.6, 1.1, 10.6, 0, 1.1, 124], ["2 eggs", 100, "100 g", 100]),
     W("egg_white", "Egg white, large", "", 1, "large egg white", 33, [52, 10.9, 0.7, 0.2, 0, 0.7, 166], ["2 whites", 66, "3 whites", 99, "100 g", 100]),
     L("egg_whites_carton", "Egg whites, liquid carton", "", 3, "tbsp", 46, [25, 5, 0, 0, 0, 0, 75], ["½ cup", 122, "1 cup", 243, "100 g", 100]),
-    W("greek_yogurt_0", "Greek yogurt, plain nonfat", "", 1, "cup", 227, [59, 10.2, 3.6, 0.4, 0, 3.2, 36], ["½ cup", 113, "¾ cup", 170, "100 g", 100]),
+    W("greek_yogurt_0", "Greek yogurt, plain nonfat", "", 1, "cup", 227, [59, 10.2, 3.6, 0.4, 0, 3.2, 36], ["½ cup", 113, "¾ cup", 170, "100 g", 100], WD("0% fat free")),
     /* USDA: yogurt, Greek, plain, lowfat (2%) */
     W("greek_yogurt_2", "Greek yogurt, plain 2%", "", 1, "container (6 oz)", 170, [73, 9.9, 3.9, 1.9, 0, 3.6, 34], ["½ cup", 113, "¾ cup", 170, "1 cup", 227, "100 g", 100], ST),
     W("greek_yogurt_5", "Greek yogurt, plain 5% (whole milk)", "", 1, "container (6 oz)", 170, [97, 9, 4, 5, 0, 4, 35], ["½ cup", 113, "1 cup", 227, "100 g", 100]),
@@ -161,17 +178,19 @@ window.M = window.M || {}; M.DB = M.DB || {};
        its label (Kroger / King Soopers item 0001376402705) is 110 kcal, 6 g protein,
        22 g carbs, 1.5 g fat, 4 g fiber, 4 g sugar, 170 mg sodium (the older bag said
        5 g protein, 5 g fiber, 5 g sugar). */
-    L("dkb_21_grains", "Bread, 21 Whole Grains", "Dave's Killer Bread", 1, "slice", 45, [110, 6, 22, 1.5, 4, 4, 170], ["2 slices", 90, "100 g", 100], STB(["013764027053"])),
-    L("dkb_good_seed", "Bread, Good Seed", "Dave's Killer Bread", 1, "slice", 45, [120, 5, 23, 3, 3, 5, 160], ["2 slices", 90, "100 g", 100], STB(["013764027039"])),
+    L("dkb_21_grains", "Bread, 21 Whole Grains", "Dave's Killer Bread", 1, "slice", 45, [110, 6, 22, 1.5, 4, 4, 170], ["2 slices", 90, "100 g", 100], STB(["013764027053"], "toast")),
+    L("dkb_good_seed", "Bread, Good Seed", "Dave's Killer Bread", 1, "slice", 45, [120, 5, 23, 3, 3, 5, 160], ["2 slices", 90, "100 g", 100], STB(["013764027039"], "toast")),
     /* 21 Whole Grains thin-sliced (20.5 oz): King Soopers' label for this loaf, 1 slice
        (28 g) = 60 kcal, 3 g protein, 14 g carbs, 1 g fat, 3 g fiber, 3 g sugar, 105 mg
        sodium (Open Food Facts also says 105 mg; the 2023 label was 12 g carbs, 100 mg). */
-    L("dkb_thin", "Bread, 21 Whole Grains, thin", "Dave's Killer Bread", 1, "slice", 28, [60, 3, 14, 1, 3, 3, 105], ["2 slices", 56, "100 g", 100], STB(["013764027138"]))
+    L("dkb_thin", "Bread, 21 Whole Grains, thin", "Dave's Killer Bread", 1, "slice", 28, [60, 3, 14, 1, 3, 3, 105], ["2 slices", 56, "100 g", 100], STB(["013764027138"], "toast"))
   );
   /* --------------------------------------------------------------- CARBS */
   G.push(
     CK("white_rice", "White rice", "", 0.25, "cup", 46, [365, 7.1, 80, 0.7, 1.3, 0.1, 5], [130, 2.7, 28.2, 0.3, 0.4, 0.1, 1], ["½ cup", 92, "1 cup", 185, "100 g", 100], "dry", ["½ cup", 79, "¾ cup", 118, "1 cup", 158, "100 g", 100]),
-    W("brown_rice_cooked", "Brown rice, cooked", "", 1, "cup", 195, [123, 2.7, 25.6, 1, 1.6, 0.2, 4], ["½ cup", 98, "¾ cup", 146, "100 g", 100]),
+    /* USDA SR 169704 brown rice, long-grain, cooked: 1 cup = 202 g (MF-07; 195 g is
+       the medium-grain cup) */
+    W("brown_rice_cooked", "Brown rice, cooked", "", 1, "cup", 202, [123, 2.7, 25.6, 1, 1.6, 0.2, 4], ["½ cup", 101, "¾ cup", 152, "100 g", 100]),
     W("jasmine_rice_cooked", "Jasmine rice, cooked", "", 1, "cup", 158, [129, 2.7, 28.6, 0.2, 0.3, 0, 1], ["½ cup", 79, "100 g", 100]),
     /* USDA: quinoa, uncooked / cooked (1 cup dry = 170 g, 1 cup cooked = 185 g) */
     CK("quinoa", "Quinoa", "", 0.25, "cup", 42.5, [368, 14.1, 64.2, 6.1, 7, 0, 5], [120, 4.4, 21.3, 1.9, 2.8, 0.9, 7], ["½ cup", 85, "1 cup", 170, "100 g", 100], "dry", ["½ cup", 92.5, "¾ cup", 139, "1 cup", 185, "100 g", 100], ST),
@@ -186,7 +205,7 @@ window.M = window.M || {}; M.DB = M.DB || {};
     W("english_muffin", "English muffin", "", 1, "muffin", 57, [235, 8.8, 46, 1.8, 3.5, 3.4, 400], ["½ muffin", 29, "100 g", 100]),
     L("tortilla_flour", "Tortilla, flour, 8 in", "", 1, "tortilla", 45, [140, 4, 24, 3.5, 1, 1, 330], ["1 burrito size (10 in)", 70, "1 taco size (6 in)", 30, "100 g", 100]),
     L("tortilla_corn", "Tortilla, corn, 6 in", "", 1, "tortilla", 26, [60, 1, 12, 1, 1, 0, 10], ["2 tortillas", 52, "3 tortillas", 78, "100 g", 100]),
-    CK("pasta", "Pasta", "", 2, "oz", 56, [371, 13, 74.7, 1.5, 3.2, 2.7, 6], [158, 5.8, 31, 0.9, 1.8, 0.6, 1], ["1 oz", 28, "100 g", 100], "dry", ["½ cup", 70, "1 cup", 140, "2 cups", 280, "100 g", 100]),
+    CK("pasta", "Pasta", "", 2, "oz", ozG(2), [371, 13, 74.7, 1.5, 3.2, 2.7, 6], [158, 5.8, 31, 0.9, 1.8, 0.6, 1], ["1 oz", ozG(1), "100 g", 100], "dry", ["½ cup", 70, "1 cup", 140, "2 cups", 280, "100 g", 100], WD("spaghetti penne noodles macaroni")),
     W("couscous_cooked", "Couscous, cooked", "", 1, "cup", 157, [112, 3.8, 23.2, 0.2, 1.4, 0.1, 5], ["½ cup", 79, "100 g", 100]),
     L("rice_cake", "Rice cake, plain", "", 1, "cake", 9, [35, 0.7, 7.3, 0.3, 0.4, 0, 2], ["2 cakes", 18, "3 cakes", 27, "100 g", 100]),
     L("hamburger_bun", "Hamburger bun", "", 1, "bun", 43, [120, 4, 22, 2, 1, 3, 210], ["100 g", 100]),
@@ -471,10 +490,10 @@ window.M = window.M || {}; M.DB = M.DB || {};
       "Lunch", "Either", 5, [it("deli_turkey", 2, "12 slices (112 g)"), it("cucumber"), gr("bell_pepper", 92, "1 cup, sliced (92 g)"), it("carrots_baby")], ["high-protein", "no-cook", "quick"]),
     sug("shrimp_quinoa_bowl", "Shrimp quinoa bowl",
       "Shrimp cooked with bell pepper, over quinoa with cucumber and lime juice.",
-      "Lunch", "Either", 20, [ck("shrimp", "raw", 170, "6 oz raw"), ck("quinoa", "dry", 42.5, "¼ cup dry"), gr("bell_pepper", 60, "½ pepper (60 g)"), gr("cucumber", 52, "½ cup, sliced (52 g)"), gr("lime_juice", 15, "1 tbsp (15 g)"), oil(1)], ["high-protein"]),
+      "Lunch", "Either", 20, [ck("shrimp", "raw", ozG(6), "6 oz raw"), ck("quinoa", "dry", 42.5, "¼ cup dry"), gr("bell_pepper", 60, "½ pepper (60 g)"), gr("cucumber", 52, "½ cup, sliced (52 g)"), gr("lime_juice", 15, "1 tbsp (15 g)"), oil(1)], ["high-protein"]),
     sug("pork_corn_carrots", "Pork tenderloin with grilled corn and carrots",
       "Pork tenderloin from the King Soopers 2-pack with an ear of grilled corn and carrots.",
-      "Lunch", "King Soopers", 30, [ck("pork_tenderloin", "raw", 142, "5 oz raw"), it("corn"), it("carrots_cooked", 2, "1 cup, sliced (156 g)"), oil(1)], ["high-protein", "meal-prep"])
+      "Lunch", "King Soopers", 30, [ck("pork_tenderloin", "raw", ozG(5), "5 oz raw"), it("corn"), it("carrots_cooked", 2, "1 cup, sliced (156 g)"), oil(1)], ["high-protein", "meal-prep"])
   );
   /* --------------------------------------------------------------- DINNER */
   S.push(
@@ -483,16 +502,16 @@ window.M = window.M || {}; M.DB = M.DB || {};
       "Dinner", "Costco", 30, [chicken(1), gr("broccoli_raw", 137, "1 ½ cups, chopped (137 g)"), gr("carrots", 128, "1 cup, chopped (128 g)"), oil(1.5), ck("white_rice", "cooked", 79, "½ cup cooked")], ["high-protein", "sheet-pan"]),
     sug("pork_zucchini_sweet_onion", "Pork tenderloin with zucchini and sweet onion",
       "Roast one pork tenderloin from the King Soopers 2-pack with zucchini and sweet onion on one pan.",
-      "Dinner", "King Soopers", 35, [ck("pork_tenderloin", "raw", 170, "6 oz raw"), it("zucchini_raw"), it("sweet_onion"), oil(1.5)], ["high-protein", "sheet-pan", "low-carb"]),
+      "Dinner", "King Soopers", 35, [ck("pork_tenderloin", "raw", ozG(6), "6 oz raw"), it("zucchini_raw"), it("sweet_onion"), oil(1.5)], ["high-protein", "sheet-pan", "low-carb"]),
     sug("lemon_cod_asparagus", "Lemon cod with asparagus",
       "Cod baked with lemon juice and olive oil, with asparagus and quinoa.",
-      "Dinner", "Either", 25, [ck("cod", "raw", 170, "6 oz raw"), gr("asparagus", 128, "8 spears (128 g)"), gr("lemon_juice", 24, "½ lemon, juiced (24 g)"), oil(1.5), ck("quinoa", "dry", 42.5, "¼ cup dry")], ["high-protein", "sheet-pan"]),
+      "Dinner", "Either", 25, [ck("cod", "raw", ozG(6), "6 oz raw"), gr("asparagus", 128, "8 spears (128 g)"), gr("lemon_juice", 24, "½ lemon, juiced (24 g)"), oil(1.5), ck("quinoa", "dry", 42.5, "¼ cup dry")], ["high-protein", "sheet-pan"]),
     sug("scallops_corn_zucchini", "Scallops with grilled corn and zucchini",
       "Seared scallops with an ear of grilled corn and zucchini, finished with lemon.",
-      "Dinner", "Either", 20, [ck("scallops", "raw", 170, "6 oz raw"), it("corn"), it("zucchini_raw"), gr("lemon_juice", 15, "1 tbsp (15 g)"), oil(1)], ["high-protein", "quick"]),
+      "Dinner", "Either", 20, [ck("scallops", "raw", ozG(6), "6 oz raw"), it("corn"), it("zucchini_raw"), gr("lemon_juice", 15, "1 tbsp (15 g)"), oil(1)], ["high-protein", "quick"]),
     sug("shrimp_stir_fry", "Shrimp and veggie stir-fry",
       "Shrimp stir-fried with bell pepper, broccoli and white onion in soy sauce, over rice.",
-      "Dinner", "Either", 20, [ck("shrimp", "raw", 170, "6 oz raw"), it("bell_pepper"), gr("broccoli_raw", 91, "1 cup, chopped (91 g)"), gr("onion", 40, "¼ cup, chopped (40 g)"), it("soy_sauce", 1, "1 tbsp (16 g)"), oil(1.5), ck("white_rice", "cooked", 118.5, "¾ cup cooked")], ["high-protein", "one-pan"]),
+      "Dinner", "Either", 20, [ck("shrimp", "raw", ozG(6), "6 oz raw"), it("bell_pepper"), gr("broccoli_raw", 91, "1 cup, chopped (91 g)"), gr("onion", 40, "¼ cup, chopped (40 g)"), it("soy_sauce", 1, "1 tbsp (16 g)"), oil(1.5), ck("white_rice", "cooked", 118.5, "¾ cup cooked")], ["high-protein", "one-pan"]),
     sug("chicken_tomato_skillet", "Chicken, tomato and zucchini skillet",
       "One chicken breast cooked with Roma tomatoes, white onion and zucchini, served over rice.",
       "Dinner", "Costco", 25, [chicken(1), it("roma_tomato", 2, "2 Roma tomatoes (124 g)"), gr("onion", 55, "½ onion (55 g)"), gr("zucchini_raw", 150, "¾ zucchini (150 g)"), oil(1.5), ck("white_rice", "cooked", 79, "½ cup cooked")], ["high-protein", "one-pan"])

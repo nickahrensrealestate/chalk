@@ -168,7 +168,7 @@ window.M = window.M || {};
   /* ----------------------------------------------------------------- state */
   function freshSt(device) {
     return { v: 1, code: "", device: device || "d" + rand(12).toLowerCase(), cursor: "", lastSync: 0, lastError: "", note: "",
-      hashes: {}, gone: {}, bad: {}, fail: {}, base: {}, train: {}, trainAt: 0, meta: null,
+      hashes: {}, gone: {}, bad: {}, fail: {}, base: {}, sent: {}, tomb: {}, train: {}, trainAt: 0, meta: null,
       verified: false, joining: false, pp: "", metaAt: 0, retryAt: 0, tp: null, tsw: null, prev: null, old: [], home: "" };
   }
   function loadSt() {
@@ -178,10 +178,11 @@ window.M = window.M || {};
     if (!isObj(s) || s.v !== 1) return o;
     o.code = typeof s.code === "string" && CODE_RE.test(s.code) ? s.code : "";
     o.cursor = typeof s.cursor === "string" && isFinite(tsVal(s.cursor)) ? s.cursor : "";   /* a bad saved cursor is dropped */
+    o.cursorAt = num(s.cursorAt); o.ov = typeof s.ov === "string" ? s.ov : "";
     o.lastSync = num(s.lastSync);
     o.lastError = typeof s.lastError === "string" ? s.lastError : "";
     o.note = typeof s.note === "string" ? s.note : "";
-    ["hashes", "gone", "fail", "base", "train"].forEach(k => { if (isObj(s[k])) o[k] = s[k]; });
+    ["hashes", "gone", "fail", "base", "sent", "tomb", "train"].forEach(k => { if (isObj(s[k])) o[k] = s[k]; });
     if (isObj(s.bad)) Object.keys(s.bad).forEach(k => { const b = s.bad[k]; o.bad[k] = isObj(b) ? b : { h: String(b), at: 0, s: 0, k: "refused" }; });
     o.trainAt = num(s.trainAt);
     o.meta = isObj(s.meta) ? s.meta : null;
@@ -241,6 +242,8 @@ window.M = window.M || {};
     if ((kind === "food" || kind === "meal") && isObj(rec) && ("uses" in rec || "lastUsed" in rec)) {
       const o = Object.assign({}, rec); delete o.uses; delete o.lastUsed; return o;
     }
+    /* a day an older build stored with a row's delete list: the list is never part of the day */
+    if (kind === "day" && isObj(rec) && "gone" in rec) { const o = Object.assign({}, rec); delete o.gone; return o; }
     return rec;
   }
   /* Diary days and weigh-ins are most of the data: each one's hash is kept with the record
@@ -276,6 +279,7 @@ window.M = window.M || {};
   function localTime(kind, rec) {
     if (kind === "body") return num(rec.at);
     if (kind === "profile") return Math.max(num(rec.updatedAt), num(rec.setupAt), num(rec.lastBody));
+    if (kind === "food" || kind === "meal") return Math.max(num(rec.u), num(rec.updatedAt));   /* the edit stamp (L2) */
     return num(rec.updatedAt);
   }
   /* A phone can't have edited something after the server got it: cap its clock at the server's. */
@@ -388,6 +392,7 @@ window.M = window.M || {};
     return true;
   }
   function fixDay(o, id) {
+    delete o.gone;            /* the entries a phone deleted travel with the row, not in the day */
     const p = pidOfId(id), date = id.slice(id.indexOf("|") + 1);
     if (o.id !== id) o.id = id;
     if (o.pid !== p) o.pid = p;
@@ -676,10 +681,11 @@ window.M = window.M || {};
   const notDeleted = r => String((r && r.error) || "Sync didn't work.").replace(/ We'll (?:keep trying|try again(?: soon| later)?)\.$/, "").replace(/, then tap Sync now\.$/, ".") + " Nothing was deleted. Try again in a minute.";
 
   /* ------------------------------------------------------------------ pull */
-  function forget(key) { delete st.hashes[key]; delete st.gone[key]; delete st.base[key]; delete st.bad[key]; delete st.fail[key]; rcache.delete(key); }
+  function forget(key) { delete st.hashes[key]; delete st.gone[key]; delete st.base[key]; delete st.sent[key]; delete st.tomb[key]; delete st.bad[key]; delete st.fail[key]; rcache.delete(key); }
   /* Both sides now hold `data` (hash rh). Foods and meals keep that copy for field merges. */
   function agree(key, kind, data, rh) {
     st.hashes[key] = rh;
+    delete st.sent[key];      /* the cloud copy is newer than our last push: it is the base now */
     if (kind === "food" || kind === "meal") st.base[key] = cpy(upData(kind, data));
     else if (kind === "day") { if (recentDay(idOf(key))) st.base[key] = dayBase(data); else delete st.base[key]; }
   }
@@ -690,17 +696,35 @@ window.M = window.M || {};
     }
     return rec;
   }
-  /* Field by field against the copy both phones last agreed on; a field both changed goes to the newer edit. */
-  function merge3(base, mine, theirs, theirsNewer) {
+  /* Edit stamps (u, ms; m-core sets them on every change; a record without one counts as 0).
+     A conflict both phones see settles the same way on both: the newer stamp wins, and on an
+     exact tie the larger canonical copy. Never this phone's own clock or the day's time. */
+  const stampOf = o => (isObj(o) ? Math.max(0, num(o.u)) : 0);
+  const recStamp = o => (isObj(o) ? Math.max(0, num(o.u), num(o.updatedAt)) : 0);
+  function theirsWin(sm, st_, m, t) {
+    if (sm !== st_) return st_ > sm;
+    const cm = canon(m), ct = canon(t);
+    return (ct === undefined ? "" : ct) > (cm === undefined ? "" : cm);
+  }
+  /* One value, three copies: b (both phones last agreed), s (what this phone last sent, or
+     undefined), m (mine), t (theirs). They hold exactly what we sent: our push is their base. */
+  function pick3(b, s, hasS, m, t, tw) {
+    if (m === t) return "m";
+    const base = hasS && t === s ? s : b;
+    if (t === base) return "m";
+    if (m === base) return "t";
+    if (hasS && m === s) return "t";        /* unchanged here since our push: theirs came after it */
+    return tw() ? "t" : "m";
+  }
+  /* Field by field against the copy both phones last agreed on (and what we last sent). */
+  function merge3(base, mine, theirs, sent, tw) {
     const out = {};
     const keys = new Set(Object.keys(base).concat(Object.keys(mine), Object.keys(theirs)));
     keys.forEach(k => {
       if (isBadKey(k)) return;
       const b = canon(base[k]), m = canon(mine[k]), t = canon(theirs[k]);
-      let v;
-      if (m === t || t === b) v = mine[k];
-      else if (m === b) v = theirs[k];
-      else v = theirsNewer ? theirs[k] : mine[k];
+      const w = pick3(b, sent ? canon(sent[k]) : undefined, !!sent, m, t, () => tw(mine[k], theirs[k]));
+      const v = w === "t" ? theirs[k] : mine[k];
       if (v !== undefined) out[k] = cpy(v);
     });
     return out;
@@ -714,23 +738,30 @@ window.M = window.M || {};
      (then nothing counts as deleted: both sides' entries are kept). Kept from either side:
      new entries. Dropped: an entry deleted on one side and untouched on the other. Changed on
      both sides (or deleted on one, edited on the other): the newer change wins. Nothing doubles. */
-  function mergeList(B, mine, theirs, theirsNewer, byTime) {
+  /* S: {e: {key: fingerprint}, f: {key: 1}} of what this phone last sent (f: first sent in
+     that push), or null. seen: their copy was built on that push (see seenPush). */
+  function mergeList(B, S, seen, mine, theirs, byTime, X, T) {
     const mL = (Array.isArray(mine) ? mine : []).filter(isObj), tL = (Array.isArray(theirs) ? theirs : []).filter(isObj);
     const tBy = new Map(), mBy = new Map();
     tL.forEach(x => { const k = lineKey(x); if (!tBy.has(k)) tBy.set(k, x); });
     mL.forEach(x => { const k = lineKey(x); if (!mBy.has(k)) mBy.set(k, x); });
+    const Se = S && isObj(S.e) ? S.e : null;
     const pick = (k, m, t) => {
-      const b = B && has(B, k) ? B[k] : undefined;
+      const sk = Se && has(Se, k) ? Se[k] : undefined;
+      /* the version both sides built on: what we sent, when they hold exactly that (or read that
+         push); else the copy both phones last agreed on */
+      const b = sk !== undefined && (seen || (t && eh(t) === sk)) ? sk : B && has(B, k) ? B[k] : undefined;
       if (m && t) {
         const hm = eh(m), ht = eh(t);
         if (hm === ht) return m;
-        if (b !== undefined) { if (hm === b) return t; if (ht === b) return m; }
-        return theirsNewer ? t : m;
+        if (b !== undefined) { if (ht === b) return m; if (hm === b) return t; }
+        if (sk !== undefined && hm === sk) return t;       /* unchanged here since our push */
+        return theirsWin(stampOf(m), stampOf(t), m, t) ? t : m;
       }
       const x = m || t;
+      if ((m && X && has(X, k)) || (t && T && has(T, k))) return null;   /* the other side deleted it */
       if (b === undefined) return x;                       /* new on one side */
-      if (eh(x) === b) return null;                        /* deleted on the other side, untouched here */
-      return (m ? !theirsNewer : theirsNewer) ? x : null;  /* deleted on one side, edited on the other */
+      return null;   /* deleted on one side (untouched on the other, or changed there too: the delete sticks on both phones) */
     };
     const out = [], used = new Set();
     let added = false;
@@ -746,6 +777,37 @@ window.M = window.M || {};
   const listBase = L => { const B = {}; (Array.isArray(L) ? L : []).forEach(x => { if (isObj(x)) { const k = lineKey(x); if (!has(B, k)) B[k] = eh(x); } }); return B; };
   /* A diary day's merge base: its entries' fingerprints, water and note (not the whole day). */
   const dayBase = d => ({ d: 1, e: listBase(d && d.entries), w: num(d && d.water), n: typeof (d && d.note) === "string" ? d.note : "" });
+  /* Deleted entries: a day row carries {key: fingerprint} of the entries its phone deleted (or
+     took a delete for), so a phone that sent one of them sees it was deleted, not missed. */
+  const TOMB_MAX = 60;
+  function readGone(d) {
+    if (!isObj(d) || !isObj(d.gone)) return null;
+    const out = {};
+    let n = 0;
+    for (const k of Object.keys(d.gone)) {
+      if (n >= TOMB_MAX * 2) break;
+      const v = d.gone[k];
+      if (typeof k === "string" && k.length <= 80 && /^[i#]/.test(k) && typeof v === "string" && v.length <= 40 && !isBadKey(k)) { out[k] = v; n++; }
+    }
+    return n ? out : null;
+  }
+  function capTomb(T) {
+    const ks = Object.keys(T);
+    if (ks.length > TOMB_MAX) ks.slice(0, ks.length - TOMB_MAX).forEach(k => { delete T[k]; });
+    return T;
+  }
+  /* What goes up with a day: every entry this phone knew (agreed, sent, or deleted before) that
+     it no longer has. */
+  function tombsFor(key, rec) {
+    if (st.hashes[key] === undefined) return {};   /* a day this phone doesn't track: nothing it knew */
+    const have = new Set((Array.isArray(rec && rec.entries) ? rec.entries : []).filter(isObj).map(lineKey));
+    const out = {};
+    const add = E => { if (isObj(E)) Object.keys(E).forEach(k => { if (!have.has(k) && typeof E[k] === "string") out[k] = E[k]; }); };
+    add(st.tomb[key]);
+    const b = st.base[key]; if (isObj(b) && b.d === 1) add(b.e);
+    const sn = st.sent[key]; if (isObj(sn)) add(sn.e);
+    return capTomb(out);
+  }
   let cutC = { at: 0, v: "" };
   function cutoffDate() {
     const t = now();
@@ -762,22 +824,38 @@ window.M = window.M || {};
     const cut = cutoffDate();
     /* a {d: 0} mark (sent, not agreed yet) stays until that day comes back from the cloud */
     Object.keys(st.base).forEach(k => { if (kindOf(k) === "day" && dateOfId(idOf(k)) < cut && !(isObj(st.base[k]) && st.base[k].d === 0)) delete st.base[k]; });
+    Object.keys(st.tomb).forEach(k => { if (dateOfId(idOf(k)) < cut) delete st.tomb[k]; });
+  }
+  /* Their copy was built on our last push: it holds an entry version that went up for the
+     first time in that push (a day row goes up whole, so they read all of it). */
+  function seenPush(S, theirs) {
+    if (!S || !isObj(S.e) || !isObj(S.f)) return false;
+    return (Array.isArray(theirs) ? theirs : []).some(x => { if (!isObj(x)) return false; const k = lineKey(x); return S.f[k] === 1 && has(S.e, k) && eh(x) === S.e[k]; });
+  }
+  /* What this phone sent of a day: entry fingerprints, water, note, and which entries went up
+     for the first time (not in the agreed copy or in the push before). */
+  function sentDay(d, B, prev) {
+    const sb = dayBase(d), f = {};
+    /* with no agreed copy we can't tell what the other phone already had: nothing counts as new */
+    if (B) Object.keys(sb.e).forEach(k => { if (B[k] !== sb.e[k] && !(prev && isObj(prev.e) && prev.e[k] === sb.e[k])) f[k] = 1; });
+    return { e: sb.e, w: sb.w, n: sb.n, f };
   }
   /* Two copies of one diary day become one: entries by id, water and note on their own. */
-  function mergeDay(b, mine, theirs, theirsNewer) {
+  function mergeDay(b, S, mine, theirs, X, T) {
     const B = isObj(b) && isObj(b.e) ? b.e : null;
-    const entries = mergeList(B, mine.entries, theirs.entries, theirsNewer, true);
-    const field = (k, bv, blank) => {
-      const m = mine[k], t = theirs[k];
-      if (canon(m) === canon(t)) return m;
-      if (B) { if (canon(m) === canon(bv)) return t; if (canon(t) === canon(bv)) return m; }
-      else { if (blank(m)) return t; if (blank(t)) return m; }   /* a day just made on one side */
-      return theirsNewer ? t : m;
+    const seen = seenPush(S, theirs.entries);
+    const entries = mergeList(B, S, seen, mine.entries, theirs.entries, true, X, T);
+    const field = (k, bv, sv, blank) => {
+      const m = mine[k], t = theirs[k], cm = canon(m), ct = canon(t);
+      if (cm === ct) return m;
+      if (!B && !(S && (seen || ct === canon(sv)))) { if (blank(m)) return t; if (blank(t)) return m; }   /* a day just made on one side */
+      const w = pick3(B ? canon(bv) : null, S ? canon(sv) : undefined, !!S, cm, ct, () => theirsWin(0, 0, m, t));
+      return w === "t" ? t : m;
     };
-    const out = Object.assign({}, theirsNewer ? theirs : mine, { id: mine.id, pid: mine.pid, date: mine.date });
+    const out = Object.assign({}, mine, { id: mine.id, pid: mine.pid, date: mine.date });
     out.entries = cpy(entries);
-    out.water = field("water", B ? b.w : 0, v => !num(v));
-    out.note = field("note", B ? b.n : "", v => !v);
+    out.water = field("water", B ? b.w : 0, S ? S.w : 0, v => !num(v));
+    out.note = field("note", B ? b.n : "", S ? S.n : "", v => !v);
     const body = d => { const o = Object.assign({}, d); delete o.updatedAt; return canon(o); };
     const ob = body(out);
     if (ob === body(theirs)) return theirs;
@@ -789,17 +867,24 @@ window.M = window.M || {};
      the batch's cooked weight and unit on their own; then per and the batch's raw weight are
      worked out again from the merged items (never merged as numbers). */
   const FOOD_NUMS = ["serving", "per", "per100g", "alts", "cook"];
-  function mergeRec(kind, base, mine, theirs, theirsNewer) {
-    const out = merge3(base, mine, theirs, theirsNewer);
+  /* sm, stt: the two copies' edit stamps in server time (a phone with a fast clock can't win
+     with an edit it made earlier): ours from our clock, theirs as their row says (both phones
+     see the same two numbers for the same two copies) */
+  function mergeRec(kind, base, sent, mine, theirs, sm, stt) {
+    sent = isObj(sent) ? sent : null;
+    const tw = (m, t) => theirsWin(sm, stt, m, t);
+    const out = merge3(base, mine, theirs, sent, tw);
+    /* the stamps: the newer one */
+    ["u", "updatedAt"].forEach(k => { if (mine[k] !== undefined || theirs[k] !== undefined) out[k] = Math.max(num(mine[k]), num(theirs[k])); });
     if (kind === "food") {
       const g = o => canon(FOOD_NUMS.map(k => (o[k] === undefined ? null : o[k])));
-      const b = g(base), m = g(mine), t = g(theirs);
-      const src = m === t || t === b ? mine : m === b ? theirs : theirsNewer ? theirs : mine;
+      const w = pick3(g(base), sent ? g(sent) : undefined, !!sent, g(mine), g(theirs), () => tw(FOOD_NUMS.map(k => mine[k]), FOOD_NUMS.map(k => theirs[k])));
+      const src = w === "t" ? theirs : mine;
       FOOD_NUMS.forEach(k => { if (src[k] === undefined) delete out[k]; else out[k] = cpy(src[k]); });
     } else if (kind === "meal") {
-      out.items = cpy(mergeList(listBase(base.items), mine.items, theirs.items, theirsNewer, false));
-      const bp = o => (isObj(o.batch) ? { cookedG: o.batch.cookedG, unit: o.batch.unit } : {});
-      const bf = merge3(bp(base), bp(mine), bp(theirs), theirsNewer);
+      out.items = cpy(mergeList(listBase(base.items), sent ? { e: listBase(sent.items) } : null, false, mine.items, theirs.items, false));
+      const bp = o => (isObj(o && o.batch) ? { cookedG: o.batch.cookedG, unit: o.batch.unit } : {});
+      const bf = merge3(bp(base), bp(mine), bp(theirs), sent ? bp(sent) : null, tw);
       if (num(bf.cookedG) > 0) {
         const batch = Object.assign({}, isObj(out.batch) ? out.batch : {}, { cookedG: bf.cookedG });
         if (bf.unit !== undefined) batch.unit = bf.unit; else delete batch.unit;
@@ -808,6 +893,11 @@ window.M = window.M || {};
       } else delete out.batch;
       try { if (M.meals && typeof M.meals.computePer === "function") out.per = M.meals.computePer(out); } catch (e) {}
     }
+    /* the same as one side (stamps aside): exactly that side's copy, so nothing echoes back */
+    const body = o => { const x = Object.assign({}, o); delete x.u; delete x.updatedAt; return canon(x); };
+    const ob = body(out);
+    if (ob === body(theirs)) return cpy(theirs);
+    if (ob === body(mine)) return cpy(mine);
     return out;
   }
   /* This phone's own person (its first one): their diary never leaves this phone. */
@@ -873,7 +963,8 @@ window.M = window.M || {};
     const local = has(coll, id) && isObj(coll[id]) ? coll[id] : undefined;
     const synced = st.hashes[key];
     /* the other person's diary and weigh-ins stay in the cloud */
-    if ((kind === "day" || kind === "body") && local === undefined && synced === undefined && pidOfId(id) !== curPid() && !keepAll) return;
+    /* (the person picker is open: the phone's own person counts) */
+    if ((kind === "day" || kind === "body") && local === undefined && synced === undefined && pidOfId(id) !== (curPid() || homePid()) && !keepAll) return;
     if (r.deleted === true || r.deleted === "true") {
       if (local === undefined) { forget(key); return; }
       /* a delete wins over a copy nobody touched here since the last sync, and (first join,
@@ -885,6 +976,8 @@ window.M = window.M || {};
     }
     const data = clean(kind, id, r.data);
     if (!data) return;                              /* can't be repaired: ours stays */
+    const X = kind === "day" && local !== undefined && synced !== undefined ? readGone(r.data) : null;
+    if (X) st.tomb[key] = capTomb(Object.assign({}, isObj(st.tomb[key]) ? st.tomb[key] : {}, X));   /* passed on in our own pushes of this day */
     const up = upData(kind, data), rh = H(up), remoteAt = remoteTime(r);
     const take = rec => { coll[id] = rec; agree(key, kind, data, rh); rcache.delete(key); delete st.gone[key]; markDirty(kind, id); ch.applied++; };
     if (local !== undefined) {
@@ -901,8 +994,11 @@ window.M = window.M || {};
            base, so the other phone's deletes stick. Not after our own push without a base
            ({d: 0}): the other phone may never have seen what we sent. */
         if (!b && !has(st.base, key) && synced !== undefined && lh === synced) b = dayBase(local);
-        const tn = synced !== undefined && lh === synced ? true : remoteAt > srvTime(localTime(kind, local));
-        const m = mergeDay(b, local, data, tn);
+        /* What we last sent. Unchanged here since then (a phone from before this was kept):
+           our copy is what we sent. */
+        let S = synced !== undefined && isObj(st.sent[key]) && isObj(st.sent[key].e) ? st.sent[key] : null;
+        if (!S && synced !== undefined && lh === synced) { const lb = dayBase(local); S = { e: lb.e, w: lb.w, n: lb.n, f: {} }; }
+        const m = mergeDay(b, S, local, data, X, synced !== undefined && isObj(st.tomb[key]) ? st.tomb[key] : null);
         if (m === data) { take(data); return; }
         if (m !== local) { coll[id] = m; markDirty(kind, id); ch.applied++; }
         agree(key, kind, data, rh); rcache.delete(key);
@@ -924,16 +1020,23 @@ window.M = window.M || {};
            written after our push (it replaced it), so on a field both changed, it wins. */
         const b = st.base[key];
         if ((kind === "food" || kind === "meal") && isObj(b) && H(b) !== lh) {
-          const m = mergeRec(kind, b, upData(kind, local), up, true);
+          const sent = isObj(st.sent[key]) ? st.sent[key] : upData(kind, local);   /* unchanged since our push: ours is what we sent */
+          const m = mergeRec(kind, b, sent, upData(kind, local), up, srvTime(recStamp(local)), remoteAt);
           coll[id] = keepLocal(kind, m, local); agree(key, kind, data, rh); rcache.delete(key); markDirty(kind, id); ch.applied++;
           return;
         }
         take(keepLocal(kind, up === data ? data : up, local)); return;
       }
       /* both sides changed since they last agreed */
-      if ((kind === "food" || kind === "meal") && isObj(st.base[key])) {
-        const m = mergeRec(kind, st.base[key], upData(kind, local), up, remoteAt > srvTime(localTime(kind, local)));
-        coll[id] = keepLocal(kind, m, local); agree(key, kind, data, rh); rcache.delete(key); markDirty(kind, id); ch.applied++;
+      if (kind === "food" || kind === "meal") {
+        if (isObj(st.base[key])) {
+          const m = mergeRec(kind, st.base[key], synced !== undefined ? st.sent[key] : null, upData(kind, local), up, srvTime(recStamp(local)), remoteAt);
+          coll[id] = keepLocal(kind, m, local); agree(key, kind, data, rh); rcache.delete(key); markDirty(kind, id); ch.applied++;
+          return;
+        }
+        /* no copy both phones agreed on: the newer edit stamp, the same on both phones */
+        const ul = upData(kind, local);
+        if (theirsWin(srvTime(recStamp(ul)), remoteAt, ul, up)) take(keepLocal(kind, up === data ? data : up, local));
         return;
       }
       if (remoteAt > srvTime(localTime(kind, local))) take(keepLocal(kind, up === data ? data : up, local));
@@ -1047,15 +1150,22 @@ window.M = window.M || {};
       /* Local data first, then the sync state that describes it — never the other way round,
          so a phone killed mid-pull never thinks it holds data it didn't save. */
       if ((ch.applied > before || unsaved) && !commitLocal()) throw { code: "storage" };
-      if (moveCursor && cur && okTs(cur) && (!st.cursor || later(cur, st.cursor))) st.cursor = cur;
+      if (moveCursor && cur && okTs(cur) && (!st.cursor || later(cur, st.cursor))) { st.cursor = cur; st.cursorAt = now(); }
       saveSt();
       return true;
     };
   }
+  /* The last 10 s before the cursor are read again until a pull made a minute after the
+     cursor moved has read them (a late row has committed by then); after that, an idle sync
+     reads nothing again (not a whole big upload, every time). */
+  const SETTLE_MS = 60000;
   async function pull(gen) {
     const ch = { applied: 0 };
-    try { await pages(gen, "", st.cursor ? back(st.cursor, OVERLAP_MS) : EPOCH, applier(gen, ch, true)); }
+    const c0 = st.cursor, t0 = now();
+    const settled = !!c0 && st.ov === c0;
+    try { await pages(gen, "", c0 ? (settled ? c0 : back(c0, OVERLAP_MS)) : EPOCH, applier(gen, ch, true)); }
     finally { if (ch.applied && gen === epoch) safeRerender(); }
+    if (gen === epoch && c0 && st.cursor === c0 && !settled && Math.abs(t0 - num(st.cursorAt)) >= SETTLE_MS) st.ov = c0;
     return ch.applied;
   }
   /* This phone switched person: bring that person's diary and weigh-ins down. */
@@ -1098,7 +1208,7 @@ window.M = window.M || {};
       });
     });
     if (!drop.length) return 0;
-    drop.forEach(x => { delete st.hashes[x.key]; delete st.base[x.key]; });
+    drop.forEach(x => { delete st.hashes[x.key]; delete st.base[x.key]; delete st.sent[x.key]; delete st.tomb[x.key]; });
     if (!lsSet(ST_KEY, JSON.stringify(st))) { drop.forEach(x => { st.hashes[x.key] = x.h; }); return 0; }
     drop.forEach(x => { delete MS[COLL[x.kind]][x.id]; rcache.delete(x.key); markDirty(x.kind, x.id); });
     commitLocal();
@@ -1223,12 +1333,25 @@ window.M = window.M || {};
     opts = opts || {};
     const snap = scan(opts), items = [];
     snap.changed.forEach(it => {
-      const x = makeItem(it.kind, it.id, upData(it.kind, it.rec), false, localTime(it.kind, it.rec), it.key, it.h, () => {
+      let data = upData(it.kind, it.rec), tomb = null;
+      if (it.kind === "day") { tomb = tombsFor(it.key, it.rec); if (Object.keys(tomb).length) data = Object.assign({}, data, { gone: tomb }); else tomb = null; }
+      const x = makeItem(it.kind, it.id, data, false, localTime(it.kind, it.rec), it.key, it.h, () => {
         st.hashes[it.key] = it.h; delete st.gone[it.key];
-        /* the merge base stays the copy both phones last agreed on until ours comes back in a pull */
-        if ((it.kind === "food" || it.kind === "meal") && !isObj(st.base[it.key])) { try { st.base[it.key] = JSON.parse(x.s).data; } catch (e) {} }
-        /* a day sent with no base: mark it, so what we sent never counts as agreed */
-        else if (it.kind === "day" && !isObj(st.base[it.key])) st.base[it.key] = { d: 0 };
+        /* The merge base stays the copy both phones last agreed on until ours comes back in a
+           pull; what we sent is kept beside it, so the other phone's copy built on our push
+           counts from there (a delete or edit made here right after it sticks). */
+        let sent = null;
+        try { sent = JSON.parse(x.s).data; } catch (e) { sent = null; }
+        if (it.kind === "food" || it.kind === "meal") {
+          if (!isObj(st.base[it.key]) && isObj(sent)) st.base[it.key] = sent;
+          if (isObj(sent)) st.sent[it.key] = sent; else delete st.sent[it.key];
+        } else if (it.kind === "day") {
+          /* a day sent with no base: mark it, so what we sent never counts as agreed */
+          if (!isObj(st.base[it.key])) st.base[it.key] = { d: 0 };
+          const bb = st.base[it.key].d === 1 && isObj(st.base[it.key].e) ? st.base[it.key].e : null;
+          if (isObj(sent)) st.sent[it.key] = sentDay(sent, bb, st.sent[it.key]); else delete st.sent[it.key];
+          if (tomb) st.tomb[it.key] = tomb; else delete st.tomb[it.key];
+        }
       });
       items.push(x);
     });
@@ -1425,7 +1548,7 @@ window.M = window.M || {};
     const r = rows.find(x => isObj(x) && x.household === st.code);
     if (r && r.deleted === true) { closed(); return "gone"; }
     if (!r) {
-      st.hashes = {}; st.base = {}; st.gone = {}; st.fail = {}; st.bad = {}; st.train = {}; st.cursor = "";
+      st.hashes = {}; st.base = {}; st.sent = {}; st.tomb = {}; st.gone = {}; st.fail = {}; st.bad = {}; st.train = {}; st.cursor = "";
       rcache.clear();
       if (!isObj(st.meta)) st.meta = { v: 1, createdAt: now(), by: st.device };
       st.pp = curPid() || "";
@@ -1939,4 +2062,17 @@ window.M = window.M || {};
     /* internals for tests */
     _: { canon, hash: H, tsVal, normCode, clean, merge3, mergeDay, dayBase, mergeRec, state: () => st, scan: () => scan({}), cycle: o => cycle(o), CODE_RE }
   };
+  /* A phone from before merge bases were kept: each recent diary day still exactly as it was at
+     the last sync becomes that day's base now, before anything is changed here, so a delete
+     made before the first sync with this build sticks. */
+  try {
+    const days = isObj(M.MS) && isObj(M.MS.days) ? M.MS.days : null;
+    let n = 0;
+    if (days && st.code) Object.keys(days).forEach(id => {
+      const key = "day|" + id, rec = days[id];
+      if (!isObj(rec) || !validId("day", id) || st.hashes[key] === undefined || has(st.base, key) || !recentDay(id)) return;
+      if (hashRec(key, rec) === st.hashes[key]) { st.base[key] = dayBase(rec); n++; }
+    });
+    if (n) saveSt(true);
+  } catch (e) {}
 })(window.M);

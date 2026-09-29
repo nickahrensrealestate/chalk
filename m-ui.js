@@ -55,6 +55,12 @@ window.M = window.M || {};
       if (UI.date === seenToday) UI.date = t;
       if (add && add.date === seenToday) add.date = t;
       if (det && det.mode !== "edit" && det.date === seenToday) det.date = t;
+      /* U3-01: Quick add, Describe / Photo, New food, a saved meal and Meal ideas follow the clock too
+         (an entry being edited keeps its own day) */
+      try {
+        if (quick && !quick.editId && quick.date === seenToday) quick.date = t;
+        [items, ff, mealSheet, sug].forEach(o => { if (o && o.date === seenToday) o.date = t; });
+      } catch (e) {}
     }
     seenToday = t;
     if (!UI.date) UI.date = t;
@@ -80,9 +86,9 @@ window.M = window.M || {};
   /* Meat, fish, rice, pasta: raw first, cooked in parentheses ("6 oz raw (4.4 oz cooked)"). "" for other foods. */
   const cookText = e => { try { return M.cook ? M.cook.entryLabel(e, units()) : ""; } catch (x) { return ""; } };
   /* Units counted in whole pieces: the stepper moves by 1 and amounts fold ("3 eggs"). */
-  const COUNT_U = /^(eggs?|whites?|slices?|tortillas?|pieces?|pcs?|bars?|scoops?|medium|large|small|jumbo|cans?|bottles?|containers?|links?|patt(?:y|ies)|sticks?|packets?|pouch(?:es)?|cookies?|crackers?|fillets?|wraps?|buns?|bagels?|muffins?|each|items?)$/i;
+  const COUNT_U = /^(eggs?|whites?|slices?|tortillas?|pieces?|pcs?|bars?|scoops?|medium|large|small|jumbo|cans?|bottles?|containers?|links?|patt(?:y|ies)|sticks?|packets?|pouch(?:es)?|cookies?|crackers?|fillets?|wraps?|buns?|bagels?|muffins?|each|items?|carrots?|breasts?|strips?|shrimp)$/i;
   const MEASURE_U = /^(cups?|tbsp|tsp|oz|fl oz|g|ml|lb|kg|l)$/i;
-  const PLURAL = { egg: "eggs", white: "whites", slice: "slices", tortilla: "tortillas", piece: "pieces", bar: "bars", scoop: "scoops", can: "cans", bottle: "bottles", container: "containers", link: "links", patty: "patties", stick: "sticks", packet: "packets", pouch: "pouches", cookie: "cookies", cracker: "crackers", fillet: "fillets", wrap: "wraps", bun: "buns", bagel: "bagels", muffin: "muffins", item: "items", serving: "servings", cup: "cups" };
+  const PLURAL = { egg: "eggs", white: "whites", slice: "slices", tortilla: "tortillas", piece: "pieces", bar: "bars", scoop: "scoops", can: "cans", bottle: "bottles", container: "containers", link: "links", patty: "patties", stick: "sticks", packet: "packets", pouch: "pouches", cookie: "cookies", cracker: "crackers", fillet: "fillets", wrap: "wraps", bun: "buns", bagel: "bagels", muffin: "muffins", item: "items", serving: "servings", cup: "cups", carrot: "carrots", breast: "breasts", strip: "strips" };
   const unitOfLabel = l => String(M.parseServing(l).unit || "").trim();
   /* "large egg", "slice", "2 whites": any word that counts pieces */
   const isCountUnit = u => lc(u).split(/[^a-z]+/).filter(Boolean).some(w => COUNT_U.test(w));
@@ -113,6 +119,8 @@ window.M = window.M || {};
     /* drinks read in ml: "2 cups (480 ml)" */
     const um = u.replace(/\s*\(\s*[\d.]+\s*ml\s*\)\s*$/i, "");
     if (mlM && num(mlM[1]) > 0 && Math.abs(s - 1) > 1e-9 && (isCountUnit(um) || MEASURE_U.test(um)) && p.qty > 0) { const tq = s * p.qty; return { text: fracQty(tq, um) + " " + unitNoun(um, tq) + " (" + r0(s * num(mlM[1])) + " ml)", grams: null }; }
+    /* MF-09 / KJ-07: grams inside the bracket ("1 container (6 oz, 170 g)") are read, never added twice */
+    if (Math.abs(s - 1) < 1e-9 && /,\s*[\d.]+\s*g\s*\)\s*$/i.test(l)) return { text: l, grams: null };
     if (Math.abs(s - 1) < 1e-9) return known && num(p.g) > 0 ? { text: l.replace(/\s*\(\s*[\d.]+\s*g\s*\)\s*$/i, ""), grams: r0(num(p.g)) } : { text: l, grams: !hasG && !hasAmt && gl > 0 ? r0(gl) : null };
     if (!known) {
       /* "1 cup, chopped (156 g)" × 1.5 → "1.5 cups, chopped" (234 g), not "1.5 × 1 cup, chopped (156 g)" */
@@ -120,8 +128,8 @@ window.M = window.M || {};
       if (cm && p.qty > 0 && (isCountUnit(bu) || MEASURE_U.test(bu))) { const t2 = s * p.qty; return { text: fracQty(t2, bu) + " " + unitNoun(bu, t2) + ", " + cm[2].trim(), grams: gl > 0 ? r0(s * gl) : null }; }
       return { text: fmtQty(s) + " × " + l, grams: null };
     }
-    const tot = s * p.qty;
-    return { text: fracQty(tot, u) + " " + unitNoun(u, tot), grams: gl > 0 ? r0(s * gl) : null };
+    const tot = s * p.qty, uc = u.replace(/\s*\([^()]*\)\s*$/, "").trim() || u;   /* "container (6 oz)" × 2 → "2 containers" */
+    return { text: fracQty(tot, uc) + " " + unitNoun(uc, tot), grams: gl > 0 ? r0(s * gl) : null };
   }
   /* Plain text amount: "2 eggs", "3 large (150 g)", "1.5 cups (360 g)", "150 g", "1 cup (240 g)". Not escaped. */
   function amountText(servings, label, gEach) { const a = amountParts(servings, label, gEach); return a.text + (a.grams != null ? " (" + a.grams + " g)" : ""); }
@@ -333,11 +341,14 @@ window.M = window.M || {};
       const t = e.target;
       if (!t || !t.closest) return;
       if (t.closest('[data-a="sheet-close"]') || t.id === "sheetBg") {
-        const back = !!(add && add.onPick && UI.draft);   /* picking an item for the meal builder: return to it */
-        /* F2b DY-12: × on Scan barcode goes back to Log food with the same search, meal and day */
-        const again = !back && add && !add.onPick && $("m-scan") && t.closest('[data-a="sheet-close"]') ? { slot: add.slot, date: add.date, q: add.q || "", seg: add.q ? undefined : add.seg } : null;
+        /* PL-01: a New food started from Describe's "Couldn't find" goes back to Describe with its list */
+        const toDesc = ff && isObj(ff.toDesc) ? ff.toDesc : null;
+        const back = !toDesc && !!(((add && add.onPick) || (items && items.onPick)) && UI.draft);   /* picking an item for the meal builder: return to it */
+        /* F2b DY-12 / U3-07: × or a backdrop tap on Scan barcode goes back to Log food with the same search, meal and day */
+        const again = !toDesc && !back && add && !add.onPick && $("m-scan") ? { slot: add.slot, date: add.date, q: add.q || "", seg: add.q ? undefined : add.seg } : null;
         UI.cleanup();
-        if (back) setTimeout(() => { if (UI.draft && !UI.sheetOpen()) UI.openBuilder(); }, 260);
+        if (toDesc) setTimeout(() => { if (!UI.sheetOpen()) descReopen(toDesc); }, 260);
+        else if (back) setTimeout(() => { if (UI.draft && !UI.sheetOpen()) UI.openBuilder(); }, 260);
         else if (again) setTimeout(() => { if (!UI.sheetOpen()) UI.openAdd(again); }, 260);
         return;
       }
@@ -358,6 +369,14 @@ window.M = window.M || {};
       if (name === "code-in") { e.preventDefault(); A["code-lookup"](el, e); }
       else if (name === "search" || name === "foods-q") { try { el.blur(); } catch (x) {} }
     });
+    /* U3-04: Escape does what × does (back to the meal builder, Log food or Describe; a draft is never lost).
+       Capture phase, so it runs before Chalk's own Escape close. */
+    document.addEventListener("keydown", e => {
+      if (e.key !== "Escape" || !UI.sheetOpen()) return;
+      const x = qs('#sheet .sh [data-a="sheet-close"]') || qs('#sheet [data-a="sheet-close"]'); if (!x) return;
+      e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      x.click();
+    }, true);
     /* Back from the background (iPhone keeps the app in memory overnight): follow the clock. */
     /* K7: also once a minute while Chalk is on screen. A new day redraws whichever view is up
        (Macros, or Train → Today's calories row); a check-in that just came due shows its card. */
@@ -382,7 +401,7 @@ window.M = window.M || {};
       try { if (M.mode() === "macros" && UI.tab === "diary" && catchingUp() !== !!UI._catchShown) UI.rerender(); } catch (e) {}
     });
     /* Log food: while the search box is in use, the tools step aside so results sit above the keyboard */
-    document.addEventListener("focusin", e => { if (e.target && e.target.id === "m-search") searchMode(true); });
+    document.addEventListener("focusin", e => { if (e.target && e.target.id === "m-search") searchMode(); });
     document.addEventListener("focusout", e => { if (e.target && e.target.id === "m-search") setTimeout(() => searchMode(), 0); });
   };
   /* Sheet titles name the day when it isn't today ("Log food · Yesterday"). */
@@ -392,10 +411,13 @@ window.M = window.M || {};
     const t = $("sheetT"); if (!t || !UI.sheetOpen()) return;
     if (det && $("m-det-box")) t.textContent = detTitle();
     else if (add && $("m-search")) t.textContent = addTitle();
+    else if (quick && !quick.editId && qs(".m-quick")) t.textContent = "Quick add" + dayTag(quick.date);   /* U3-01 */
+    const mg = $("m-meal-go"); if (mg && mealSheet) mg.textContent = "Add to " + mealSheet.slot + dayTag(mealSheet.date);
   }
   function searchMode(force) {
     const box = qs(".m-add"), inp = $("m-search"); if (!box) return;
-    const on = force === true || !!(inp && (inp.value.trim() || document.activeElement === inp));
+    /* PL-04: the tools and Recent / Meals / Foods step aside only once there's text, so Tab still reaches them */
+    const on = force === true || !!(inp && inp.value.trim());
     box.classList.toggle("m-typing", on);
   }
 
@@ -460,7 +482,7 @@ window.M = window.M || {};
   A["day-next"] = () => { UI.date = M.addDays(date(), 1); UI.render(); };
   A["day-today"] = () => { UI.date = today(); UI.render(); };
   const waterMl = oz => Math.round(num(oz) * 29.5735 / 50) * 50;
-  const moreLabel = () => (UI.more ? "Hide fiber, sugar, water ▴" : "Fiber, sugar, water ▾");
+  const moreLabel = () => (UI.more ? 'Hide fiber, sugar, water <span aria-hidden="true">▴</span>' : 'Fiber, sugar, water <span aria-hidden="true">▾</span>');   /* PL-07 */
   A.more = el => {
     UI.more = !UI.more;
     const box = $("m-more"); if (box) box.hidden = !UI.more;
@@ -506,10 +528,13 @@ window.M = window.M || {};
   const NBSP = String.fromCharCode(160);
   const macroTight = per => macroLine(per).split(" · ").map(p => p.split(" ").join(NBSP)).join(NBSP + "·" + NBSP);   /* one unbreakable run: "F 3" never sits alone */
   /* K7: each row carries its day, so a tap after midnight still opens the right entry */
+  /* PL-05: what VoiceOver reads for a food row: "Eggs, whole. 3 large eggs. 216 cal. Protein 19 g, carbs 1 g, fat 14 g."
+     (name and amt come in already escaped) */
+  const rowAria = (name, amt, per) => ' aria-label="' + name + ". " + amt + ". " + kcal(per.cal) + " cal. Protein " + g0(per.p) + " g, carbs " + g0(per.c) + " g, fat " + g0(per.f) + ' g."';
   function entryRow(e, dt) {
     const tot = entryTotals(e);
     const sub = (e.brand ? esc(e.brand) + " · " : "") + amountLabel(e) + " · " + macroTight(tot);
-    return '<button class="ex-row m-row" data-m="entry" data-id="' + esc(e.id) + '" data-date="' + esc(dt || date()) + '"><div class="ex-main"><div class="n">' + esc(e.name) + '</div><div class="t">' + sub + '</div></div><div class="m-kcal num">' + kcal(tot.cal) + '</div></button>';
+    return '<button class="ex-row m-row" data-m="entry" data-id="' + esc(e.id) + '" data-date="' + esc(dt || date()) + '"' + rowAria(esc(e.name) + (e.brand ? ", " + esc(e.brand) : ""), amountLabel(e), tot) + '><div class="ex-main"><div class="n">' + esc(e.name) + '</div><div class="t">' + sub + '</div></div><div class="m-kcal num">' + kcal(tot.cal) + '</div></button>';
   }
   function slotCard(slot) {
     const dt = date(), list = M.log.slotEntries(dt, slot);
@@ -519,7 +544,7 @@ window.M = window.M || {};
       (list.length ? "" : '<button class="icon m-slot-plus" data-m="add" data-slot="' + slot + '" aria-label="Add to ' + slot + '">+</button>') +
       '<button class="icon" data-m="slot-menu" data-slot="' + slot + '" aria-label="' + slot + ' menu">⋯</button></div></div>' +
       (list.length ? '<div class="ex-list">' + list.map(e => entryRow(e, dt)).join("") + "</div>" +
-      '<div class="m-slot-add"><button class="btn ghost block" data-m="add" data-slot="' + slot + '">+ Add</button></div>' : "") + '</div>';
+      '<div class="m-slot-add"><button class="btn ghost block" data-m="add" data-slot="' + slot + '" aria-label="Add to ' + slot + '">+ Add</button></div>' : "") + '</div>';   /* PL-06 */
   }
   function dayCard() {
     const p = M.person(), tg = p.targets || {}, t = dayShown(date());
@@ -535,7 +560,7 @@ window.M = window.M || {};
       '<div class="m-dayrow">' + UI.ring(t.cal, tg.cal) + '<div class="m-daynums"><div class="m-dn"><span class="v num">' + kcal(t.cal) + '</span><span class="k">eaten</span></div><div class="m-dn"><span class="v num">' + kcal(tg.cal) + '</span><span class="k">target</span></div></div></div>' +
       UI.bars(t, tg) +
       '<div class="m-morebtn"><button class="btn ghost" data-m="more" aria-expanded="' + (UI.more ? "true" : "false") + '" aria-controls="m-more">' + moreLabel() + '</button></div>' +
-      '<div id="m-more" class="m-more"' + (UI.more ? "" : " hidden") + '><div class="chips"><span class="chip">Fiber ' + g0(t.fiber) + ' / ' + g0(tg.fiber) + ' g</span><span class="chip">Sugar ' + g0(t.sugar) + ' g</span><span class="chip">Sodium ' + kcal(t.sodium) + ' mg</span></div>' +
+      '<div id="m-more" class="m-more"' + (UI.more ? "" : " hidden") + '><div class="m-nutri num"><span>Fiber <b>' + g0(t.fiber) + ' / ' + g0(tg.fiber) + ' g</b></span><span>Sugar <b>' + g0(t.sugar) + ' g</b></span><span>Sodium <b>' + kcal(t.sodium) + ' mg</b></span></div>' +
       '<div class="m-water"><div><div class="l">Water</div><div class="s num">' + wTxt + ' · ' + glasses + ' glass' + (glasses === 1 ? "" : "es") + '</div></div><div class="m-water-b"><button class="btn" data-m="water" ' + wAttr(-1) + ' aria-label="Minus ' + wStep + '">− ' + wStep + '</button><button class="btn" data-m="water" ' + wAttr(1) + ' aria-label="Plus ' + wStep + '">+ ' + wStep + '</button></div></div></div></div>';
   }
   UI.views.diary = function () {
@@ -552,7 +577,7 @@ window.M = window.M || {};
     UI._catchShown = catchingUp();
     const catching = UI._catchShown ? '<div class="m-catch" role="status">Getting your diary…</div>' : "";
     return full + catching + banner + dayCard() + M.SLOTS.map(slotCard).join("") +
-      '<div class="m-foot">' + (streak > 0 ? '<span class="chip ok m-streak">🔥 ' + streak + '-day streak</span>' : '<span class="chip">Log a day to start a streak</span>') + '<button class="btn" data-m="suggest">Meal ideas</button></div>';
+      '<div class="m-foot">' + (streak > 0 ? '<span class="chip ok m-streak"><span aria-hidden="true">🔥 </span>' + streak + '-day streak</span>' : '<span class="chip">Log a day to start a streak</span>') + '<button class="btn" data-m="suggest">Meal ideas</button></div>';
   };
 
   /* ---------------------------------------------------------- unit options */
@@ -606,6 +631,20 @@ window.M = window.M || {};
     try { const rc = M.recents(pid(), 60).find(x => x.mealId === mealId && x.state === "cooked"); const i = rc ? M.cook.entryInfo(rc) : null; return i && i.grams > 0 ? i.grams : null; }
     catch (e) { return null; }
   }
+  /* NJ-01: { raw100, cooked100, cook } from an entry's own numbers, when they differ from the food's
+     now (an entry from before the food changed); null when the entry matches the food. */
+  function ownPer100(src, food, c) {
+    try {
+      const st = src.state === "raw" || src.state === "cooked" ? src.state : null, ug = st ? M.cook.unitGrams(src) : 0;
+      if (!(ug > 0) || !isObj(src.per) || !(num(src.per.cal) > 0)) return null;
+      const fp = M.cook.perFor(food, st, ug);
+      if (fp && Math.abs(num(fp.cal) - num(src.per.cal)) <= Math.max(1, num(fp.cal) * 0.01)) return null;
+      const y = isObj(src.cook) && num(src.cook.y) > 0 ? num(src.cook.y) : num(c.y); if (!(y > 0)) return null;
+      const cook = { y, word: (isObj(src.cook) && src.cook.word) || c.word || "raw" };
+      const p = {}, o = {}; NUT.forEach(k => { p[k] = num(src.per[k]) * 100 / ug; o[k] = st === "raw" ? p[k] / y : p[k] * y; });
+      return { raw100: st === "raw" ? p : o, cooked100: st === "cooked" ? p : o, cook };
+    } catch (e) { return null; }
+  }
   /* { opts, cook, batch, food } for cook foods, batch meals and their entries; null otherwise. */
   function cookSetup(src) {
     if (!M.cook || !isObj(src)) return null;
@@ -618,8 +657,10 @@ window.M = window.M || {};
     }
     const food = src.foodId ? M.foods.get(src.foodId) : (isObj(src.ref) && M.cook.of(src.ref) ? src.ref : null);
     if (food && M.cook.of(food)) {
-      const opts = M.cook.unitsFor(food, U), c = M.cook.of(food);
-      if (opts.length) return { opts, cook: { y: c.y, word: c.word }, food };
+      const c = M.cook.of(food), own = src.own ? ownPer100(src, food, c) : null;
+      /* NJ-01: an entry saved with older numbers keeps them in every unit (a unit change never re-prices it) */
+      const opts = own ? M.cook.unitsFor(food, U, own) : M.cook.unitsFor(food, U);
+      if (opts.length) return { opts, cook: own ? own.cook : { y: c.y, word: c.word }, food };
     }
     if (src.state !== "raw" && src.state !== "cooked") return null;
     /* the food is gone, or this is a portion of a batch meal: work from the entry itself */
@@ -649,7 +690,16 @@ window.M = window.M || {};
     const o = curOpt(), d = detPer();
     /* F2b: a batch portion is weighed cooked, so it reads cooked only ("4 oz cooked"), like the diary row */
     if (det.cookMode && det.batch && o.state === "cooked") return M.cook.fmtWeight(d.servings * o.g, o.vol ? (units() === "metric" ? "g" : "oz") : o.unit) + " cooked";
-    if (det.cookMode) return M.cook.label(d.servings * o.g, o.state, det.cook, o.vol ? units() : o.unit, { vol: o.vol ? { unit: o.unit, g: o.g } : null });
+    if (det.cookMode) {
+      /* decision 6: the Kirkland chicken reads in grams whatever the units; a piece unit leads with the count
+         ("2 breasts · 350 g raw (254 g cooked)") */
+      const aRaw = !det.batch && det.food && det.food.alwaysRaw === true, pc = !o.vol && !M.cook.UNIT_G[o.unit];
+      /* weighed cooked reads cooked first, like its Diary row (F1 NJ-05: "1 cup cooked (2 oz dry)"); the chicken stays raw first */
+      const w = M.cook.label(d.servings * o.g, o.state, det.cook, aRaw ? "g" : o.vol || pc ? units() : o.unit, { vol: o.vol && !aRaw ? { unit: o.unit, g: o.g } : null, cookedFirst: o.state === "cooked" && !aRaw });
+      if (!pc) return w;
+      const n = r4(d.servings);
+      return fracQty(n, o.unit) + " " + (n > 1 + 1e-9 && !/shrimp$/i.test(o.unit) ? plural(o.unit) : o.unit) + " · " + w;
+    }
     if (o.grams) return g0(det.grams) + " g";
     const a = amountParts(det.servings, o.label, o.g);
     return a.text + (a.grams != null ? " · " + a.grams + " g" : "");
@@ -711,7 +761,7 @@ window.M = window.M || {};
       '<div class="stats m-live" id="m-live"></div>' +
       (det.mode === "pick" ? "" : '<div style="margin-top:10px"><span class="lbl">Meal</span><select class="sel" data-m="det-slot" aria-label="Meal">' + M.SLOTS.map(x => '<option' + (x === det.slot ? " selected" : "") + '>' + x + '</option>').join("") + '</select></div>') +
       '<button class="btn primary block" id="m-det-go" data-m="det-go" style="margin-top:12px">' + (det.mode === "pick" ? "Add to meal" : det.mode === "edit" ? "Save" : "Add to " + det.slot) + '</button>' +
-      (det.mode === "edit" ? '<div class="m-btnrow"><button class="btn" data-m="det-move" aria-expanded="false" aria-controls="m-move">Move</button>' + (det.canSaveFood ? '<button class="btn" data-m="det-savefood">Save as food</button>' : "") + '<button class="btn danger" data-m="det-del">Delete</button></div><div id="m-move" hidden class="m-move">' + dayMoveHTML() + "</div>" : "") +
+      (det.mode === "edit" ? '<div class="m-btnrow"><button class="btn" data-m="det-move" aria-expanded="false" aria-controls="m-move">Move</button>' + (det.canSaveFood ? '<button class="btn" data-m="det-savefood">Save food</button>' : "") + '<button class="btn danger" data-m="det-del">Delete</button></div><div id="m-move" hidden class="m-move">' + dayMoveHTML() + "</div>" : "") +
       "</div>";
   }
   /* Set `det` for a source. opt: mode, slot, date, entryId, onPick, canSaveFood, fromMeal;
@@ -725,10 +775,12 @@ window.M = window.M || {};
       det = Object.assign(base, { cookMode: true, opts: ck.opts, cook: ck.cook || null, batch: ck.batch || null, unit: ck.opts[0].key, servings: 1, grams: 0 });
       const has = k => ck.opts.some(o => o.key === k);
       const fam = units() === "metric" ? "g" : "oz";
-      let key = opt.unitKey && has(opt.unitKey) ? opt.unitKey : null, amt = null;
+      let key = opt.unitKey && has(opt.unitKey) ? opt.unitKey : null, amt = null, piece = false;
       if (opt.info) {
         const u = opt.info.fam || (opt.info.vol && opt.info.vol.unit) || null;
         if (!key && u && has(u + "-" + opt.info.state)) key = u + "-" + opt.info.state;
+        /* decision 6: an entry or recent counted in pieces ("2 breasts") reopens in that piece */
+        if (!key && !u) { const pu = pieceWord(src.servingLabel), po = pu && ck.opts.find(x => !x.vol && !M.cook.UNIT_G[x.unit] && x.state === opt.info.state && sing(lc(x.unit)) === pu); if (po) { key = po.key; piece = true; } }
         amt = { g: opt.info.grams, state: opt.info.state, exact: true };
       } else if (ck.batch) {
         /* WK-05: a batch opens in the unit its cooked weight was typed in (a gram batch at 100 g), from Log food too */
@@ -743,8 +795,13 @@ window.M = window.M || {};
       if (!key) key = has(fam + "-" + (amt ? amt.state : "raw")) ? fam + "-" + (amt ? amt.state : "raw") : ck.opts[0].key;
       /* An alwaysRaw food (Kirkland chicken breast) opens in raw grams, whatever the units:
          from search, from Recent, and into a saved meal or a batch ("175 g raw (127 g cooked)").
-         Editing a logged entry keeps the unit it was saved in. */
-      if (det.mode !== "edit" && !opt.unitKey && ck.food && ck.food.alwaysRaw === true && has("g-raw")) key = "g-raw";
+         Decision 6: editing an entry weighed in oz opens in grams too; one counted in breasts stays in breasts. */
+      const aRaw = !ck.batch && ck.food && ck.food.alwaysRaw === true;
+      if (aRaw && det.mode !== "edit" && !opt.unitKey && has("g-raw")) key = "g-raw";
+      if (aRaw && !piece && det.mode === "edit" && opt.info && has("g-" + opt.info.state)) key = "g-" + opt.info.state;
+      /* MF-03 (decision 7): the amount typed in the search wins ("2 chicken breasts", "1 cup cooked quinoa") */
+      const tc = !ck.batch && det.mode !== "edit" ? typedCook(opt.typed, ck.opts, ck.food) : null;
+      if (tc) { key = tc.key; amt = { g: tc.g, state: tc.state, exact: true }; }
       det.unit = key;
       const o = curOpt();
       if (amt) {
@@ -763,7 +820,71 @@ window.M = window.M || {};
     /* DY-05: a food sold "per 100 g" (common from Open Food Facts) opens in grams, so 32 from the scale means 32 g */
     const bu = lc(unitOfLabel(opts[0].label));
     if (det.mode !== "edit" && !opt.unit && !opt.unitLabel && (bu === "g" || bu === "ml") && num(opts[0].g) > 0 && opts.some(x => x.key === "g")) { det.unit = "g"; det.grams = num(opts[0].g); }
+    if (det.mode !== "edit" && !opt.unit && !opt.unitLabel) {
+      /* KJ-03: a serving of several pieces ("6 slices (56 g)") opens on one piece, 6 of them,
+         so typing 4 means 4 slices (not 4 × 6) */
+      const b = opts[0], bp = M.parseServing(b.label), bw = pieceWord(b.label);
+      if (b.key === det.unit && bw && num(bp.qty) > 1) {
+        const one = opts.find(x => !x.grams && x !== b && Math.abs(num(M.parseServing(x.label).qty) - 1) < 1e-9 && pieceWord(x.label) === bw);
+        if (one) { det.unit = one.key; det.servings = r4(num(bp.qty) * det.servings); }
+      }
+    }
+    /* MF-03 (decision 7): the amount typed in the search wins ("2 eggs", "4 slices turkey", "150 g …") */
+    const tp = det.mode !== "edit" ? typedPlain(opt.typed, opts, src && src.name) : null;
+    if (tp && tp.grams != null) { det.unit = "g"; det.grams = tp.grams; }
+    else if (tp) { det.unit = tp.unit; det.servings = tp.servings; }
     return markOrig(opt);
+  }
+  /* "slices" → "slice", "eggs" → "egg", "breasts" → "breast" (unit words, lower case) */
+  function sing(w) {
+    w = lc(String(w || "").trim());
+    for (const k in PLURAL) if (PLURAL[k] === w) return k;
+    return /(ss|us|is)$/.test(w) ? w : w.replace(/ies$/, "y").replace(/(ch|sh|x)es$/, "$1").replace(/s$/, "");
+  }
+  /* The piece a label counts, singular: "6 slices (56 g)" → "slice", "1 breast (175 g raw)" → "breast",
+     "10 baby carrots" → "baby carrot"; "" for weights and volumes. */
+  function pieceWord(label) {
+    const p = M.parseServing(String(label || "")), u = String(p.unit || "").replace(/\([^)]*\)/g, " ").replace(/,.*$/, "").replace(/\s+(raw|cooked|dry)$/i, "").trim();
+    if (!u || (M.cook && M.cook.unitWord(u)) || /^(g|grams?|ml|servings?)$/i.test(u) || /\d/.test(u)) return "";
+    const ws = lc(u).split(/\s+/); ws[ws.length - 1] = sing(ws[ws.length - 1]);
+    return ws.join(" ");
+  }
+  /* MF-03 via L1 (M.searchAmount → {qty, unit, state}): the matching cook unit, or null.
+     No state typed: rice / quinoa (a "dry" food) read cooked from ½ cup or 100 g up, else dry; others raw. */
+  function typedCook(t, opts, food) {
+    if (!isObj(t) || !(num(t.qty) > 0) || !t.unit || !M.cook) return null;
+    const q = num(t.qty), u = sing(t.unit), wu = u === "kg" ? "g" : M.cook.unitWord(u), c = food ? M.cook.of(food) : null, dry = !!(c && c.word === "dry");
+    const typedSt = t.state === "cooked" ? "cooked" : t.state === "raw" || t.state === "dry" ? "raw" : null;
+    const W = M.cook.UNIT_G;
+    if (wu && W[wu]) {
+      const g = q * (u === "kg" ? 1000 : W[wu]), st = typedSt || (dry && g >= 100 ? "cooked" : "raw"), o = opts.find(x => x.key === wu + "-" + st);
+      return o ? { key: o.key, g, state: st } : null;
+    }
+    if (wu) {
+      const st = typedSt || (dry && wu === "cup" && q >= 0.5 ? "cooked" : "raw");
+      const o = opts.find(x => x.vol && x.unit === wu && x.state === st) || (typedSt ? null : opts.find(x => x.vol && x.unit === wu));
+      return o ? { key: o.key, g: q * o.g, state: o.state } : null;
+    }
+    /* "2 breasts"; "12 shrimp" → the "large shrimp" piece when there is one */
+    const pcs = opts.filter(x => !x.vol && !W[x.unit] && (!typedSt || x.state === typedSt) && (sing(x.unit) === u || sing(lc(String(x.unit)).replace(/\([^)]*\)/g, " ").trim().split(/\s+/).pop()) === u));
+    const o = pcs.find(x => sing(x.unit) === u) || (/\bjumbo\b/i.test(String(t.q || "")) && pcs.find(x => /\bjumbo\b/i.test(x.unit))) || pcs.find(x => /\blarge\b/i.test(x.unit)) || pcs[0];
+    return o ? { key: o.key, g: q * o.g, state: o.state } : null;
+  }
+  /* Plain foods: { unit, servings } or { grams } for the typed amount, or null (no matching unit). */
+  function typedPlain(t, opts, name) {
+    if (!isObj(t) || !(num(t.qty) > 0) || !t.unit) return null;
+    const q = num(t.qty), u = sing(t.unit), gOpt = opts.some(x => x.grams);
+    if (u === "g" || u === "gram") return gOpt ? { grams: q } : null;
+    /* "2 bananas" on "1 medium (118 g)": the food's own piece ("½ avocado" on "½ medium" = 1 of it) */
+    const b = opts[0], bp = M.parseServing(b.label), nws = lc(String(name || "")).split(/[^a-z]+/).filter(Boolean).map(sing);
+    if (nws.indexOf(u) >= 0 && !b.grams && isCountUnit(unitOfLabel(b.label)) && !pieceWord(b.label).split(" ").some(w => w !== u && !/^(large|medium|small|jumbo|whole)$/.test(w)) && num(bp.qty) > 0 && num(bp.qty) <= 1) return { unit: b.key, servings: r4(q / num(bp.qty)) };
+    const hits = opts.filter(x => !x.grams).map(x => {
+      const p = M.parseServing(x.label), ws = lc(String(p.unit || "")).replace(/\([^)]*\)/g, " ").split(/[^a-z]+/).filter(Boolean).map(sing);
+      return { x, n: num(p.qty) > 0 ? num(p.qty) : 1, ok: ws.indexOf(u) >= 0 };
+    }).filter(h => h.ok);
+    if (hits.length) { const h = hits.find(y => Math.abs(y.n - 1) < 1e-9) || hits[0]; return { unit: h.x.key, servings: r4(q / h.n) }; }
+    const wg = { oz: 28.349523125, lb: 453.59237, kg: 1000 }[u];
+    return wg && gOpt ? { grams: r4(q * wg) } : null;
   }
   /* FX-01: remember how an edited entry opened (its own numbers, unit and amount) */
   function markOrig(opt) {
@@ -929,7 +1050,7 @@ window.M = window.M || {};
     if (e.source === "quick" && !e.foodId && !e.mealId) { openQuick(e, dt); return; }   /* DY-07 */
     const info = M.cook ? M.cook.entryInfo(e) : null;
     if (info) {
-      const csrc = { name: e.name, brand: e.brand, per: e.per, servingLabel: e.servingLabel, g: e.g, servings: e.servings, foodId: e.foodId, mealId: e.mealId, source: e.source, state: info.state, cook: info.cook, batchG: e.batchG };
+      const csrc = { name: e.name, brand: e.brand, per: e.per, servingLabel: e.servingLabel, g: e.g, servings: e.servings, foodId: e.foodId, mealId: e.mealId, source: e.source, state: info.state, cook: info.cook, batchG: e.batchG, own: true };
       if (cookSetup(csrc)) { UI.openDetail(csrc, { mode: "edit", entryId: e.id, slot: e.slot, date: dt, info, orig: e }); return; }
     }
     const food = e.foodId ? M.foods.get(e.foodId) : null;
@@ -984,11 +1105,23 @@ window.M = window.M || {};
     }
     const desc = r.kind === "meal" && r.desc ? '<div class="t m-clamp">' + esc(r.desc) + "</div>" : "";
     const lines = r.batch
-      ? '<div class="t">' + esc(r.sub) + '</div><div class="t">' + macroLine(per) + ' ' + esc(r.portion || "") + '</div>'
-      : '<div class="t">' + (r.brand ? esc(r.brand) + " · " : "") + amount + ' · ' + macroLine(per) + '</div>';
+      ? '<div class="t">' + esc(r.sub) + '</div><div class="t">' + macroTight(per) + ' ' + esc(r.portion || "") + '</div>'
+      : '<div class="t">' + (r.brand ? esc(r.brand) + " · " : "") + amount + ' · ' + macroTight(per) + '</div>';   /* LK-05: "P · C · F" never breaks inside */
     /* VI-20: a saved meal says so */
-    return '<button class="ex-row m-row" data-m="pick" data-i="' + i + '"><div class="ex-main"><div class="n">' + esc(r.name) + (r.kind === "meal" ? ' <span class="m-mealtag">Meal</span>' : "") + '</div>' + desc + lines + '</div><div class="m-kcal num">' + kcal(per.cal) + '</div></button>';
+    /* L3: the other person's saved meal carries their name */
+    const who = r.kind === "meal" ? mealOwner(r) : "";
+    const aName = esc(r.name) + (r.kind === "meal" ? ", saved meal" : "") + (who ? ", " + esc(personName(who)) + "'s" : "") + (r.brand ? ", " + esc(r.brand) : "");
+    return '<button class="ex-row m-row" data-m="pick" data-i="' + i + '"' + rowAria(aName, r.batch ? esc(r.sub || "") : amount, per) + '><div class="ex-main"><div class="n">' + esc(r.name) + (r.kind === "meal" ? ' <span class="m-mealtag">Meal</span>' : "") + (who ? ' <span class="tag m-who">' + esc(personName(who)) + '</span>' : "") + '</div>' + desc + lines + '</div><div class="m-kcal num">' + kcal(per.cal) + '</div></button>';
   }
+  /* L3: the other person's id for a meal (a result, or the meal itself); "" for mine or an old meal with no owner */
+  function mealOwner(r) {
+    if (!isObj(r)) return "";
+    const p = r.pid || (isObj(r.ref) && r.ref.pid) || "";
+    if (r.own === true) return "";
+    return p && p !== pid() ? p : "";
+  }
+  /* own meals first, the other person's after (stable) */
+  const ownFirst = list => list.map((r, i) => ({ r, i, o: r && (r.kind === "meal" || r.items) && mealOwner(r) ? 1 : 0 })).sort((a, b) => a.o - b.o || a.i - b.i).map(x => x.r);
   /* A saved meal as a result row; batch meals show their cooked weight and macros per 4 oz / 100 g. */
   function mealRes(m) {
     const r = { kind: "meal", id: m.id, name: m.name, brand: "", desc: m.desc, slot: m.slot, sub: "1 serving", per: m.per, serving: { qty: 1, unit: "serving", g: null }, alts: [], foodId: null, mealId: m.id, ref: m };
@@ -1009,7 +1142,7 @@ window.M = window.M || {};
       let html = "", n = 0;
       add.list = [];
       order.forEach(s => {
-        const g = meals.filter(m => m.slot === s && hit(m)); if (!g.length) return;
+        const g = ownFirst(meals.filter(m => m.slot === s && hit(m))); if (!g.length) return;
         html += '<div class="ex-div">' + slotName(s) + '</div>' + g.map(m => { const r = mealRes(m); add.list.push(r); n++; return resultRow(r, add.list.length - 1); }).join("");
       });
       /* F2a DY-01: nothing here → one tap searches everything with the same words */
@@ -1020,7 +1153,7 @@ window.M = window.M || {};
     const foodsOnly = add.seg === "foods";
     list = M.search(q, { pid: pid(), slot: add.slot, limit: 40, recents: !foodsOnly, meals: !foodsOnly });
     /* Recent (default): with no query → recents + meals; with a query → everything, ranked. Foods → foods + generic + OFF. */
-    if (add.seg === "recent" && !q) list = list.filter(r => r.kind === "recent" || r.kind === "meal");
+    if (add.seg === "recent" && !q) list = ownFirst(list.filter(r => r.kind === "recent" || r.kind === "meal"));   /* U3-03 */
     else if (add.seg === "foods") list = list.filter(r => r.kind !== "meal" && r.kind !== "recent");
     add.list = list.slice();
     let html = list.map(resultRow).join("");
@@ -1123,7 +1256,7 @@ window.M = window.M || {};
     if (!add) return;
     add.q = el.value;
     const x = qs('[data-m="search-clear"]'); if (x) x.hidden = !add.q;
-    searchMode(true);
+    searchMode();
     clearTimeout(add.tLocal);
     add.tLocal = setTimeout(() => { if (!add) return; paintResults(); }, 150);
     scheduleOFF(add.q);
@@ -1153,6 +1286,8 @@ window.M = window.M || {};
     if (!add) return;
     const r = add.list[num(el.dataset.i, -1)]; if (!r) return;
     const ctx = { slot: add.slot, date: add.date, mode: add.onPick ? "pick" : "log", onPick: add.onPick, back: true };
+    /* MF-03 (decision 7, L1): open at the amount typed in the search, when the food has that unit */
+    if (add.q && typeof M.searchAmount === "function") { try { const a = M.searchAmount(add.q); ctx.typed = isObj(a) ? Object.assign({ q: add.q }, a) : null; } catch (e) { ctx.typed = null; } }
     if (r.kind === "meal") { UI.openDetail(r.ref && isObj(r.ref.batch) ? batchSrc(r.ref) : r, ctx); return; }
     if (r.kind === "recent" && !(r.state === "raw" || r.state === "cooked") && recentPick(r, ctx)) return;
     /* a recent of a cook food or a batch portion reopens with the same unit and amount (live numbers) */
@@ -1198,7 +1333,7 @@ window.M = window.M || {};
     const cal0 = n("cal"), p = n("p"), c = n("c"), f = n("f"), msg = $("m-qa-msg");
     const bad = [cal0, p, c, f].some(v => v !== null && !(v >= 0));
     const cal = cal0 != null ? cal0 : (p || c || f ? r0(4 * (p || 0) + 4 * (c || 0) + 9 * (f || 0)) : null);
-    if (bad || !(cal > 0) || cal > 10000) { if (msg) msg.textContent = bad ? "Numbers can't be below zero." : cal > 10000 ? "That's more than 10,000 calories. Check the number." : "Enter the calories."; return; }
+    if (bad || !(cal > 0) || cal > 10000) { if (msg) msg.textContent = bad ? "Numbers can't be below 0." : cal > 10000 ? "That's more than 10,000 calories. Check the number." : "Type the calories."; return; }   /* PL-14 */
     const slot = quick.slot, dt = quick.date;
     const rec = { slot, name: val("name").slice(0, 120) || "Quick add", brand: "", servings: 1, servingLabel: "1 serving", g: null, per: { cal: r0(cal), p: r1(p || 0), c: r1(c || 0), f: r1(f || 0), fiber: 0, sugar: 0, sodium: 0 }, source: "quick" };
     if (quick.editId) { M.log.update(dt, quick.editId, rec); UI.close(); UI.toast("Saved"); UI.render(); return; }
@@ -1236,7 +1371,7 @@ window.M = window.M || {};
     const ctx = scanCtx(); keepCtx(ctx);
     UI.sheet("Scan barcode", '<div id="m-scan" class="m-scan"></div><div class="m-status mut small" id="m-scan-status" role="status">Starting camera…</div>' +
       '<div class="m-coderow"><input class="m-search" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Type the barcode numbers" aria-label="Barcode numbers" enterkeyhint="search" data-m="code-in" id="m-code"><button class="btn" data-m="code-lookup">Look up</button></div>' +
-      '<label class="btn block m-file"><input type="file" accept="image/*" capture="environment" data-m="code-photo">Photo of barcode</label>' +
+      '<label class="btn block m-file"><input type="file" accept="image/*" capture="environment" data-m="code-photo" aria-label="Photo of barcode"><span aria-hidden="true">Photo of barcode</span></label>' +
       '<button class="btn ghost block" data-m="scan-cancel" style="margin-top:8px">Cancel</button>');
     const el = $("m-scan"), st = $("m-scan-status");
     let busy = false, done = false;
@@ -1365,7 +1500,7 @@ window.M = window.M || {};
     UI.close(); keepCtx(ctx);
     const saved = M.foods.get(f.id) || f;
     UI.openDetail(Object.assign({ kind: "food", foodId: saved.id, sub: M.fmtServing(saved.serving), ref: saved }, saved), { slot: ctx.slot, date: ctx.date, onPick: ctx.onPick, mode: ctx.onPick ? "pick" : "log" });
-    UI.toast(linked ? "Saved the barcode. It scans next time." : "Couldn't save the barcode on this food.");
+    UI.toast(linked ? "Saved the barcode. It scans next time." : "Couldn't save the barcode. Try again.");
   };
   A["code-lookup"] = () => { const inp = $("m-code"); const code = inp ? inp.value.replace(/\D/g, "") : ""; if (!code) { UI.toast("Type the numbers under the bars"); return; } const st = $("m-scan-status"); if (st) st.textContent = "Looking up " + code + "…"; lookupCode(code, scanCtx()); };
   C["code-photo"] = el => {
@@ -1414,7 +1549,7 @@ window.M = window.M || {};
   }
   /* Meat, fish, rice and pasta weigh differently cooked: ask them. Others can open the question. */
   const COOK_NAME = /\b(chicken|beef|steak|pork|turkey|lamb|bison|venison|veal|ham|bacon|sausages?|brisket|ribs?|tenderloin|sirloin|ribeye|loin|chops?|thighs?|breasts?|wings?|drumsticks?|ground|mince|meat|fish|salmon|tuna|cod|tilapia|halibut|trout|shrimp|prawns?|scallops?|mahi|rice|pasta|spaghetti|noodles?|macaroni|penne|linguine|fettuccine|rigatoni|orzo|quinoa|couscous|lentils?|barley|farro)\b/i;
-  const addBtns = () => '<button class="btn primary block" data-m="ff-save-add">' + (ff.onPick ? "Save &amp; add to meal" : "Save &amp; add to " + esc(ff.slot)) + '</button><button class="btn block" data-m="ff-save">Save to My foods</button>';
+  const addBtns = () => '<button class="btn primary block" data-m="ff-save-add">' + (ff.toDesc ? "Save &amp; add to the list" : ff.onPick ? "Save &amp; add to meal" : "Save &amp; add to " + esc(ff.slot)) + '</button><button class="btn block" data-m="ff-save">Save to My foods</button>';
   function formHTML(opt) {
     const f = ff.food, s = f.serving || { qty: 1, unit: "serving", g: null }, per = f.per || {};
     const v = (x, d) => (x == null || x === "" ? (d == null ? "" : d) : x);
@@ -1599,7 +1734,9 @@ window.M = window.M || {};
     const typed = el && el.dataset && el.dataset.name ? String(el.dataset.name).trim() : "";
     const nice = typed ? typed.charAt(0).toUpperCase() + typed.slice(1) : "";
     const brand = el && el.dataset && el.dataset.brand ? String(el.dataset.brand).trim() : "";
-    ff = { food: { name: nice, brand, barcode: (el && el.dataset && el.dataset.code) || "", serving: { qty: 1, unit: "serving", g: null }, per: {}, source: "custom" }, id: null, slot: ctx.slot, date: ctx.date, onPick: ctx.onPick };
+    /* PL-01: from Describe's "Couldn't find": save it, then go back to Describe with it in the list */
+    const toDesc = el && el.dataset && el.dataset.desc === "1" ? descSnap() : null;
+    ff = { food: { name: nice, brand, barcode: (el && el.dataset && el.dataset.code) || "", serving: { qty: 1, unit: "serving", g: null }, per: {}, source: "custom" }, id: null, slot: toDesc ? toDesc.slot : ctx.slot, date: toDesc ? toDesc.date : ctx.date, onPick: toDesc ? null : ctx.onPick, toDesc, typed };
     UI.sheet("New food", formHTML({ buttons: addBtns() }));
   };
   const dayNote = dt => (dt && dt !== today() ? " · " + M.fmtDay(dt) : "");
@@ -1608,11 +1745,12 @@ window.M = window.M || {};
   /* picking an item for the meal builder: every way out goes back to it */
   function backToBuilder(msg) { if (UI.draft && !UI.sheetOpen()) UI.openBuilder(); if (msg) UI.toast(msg); }
   A["ff-save"] = el => {
-    const editing = !!(ff.id && M.MS.foods[ff.id]), pick = ff.onPick;
+    const editing = !!(ff.id && M.MS.foods[ff.id]), pick = ff.onPick, toDesc = ff.toDesc;
     const f = saveForm(el); if (!f) return;
     const n = ff.mealsUpdated || 0;
     UI.close();
     const msg = editing ? "Saved changes" + (n ? ". Updated " + n + " saved meal" + (n === 1 ? "" : "s") + "." : "") : "Saved to My foods";
+    if (toDesc) { descReopen(toDesc); UI.toast(msg); return; }
     if (typeof pick === "function") { backToBuilder(msg); return; }
     UI.toast(msg);
     if (UI.tab === "foods") UI.render();
@@ -1620,9 +1758,10 @@ window.M = window.M || {};
   /* Save, then log one serving right away (tap the entry to change the amount). */
   A["ff-save-add"] = el => {
     const f = saveForm(el); if (!f) return;
-    const ctx = { slot: ff.slot, date: ff.date, onPick: ff.onPick };
+    const ctx = { slot: ff.slot, date: ff.date, onPick: ff.onPick, toDesc: ff.toDesc, typed: ff.typed };
     UI.close();
     const e = foodEntry(f);
+    if (ctx.toDesc) { descReopen(ctx.toDesc, Object.assign(e, { source: "custom" }), ctx.typed); UI.toast("Saved to My foods"); return; }
     if (typeof ctx.onPick === "function") { ctx.onPick(e); return; }
     M.log.add(ctx.date, Object.assign(e, { slot: ctx.slot }));
     UI.toast("Added to " + ctx.slot + dayNote(ctx.date));
@@ -1640,8 +1779,8 @@ window.M = window.M || {};
     const ctx = scanCtx();
     ff = { food: { name: "", brand: "", barcode: (el && el.dataset.code) || "", serving: { qty: 1, unit: "serving", g: null }, per: {}, source: "label" }, id: null, slot: ctx.slot, date: ctx.date, onPick: ctx.onPick };
     UI.sheet("Scan label", '<p class="hint" style="font-size:15px;margin:0 0 10px">Take a clear photo of the Nutrition Facts panel. Fill the frame, good light, no glare.</p>' +
-      '<label class="btn primary block m-file"><input type="file" accept="image/*" capture="environment" data-m="label-file">Take a photo</label>' +
-      '<label class="btn block m-file" style="margin-top:8px"><input type="file" accept="image/*" data-m="label-file">Choose from photos</label>' +
+      '<label class="btn primary block m-file"><input type="file" accept="image/*" capture="environment" data-m="label-file" aria-label="Take a photo"><span aria-hidden="true">Take a photo</span></label>' +
+      '<label class="btn block m-file" style="margin-top:8px"><input type="file" accept="image/*" data-m="label-file" aria-label="Choose from photos"><span aria-hidden="true">Choose from photos</span></label>' +
       '<div class="m-status mut" id="m-label-status" role="status"></div><div id="m-label-form"></div>' +
       '<button class="btn ghost block" id="m-label-type" data-m="open-form" data-code="' + esc(ff.food.barcode) + '" style="margin-top:8px">Type it in instead</button>');
   };
@@ -1712,12 +1851,46 @@ window.M = window.M || {};
   }
   /* Hand a list of items to the meal builder in one go (one repaint, one toast). */
   function pickAll(cb, list) { if (typeof cb.many === "function") cb.many(list); else list.forEach(e => cb(e)); }
+  /* U3-06: breasts step by ½ (like "½ breast"), eggs, slices… by 1, the rest by ¼ */
+  const itemStep = it => { const u = String(M.parseServing(it && it.servingLabel).unit || "").trim(); return /^breasts?\b/i.test(u) && !(M.cook && M.cook.unitWord(u)) ? 0.5 : isCountItem(it) ? 1 : 0.25; };
+  /* PL-01: the words nothing matched, in warning color, each with "+ Add “x” as a new food" and Quick add */
+  function unfoundHTML() {
+    const un = items && Array.isArray(items.unmatched) ? items.unmatched : [];
+    if (!un.length) return "";
+    const box = (i, k, label, unit, ph) => '<label class="m-f"><span>' + label + (unit ? ' <em>' + unit + '</em>' : "") + '</span><input type="number" inputmode="decimal" min="0" step="any" data-k="' + k + '" placeholder="' + ph + '" aria-label="' + label + '"></label>';
+    return '<div class="m-unfound">' + un.map((x, i) => {
+      const n = esc(x);
+      return '<div class="m-unf"><p class="m-warnline m-keepcase">Couldn\'t find “' + n + '”. It won\'t be added.</p>' +
+        '<div class="m-btnrow"><button class="btn m-keepcase" data-m="open-form" data-desc="1" data-name="' + n + '">+ Add “' + n + '” as a new food</button><button class="btn" data-m="unf-quick" data-i="' + i + '" aria-expanded="false" aria-controls="m-unfq-' + i + '">Quick add</button></div>' +
+        '<div class="m-unfq m-quick" id="m-unfq-' + i + '" hidden>' + box(i, "cal", "Calories", "", "e.g. 350") + '<div class="m-f3">' + box(i, "p", "Protein", "g", "optional") + box(i, "c", "Carbs", "g", "optional") + box(i, "f", "Fat", "g", "optional") + '</div>' +
+        '<p class="m-warnline" role="status"></p><button class="btn block" data-m="unf-quick-go" data-i="' + i + '">Add to the list</button></div></div>';
+    }).join("") + '</div>';
+  }
+  A["unf-quick"] = el => {
+    const box = $("m-unfq-" + num(el.dataset.i)); if (!box) return;
+    box.hidden = !box.hidden; el.setAttribute("aria-expanded", box.hidden ? "false" : "true");
+  };
+  A["unf-quick-go"] = el => {
+    if (!items || !Array.isArray(items.unmatched)) return;
+    const i = num(el.dataset.i), name = items.unmatched[i], box = $("m-unfq-" + i); if (!name || !box) return;
+    const val = k => { const x = box.querySelector('[data-k="' + k + '"]'); const s = x ? String(x.value || "").trim() : ""; return s === "" ? null : num(s, NaN); };
+    const cal0 = val("cal"), p = val("p"), c = val("c"), f = val("f"), msg = box.querySelector(".m-warnline");
+    const bad = [cal0, p, c, f].some(v => v !== null && !(v >= 0));
+    const cal = cal0 != null ? cal0 : (p || c || f ? r0(4 * (p || 0) + 4 * (c || 0) + 9 * (f || 0)) : null);
+    if (bad || !(cal > 0) || cal > 10000) { if (msg) msg.textContent = bad ? "Numbers can't be below 0." : cal > 10000 ? "That's more than 10,000 calories. Check the number." : "Type the calories."; return; }
+    items.list.push({ name: (name.charAt(0).toUpperCase() + name.slice(1)).slice(0, 120), brand: "", servings: 1, servingLabel: "1 serving", g: null, per: { cal: r0(cal), p: r1(p || 0), c: r1(c || 0), f: r1(f || 0), fiber: 0, sugar: 0, sodium: 0 }, source: "quick" });
+    items.unmatched.splice(i, 1);
+    paintItems();
+  };
+  /* "a, b and c" */
+  const andList = a => (a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]);
   function itemsHTML() {
-    if (!items.list.length) return '<div class="empty">Nothing to add.</div>';
+    const un = unfoundHTML();
+    if (!items.list.length) return un || '<div class="empty">Nothing to add.</div>';
     const tot = shownTotals(items.list);   /* CP-13: the total adds the rounded rows, like the Diary */
-    return '<div class="ex-list m-items">' + items.list.map((it, i) => {
+    return un + '<div class="ex-list m-items">' + items.list.map((it, i) => {
       const t = entryTotals(it), nm = esc(it.name);
-      return '<div class="ex-row m-item"><div class="ex-main"><div class="n">' + nm + '</div><div class="t">' + itemLine(it, t) + '</div></div><div class="stepper sm m-istep"><button data-m="item-step" data-i="' + i + '" data-v="-1" aria-label="Less ' + nm + '">−</button><input type="number" inputmode="decimal" step="' + (isCountItem(it) ? 1 : 0.25) + '" min="0" data-m="item-qty" data-i="' + i + '" value="' + fmtQty(rawServings(it)) + '" aria-label="How many: ' + nm + '"><button data-m="item-step" data-i="' + i + '" data-v="1" aria-label="More ' + nm + '">+</button></div><button class="icon" data-m="item-del" data-i="' + i + '" aria-label="Remove ' + nm + '">×</button></div>';
+      return '<div class="ex-row m-item"><div class="ex-main"><div class="n">' + nm + '</div><div class="t">' + itemLine(it, t) + '</div></div><div class="stepper sm m-istep"><button data-m="item-step" data-i="' + i + '" data-v="-1" aria-label="Less ' + nm + '">−</button><input type="number" inputmode="decimal" step="' + itemStep(it) + '" min="0" data-m="item-qty" data-i="' + i + '" value="' + fmtQty(rawServings(it)) + '" aria-label="How many: ' + nm + '"><button data-m="item-step" data-i="' + i + '" data-v="1" aria-label="More ' + nm + '">+</button></div><button class="icon" data-m="item-del" data-i="' + i + '" aria-label="Remove ' + nm + '">×</button></div>';
     }).join("") + '</div>' +
       (items.note ? '<p class="hint">' + esc(items.note) + '</p>' : "") +
       '<div class="m-itot num"><span>Total</span><span><b>' + kcal(tot.cal) + '</b> cal · ' + macroLine(tot) + '</span></div>' +
@@ -1729,8 +1902,9 @@ window.M = window.M || {};
   const keepTogether = s => String(s).split(" · ").map(p => p.split(" ").join(NB)).join(NB + "· ");
   const itemLine = (it, t) => (rawServings(it) > 0 ? esc(wholeAmount(it, true)) + NB + '· ' + keepTogether(macroLine(t)) + NB + '· <b>' + kcal(t.cal) + '</b>' + NB + 'cal' : '<span class="m-zero">0 · won\'t be added</span>');
   function paintItems() { const box = $("m-items"); if (box && items) box.innerHTML = itemsHTML(); }
-  A["item-step"] = el => { const it = items && items.list[num(el.dataset.i)]; if (!it) return; it.servings = stepQty(rawServings(it), num(el.dataset.v), isCountItem(it) ? 1 : 0.25); paintItems(); };
-  I["item-qty"] = el => { const it = items && items.list[num(el.dataset.i)]; if (!it) return; it.servings = Math.max(0, num(el.value)); const row = el.closest(".m-item"); if (row) { const tt = row.querySelector(".t"); if (tt) tt.innerHTML = itemLine(it, entryTotals(it)); } const tot = qs("#m-items .m-itot span:last-child"); if (tot) { const s = M.foodMath.sum(items.list); tot.innerHTML = '<b>' + kcal(s.cal) + '</b> kcal · ' + macroLine(s); } };
+  A["item-step"] = el => { const it = items && items.list[num(el.dataset.i)]; if (!it) return; it.servings = stepQty(rawServings(it), num(el.dataset.v), itemStep(it)); paintItems(); };
+  /* U3-05: typing an amount keeps the total the same as the rows (rounded rows added, "cal") */
+  I["item-qty"] = el => { const it = items && items.list[num(el.dataset.i)]; if (!it) return; it.servings = Math.max(0, num(el.value)); const row = el.closest(".m-item"); if (row) { const tt = row.querySelector(".t"); if (tt) tt.innerHTML = itemLine(it, entryTotals(it)); } const tot = qs("#m-items .m-itot span:last-child"); if (tot) { const s = shownTotals(items.list); tot.innerHTML = '<b>' + kcal(s.cal) + '</b> cal · ' + macroLine(s); } };
   A["item-del"] = el => { if (!items) return; items.list.splice(num(el.dataset.i), 1); paintItems(); };
   A["items-add"] = () => {
     if (!items) return;
@@ -1740,8 +1914,11 @@ window.M = window.M || {};
     const mk = it => Object.assign({ name: it.name, brand: it.brand || "", servings: rawServings(it), servingLabel: it.servingLabel || "1 serving", g: (M.cook ? M.cook.unitGrams(it) : 0) || it.g || null, per: it.per, source: it.source || "ai", foodId: it.foodId || undefined }, cookOf(it));
     if (items.onPick) { const cb = items.onPick; UI.close(); pickAll(cb, list.map(mk)); return; }
     const slot = items.slot, dt = items.date;
+    /* PL-01: the toast names what wasn't found ("Mocha frappuccino wasn't added.") */
+    const un = Array.isArray(items.unmatched) ? items.unmatched : [];
+    const miss = un.length ? ". " + (s => s.charAt(0).toUpperCase() + s.slice(1))(andList(un)) + (un.length === 1 ? " wasn't added." : " weren't added.") : "";
     list.forEach(it => M.log.add(dt, Object.assign(mk(it), { slot })));
-    UI.close(); UI.toast("Added " + list.length + " item" + (list.length === 1 ? "" : "s") + " to " + slot + dayNote(dt)); UI.render();
+    UI.close(); UI.toast("Added " + list.length + " item" + (list.length === 1 ? "" : "s") + " to " + slot + dayNote(dt) + miss); UI.render();
   };
 
   /* ----------------------------------------------------------------- photo */
@@ -1760,8 +1937,8 @@ window.M = window.M || {};
       return;
     }
     UI.sheet("Photo", '<p class="hint" style="font-size:15px;margin:0 0 10px">Take a photo of your plate from above. Claude names each food and guesses how much. Check the amounts before you add.</p>' +
-      '<label class="btn primary block m-file"><input type="file" accept="image/*" capture="environment" data-m="photo-file">Take a photo</label>' +
-      '<label class="btn block m-file" style="margin-top:8px"><input type="file" accept="image/*" data-m="photo-file">Choose from photos</label>' +
+      '<label class="btn primary block m-file"><input type="file" accept="image/*" capture="environment" data-m="photo-file" aria-label="Take a photo"><span aria-hidden="true">Take a photo</span></label>' +
+      '<label class="btn block m-file" style="margin-top:8px"><input type="file" accept="image/*" data-m="photo-file" aria-label="Choose from photos"><span aria-hidden="true">Choose from photos</span></label>' +
       '<div class="m-preview" id="m-photo-prev"></div><div class="m-status mut" id="m-photo-status" role="status"></div><div id="m-items"></div>');
   };
   C["photo-file"] = el => {
@@ -1774,25 +1951,56 @@ window.M = window.M || {};
   };
 
   /* -------------------------------------------------------------- describe */
+  const descBody = q => '<label class="m-f" for="m-desc"><span>What did you eat?</span></label><textarea class="m-ta" id="m-desc" placeholder="e.g. 2 eggs, 2 slices toast, 1 tbsp butter" autocapitalize="off">' + esc(q) + '</textarea>' +
+    '<button class="btn primary block" data-m="describe-go" style="margin-top:8px">Find foods</button><div class="m-status mut" id="m-desc-status" role="status">' + (M.ai && M.ai.ready() ? "" : "This matches your words to your foods and the built-in list.") + '</div><div id="m-items"></div>';
   A["open-describe"] = el => {
     const ctx = scanCtx();
-    items = Object.assign({ list: [], note: "" }, ctx);
+    items = Object.assign({ list: [], note: "", unmatched: [] }, ctx);
     const q = (el && el.dataset.q) || "";
-    UI.sheet("Describe", '<label class="m-f" for="m-desc"><span>What did you eat?</span></label><textarea class="m-ta" id="m-desc" placeholder="e.g. 2 eggs, 2 slices toast, 1 tbsp butter" autocapitalize="off">' + esc(q) + '</textarea>' +
-      '<button class="btn primary block" data-m="describe-go" style="margin-top:8px">Find foods</button><div class="m-status mut" id="m-desc-status" role="status">' + (M.ai && M.ai.ready() ? "" : "This matches your words to your foods and the built-in list.") + '</div><div id="m-items"></div>');
+    UI.sheet("Describe", descBody(q));
     /* no autofocus: on iPhone it opens the keyboard over the sheet at once (IO-01) */
   };
+  /* PL-01: "a large mocha frappuccino" → "mocha frappuccino" (m-food may already send it clean) */
+  const UNF_LEAD = /^(?:(?:a|an|the|some|one|two|three|couple of|\d+(?:[.,/]\d+)?|small|medium|large|big|little|extra large|extra-large|grande|venti)\s+)+/i;
+  function unfoundNames(list) {
+    const seen = new Set();
+    return (Array.isArray(list) ? list : []).map(x => String(x == null ? "" : x).replace(/\s+/g, " ").trim())
+      .map(x => x.replace(UNF_LEAD, "").trim() || x)
+      .filter(x => { const k = lc(x); if (!x || seen.has(k)) return false; seen.add(k); return true; });
+  }
+  /* PL-01: a new food started from Describe comes back to Describe with its list */
+  function descSnap() {
+    if (!items) return null;
+    const ta = $("m-desc");
+    return { slot: items.slot, date: items.date, onPick: items.onPick || null, list: items.list.slice(), note: items.note || "", unmatched: (items.unmatched || []).slice(), text: ta ? ta.value : items.text || "" };
+  }
+  function descReopen(s, extra, gone) {
+    if (!isObj(s)) return;
+    items = { slot: s.slot, date: s.date, onPick: s.onPick, list: s.list.concat(extra ? [extra] : []), note: s.note, unmatched: s.unmatched.filter(x => !gone || lc(x) !== lc(gone)), text: s.text };
+    UI.sheet("Describe", descBody(s.text));
+    const st = $("m-desc-status"); if (st) st.textContent = "";
+    paintItems();
+  }
   A["describe-go"] = el => {
     const ta = $("m-desc"); const text = ta ? ta.value.trim() : ""; if (!text) { UI.toast("Type what you ate"); return; }
-    const st = $("m-desc-status"); if (st) st.textContent = M.ai && M.ai.ready() ? "Asking Claude…" : "Matching your words…";
-    el.disabled = true; const ctx = items;
-    M.food.describe(text, { slot: items.slot }).then(res => {
-      if (items !== ctx) return; el.disabled = false;
-      items.list = (res.items || []).map(it => Object.assign({ servings: 1 }, it)); items.note = res.note || "";
-      const un = Array.isArray(res.unmatched) ? res.unmatched.filter(Boolean) : [];
-      if (st) st.textContent = items.list.length ? (un.length ? "Couldn't match: " + un.join(", ") : "") : "Couldn't work that out. Try simpler words like \"2 eggs, 1 cup rice\".";
-      paintItems();
-    }, e => { if (items !== ctx) return; el.disabled = false; if (st) st.textContent = errMsg(e); });
+    if (!items || items.busy) return;   /* L4: one run at a time (a double tap does nothing) */
+    const ctx = items, st = $("m-desc-status");
+    ctx.busy = true; ctx.text = text; if (el) el.disabled = true;
+    if (st) st.textContent = M.ai && M.ai.ready() ? "Asking Claude…" : "Matching your words…";
+    const done = () => { ctx.busy = false; if (el) el.disabled = false; };
+    /* L4: let the phone paint "Matching your words…" before the matching starts */
+    setTimeout(() => {
+      if (items !== ctx) { done(); return; }
+      let p; try { p = M.food.describe(text, { slot: ctx.slot }); } catch (e) { p = Promise.reject(e); }
+      Promise.resolve(p).then(res => {
+        done(); if (items !== ctx) return;
+        res = isObj(res) ? res : {};
+        ctx.list = (Array.isArray(res.items) ? res.items : []).map(it => Object.assign({ servings: 1 }, it)); ctx.note = res.note || "";
+        ctx.unmatched = unfoundNames(res.unmatched);
+        if (st) st.textContent = ctx.list.length || ctx.unmatched.length ? "" : "Couldn't work that out. Try simpler words like \"2 eggs, 1 cup rice\".";
+        paintItems();
+      }, e => { done(); if (items !== ctx) return; if (st) st.textContent = errMsg(e); });
+    }, 30);
   };
 
   /* --------------------------------------------------------------- suggest */
@@ -1830,7 +2038,7 @@ window.M = window.M || {};
       : '<div class="mut small num">' + macroLine(per) + ' per serving</div><ul class="m-sugitems">' + (s.items || []).map(it => '<li><span class="n">' + esc(it.name) + '</span><span class="a num">' + esc(wholeAmount(it)) + '</span></li>').join("") + '</ul>';
     const btns = pick ? '<button class="btn primary" data-m="sug-log" data-i="' + i + '">Add to meal</button>'
       : '<button class="btn primary" data-m="sug-log" data-i="' + i + '">' + (s.batchMeal ? "Add " + esc(s.portion.replace(/ cooked$/, "")) + " to " : "Add to ") + esc(sug.slot) + '</button>' + (s.source === "mine" || s.batchMeal ? "" : '<button class="btn" data-m="sug-save" data-i="' + i + '">Save as meal</button>');
-    return '<div class="card m-sug"><div class="hd"><div><h3>' + esc(s.name) + '</h3><div class="m-sugtags">' + src + store + time + '</div></div><div class="m-kcal num">' + kcal(per.cal) + '</div></div>' +
+    return '<div class="card m-sug"><div class="hd"><div><h3>' + esc(s.name) + '</h3><div class="m-sugtags">' + src + store + time + '</div></div><div class="m-kcal num">' + kcal(per.cal) + '<small> cal</small></div></div>' +
       '<div class="bd">' + (s.desc ? '<p class="m-sugdesc">' + esc(s.desc) + '</p>' : "") + body + '<div class="m-btnrow">' + btns + '</div></div></div>';
   }
   function sugHTML() {
@@ -1850,7 +2058,12 @@ window.M = window.M || {};
     M.food.suggest({ pid: pid(), slot: sug.slot, remaining: sug.remaining, exclude: sug.shown.slice() }).then(list => {
       if (!sug || sug.req !== my) return;
       const batches = batchIdeas();
-      sug.list = batches.concat(Array.isArray(list) ? list : []);
+      /* L3 / KJ-04: this person's meals and batches first, then the other person's (tagged with their name) */
+      const other = s => { const m = s && s.mealId ? M.meals.get(s.mealId) : null; return !!(m && m.pid && m.pid !== pid()); };
+      const L = Array.isArray(list) ? list : [], lead = [];
+      let li = 0; while (li < L.length && isObj(L[li]) && L[li].source === "mine" && !other(L[li])) lead.push(L[li++]);
+      sug.list = batches.filter(s => !other(s)).concat(lead, batches.filter(other), L.slice(li));
+      if (L.aiError) sug.list.aiError = L.aiError;
       sug.list.forEach(s => { if (s.id && !String(s.id).startsWith("ai_")) sug.shown.push(s.id); });
       box.innerHTML = (sug.list.length ? sug.list.map(sugCard).join("") : '<div class="empty">No ideas fit what\'s left. Try another meal.</div>') + (list && list.aiError ? '<p class="hint">Claude: ' + esc(list.aiError) + '</p>' : "");
       if (more) more.disabled = false;
@@ -1911,12 +2124,18 @@ window.M = window.M || {};
     const P = bP(m), pg = M.cook.portionG(P), per = M.cook.batchPer(m, pg);
     return '<div class="t num">' + esc(M.cook.batchSub(m, bU(m))) + '</div><div class="t num">' + kcal(per.cal) + ' cal · ' + macroLine(per) + ' per ' + esc(M.cook.fmtWeight(pg, P)) + ' cooked</div>';
   }
+  /* KJ-05: a one-serving meal adds its rounded item rows, like the Diary it came from */
+  const mealShown = m => (isObj(m) && Array.isArray(m.items) && m.items.length && Math.abs(num(m.servingsMade, 1) - 1) < 1e-9 ? shownTotals(m.items) : (m && m.per) || M.foodMath.blank());
   function mealRow(m) {
-    const per = m.per || M.foodMath.blank();
-    const lines = isObj(m.batch) && num(m.batch.cookedG) > 0 ? batchLines(m) : '<div class="t num">' + kcal(per.cal) + ' cal · ' + macroLine(per) + ' per serving</div>';
+    /* LK-08: laid out like a food row, calories on the right */
+    let per, lines;
+    if (isObj(m.batch) && num(m.batch.cookedG) > 0) {
+      const P = bP(m), pg = M.cook.portionG(P); per = M.cook.batchPer(m, pg);
+      lines = '<div class="t num">' + esc(M.cook.batchSub(m, bU(m))) + '</div><div class="t num">' + macroLine(per) + ' per ' + esc(M.cook.fmtWeight(pg, P)) + ' cooked</div>';
+    } else { per = mealShown(m); lines = '<div class="t num">' + macroLine(per) + ' per serving</div>'; }
     /* FX-09: the other person's meal carries their name */
     const who = m.pid && m.pid !== pid() ? ' <span class="tag m-who">' + esc(personName(m.pid)) + '</span>' : "";
-    return '<button class="ex-row m-row" data-m="meal" data-id="' + esc(m.id) + '"><div class="ex-main"><div class="n">' + esc(m.name) + who + '</div>' + (m.desc ? '<div class="t m-clamp">' + esc(m.desc) + '</div>' : "") + lines + '</div><span class="icon">›</span></button>';
+    return '<button class="ex-row m-row" data-m="meal" data-id="' + esc(m.id) + '"><div class="ex-main"><div class="n">' + esc(m.name) + who + '</div>' + (m.desc ? '<div class="t m-clamp">' + esc(m.desc) + '</div>' : "") + lines + '</div><div class="m-kcal num">' + kcal(per.cal) + '</div></button>';
   }
   function foodRow(f) {
     const sv = (M.cook && M.cook.servingLabel(f, units())) || tidyLabel(M.fmtServing(f.serving));
@@ -1947,7 +2166,7 @@ window.M = window.M || {};
       const all = M.meals.list();
       const meals = all.filter(m => hit(mealText(m)));
       /* VI-19: the way out sits inside the empty card */
-      if (!meals.length) return '<div class="card"><div class="empty">' + (q ? "No meals match." : "No saved meals yet. Make one here. Or in Diary, tap ⋯ next to Lunch and pick “Save Lunch as a meal”.") + (q ? "" : '<button class="btn primary m-inline" data-m="meal-new">+ New meal</button>') + '</div></div>';
+      if (!meals.length) return '<div class="card"><div class="empty">' + (q ? "No meals match." : "No saved meals yet. Tap New meal to make one. Or in Diary, tap ⋯ next to Lunch and pick “Save Lunch as a meal”.") + (q ? "" : '<button class="btn primary m-inline" data-m="meal-new">+ New meal</button>') + '</div></div>';
       const slots = q || pick === "All" ? M.SLOTS.concat(["Any"]) : pick === "Any" ? ["Any"] : [pick, "Any"];
       const order = g => g.slice().sort((a, b) => ((a.pid && a.pid !== me) ? 1 : 0) - ((b.pid && b.pid !== me) ? 1 : 0) || num(b.lastUsed) - num(a.lastUsed) || num(b.createdAt) - num(a.createdAt));
       const out = slots.map(s => { const g = meals.filter(m => (M.isSlot(m.slot) ? m.slot : "Any") === s); if (!g.length) return ""; return '<h2 class="sec">' + slotName(s) + ' <span class="m-cnt">· ' + g.length + '</span></h2><div class="card"><div class="ex-list">' + order(g).map(mealRow).join("") + '</div></div>'; }).join("");
@@ -1969,7 +2188,9 @@ window.M = window.M || {};
   UI.views.foods = function () {
     const meals = UI.foodsSeg === "meals";
     return '<div class="seg scope m-seg" role="group" aria-label="Show"><button data-m="foods-seg" data-v="meals" aria-pressed="' + (meals ? "true" : "false") + '"' + (meals ? ' class="on"' : "") + '>Saved meals</button><button data-m="foods-seg" data-v="foods" aria-pressed="' + (meals ? "false" : "true") + '"' + (meals ? "" : ' class="on"') + '>My foods</button></div>' +
-      '<div class="m-foodsbar"><input class="m-search" type="search" data-m="foods-q" placeholder="' + (meals ? "Search meals" : "Search My foods") + '" aria-label="' + (meals ? "Search meals" : "Search My foods") + '" value="' + esc(UI.foodsQ) + '" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"><button class="btn" data-m="' + (meals ? "meal-new" : "food-new") + '">' + (meals ? "+ New meal" : "+ New food") + '</button></div>' + (meals && M.meals.list().length ? mealChipsHTML() : "") +
+      '<div class="m-foodsbar"><input class="m-search" type="search" data-m="foods-q" placeholder="' + (meals ? "Search meals" : "Search My foods") + '" aria-label="' + (meals ? "Search meals" : "Search My foods") + '" value="' + esc(UI.foodsQ) + '" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">' +
+        /* LK-11 / PL-10: an empty list has its own New button, so the bar shows only one */
+        ((meals ? M.meals.list() : M.foods.list()).length ? '<button class="btn" data-m="' + (meals ? "meal-new" : "food-new") + '">' + (meals ? "+ New meal" : "+ New food") + '</button>' : "") + '</div>' + (meals && M.meals.list().length ? mealChipsHTML() : "") +
       undoBarHTML(meals ? "meal" : "food") + '<div id="m-foods-list">' + foodsListHTML() + '</div>';
   };
   /* "Deleted "Chicken bowl". Undo" for 2 minutes after a delete, on the list it came from */
@@ -1992,7 +2213,7 @@ window.M = window.M || {};
     if (list.indexOf(UI.undoDel) >= 0) UI.undoDel = null;
     if (!list.length) { UI.render(); return; }
     const back = list.map(u => (u.kind === "meal" ? (M.meals.get(u.data.id) || keepPid(u.data.pid, M.meals.add(u.data))) : (M.MS.foods[u.data.id] || M.foods.add(u.data)))).filter(Boolean);
-    UI.toast(back.length === 1 ? '"' + back[0].name + '" is back' : back.length ? back.length + (kind === "meal" ? " meals" : " foods") + " are back" : "Couldn't undo");
+    UI.toast(back.length === 1 ? "“" + back[0].name + "” is back" : back.length ? back.length + (kind === "meal" ? " meals" : " foods") + " are back" : "Couldn't undo");
     UI.render();
   };
   A["foods-seg"] = el => { UI.foodsSeg = el.dataset.v; UI.foodsQ = ""; UI.render(); };
@@ -2017,9 +2238,10 @@ window.M = window.M || {};
     const m = M.meals.get(el.dataset.id); if (!m) return;
     /* FD-07: log to the day the Diary shows, and say which day when it isn't today */
     mealSheet = { id: m.id, slot: M.isSlot(m.slot) ? m.slot : M.defaultSlot(), servings: 1, date: date() };
-    const per = m.per || M.foodMath.blank();
+    const per = mealShown(m);   /* KJ-05 */
     const head = m.desc ? '<p class="m-sugdesc">' + esc(m.desc) + '</p>' : "";
-    const list = '<div class="ex-list m-mealitems">' + m.items.map(it => { const t = entryTotals(it); return '<div class="ex-row"><div class="ex-main"><div class="n" style="font-size:15px">' + esc(it.name) + '</div><div class="t">' + esc(wholeAmount(it)) + '</div></div><div class="num mut">' + kcal(t.cal) + '</div></div>'; }).join("") + '</div>';
+    /* LK-08 / NJ-06: item rows look like food rows and keep the brand */
+    const list = '<div class="ex-list m-mealitems">' + m.items.map(it => { const t = entryTotals(it); return '<div class="ex-row"><div class="ex-main"><div class="n">' + esc(it.name) + '</div><div class="t">' + (it.brand ? esc(it.brand) + " · " : "") + esc(wholeAmount(it)) + '</div></div><div class="m-kcal num">' + kcal(t.cal) + '</div></div>'; }).join("") + '</div>';
     const tools = '<div class="m-btnrow"><button class="btn" data-m="meal-edit">Edit</button><button class="btn" data-m="meal-dup">Duplicate</button><button class="btn danger" data-m="meal-del">Delete</button></div>';
     if (isObj(m.batch) && num(m.batch.cookedG) > 0) {
       /* a batch: "How much did you eat?" by cooked weight, logged to today; the amount comes first */
@@ -2045,7 +2267,14 @@ window.M = window.M || {};
     const s = mealSheet.servings, slot = mealSheet.slot, dt = mealSheet.date || date();
     M.log.addMeal(dt, mealSheet.id, s, slot); UI.close(); UI.toast("Added to " + slot + dayTag(dt)); if (UI.tab === "diary") UI.render();
   };
-  A["meal-edit"] = () => { const m = M.meals.get(mealSheet.id); if (!m) return; det = null; UI.draft = { id: m.id, kind: "edit", name: m.name, desc: m.desc, slot: m.slot, servingsMade: m.servingsMade, batch: draftBatch(m), items: M.cp(m.items) }; UI.draft.orig = draftSnap(UI.draft); UI.openBuilder(); };
+  const editDraft = m => { const d = { id: m.id, kind: "edit", name: m.name, desc: m.desc, slot: m.slot, servingsMade: m.servingsMade, batch: draftBatch(m), items: M.cp(m.items) }; d.orig = draftSnap(d); return d; };
+  A["meal-edit"] = () => {
+    const m = M.meals.get(mealSheet.id); if (!m) return; det = null;
+    /* U3-04: changes left open (×, Escape, backdrop) come back for the same meal */
+    const d = UI.draft;
+    if (d && d.kind === "edit" && d.id === m.id && d.orig && draftSnap(d) !== d.orig) { d.resumed = true; UI.openBuilder(); return; }
+    UI.draft = editDraft(m); UI.openBuilder();
+  };
   /* what the person can change in the builder, to tell an untouched edit from a changed one (FD-09) */
   const draftSnap = d => JSON.stringify([String(d.name || ""), String(d.desc || ""), d.slot, num(d.servingsMade, 1), !!(d.batch && d.batch.on), d.batch && d.batch.on ? [num(d.batch.qty), d.batch.unit] : 0, (d.items || []).map(it => [it && it.name, rawServings(it), it && it.servingLabel, it && it.state])]);
   A["meal-dup"] = () => { const m = M.meals.get(mealSheet.id); if (!m) return; const c = M.meals.add({ name: m.name + " (copy)", desc: m.desc, slot: m.slot, servingsMade: m.servingsMade, batch: isObj(m.batch) ? { cookedG: m.batch.cookedG, unit: bUnit(m) || undefined } : null, items: M.cp(m.items) }); if (bUnit(m) && isObj(c.batch) && c.batch.unit !== bUnit(m)) { c.batch.unit = bUnit(m); M.save(); } UI.close(); UI.toast('Duplicated as "' + c.name + '"'); UI.render(); };
@@ -2059,6 +2288,15 @@ window.M = window.M || {};
   /* ---------------------------------------------------------- meal builder */
   /* UI.draft = { id|null, name, desc, slot, servingsMade, items:[Entry-like], editIdx,
                   batch:{ on, qty, unit:"oz"|"lb"|"g" } }  — batch = "Cooked as a batch — log by weight" */
+  /* NJ-02: the cooked weight starts in g when any item was typed in grams,
+     else in the unit of this person's last saved batch (else oz, or g for metric) */
+  function batchUnit0(d) {
+    const gram = (d && Array.isArray(d.items) ? d.items : []).some(it => rawServings(it) > 0 && (it.typedIn ? it.typedIn === "g" : /^(g|grams?)\b/i.test(String(M.parseServing(it && it.servingLabel).unit || "").trim())));
+    if (gram) return "g";
+    let last = null;
+    try { M.meals.list().forEach(m => { if (bUnit(m) && num(m.batch.cookedG) > 0 && (!m.pid || m.pid === pid()) && (!last || num(m.u || m.createdAt) > num(last.u || last.createdAt))) last = m; }); } catch (e) { last = null; }
+    return last ? bUnit(last) : units() === "metric" ? "g" : "oz";
+  }
   function draftBatch(m) {
     const fam = units() === "metric" ? "g" : "oz";
     /* WK-03: reopen in the unit it was saved in (2250 g stays 2250 g, never 2250 oz) */
@@ -2068,7 +2306,11 @@ window.M = window.M || {};
   const dFam = () => { const u = UI.draft && isObj(UI.draft.batch) ? UI.draft.batch.unit : null; return u === "g" || u === "oz" || u === "lb" ? u : units() === "metric" ? "g" : "oz"; };
   const batchOn = () => !!(UI.draft && isObj(UI.draft.batch) && UI.draft.batch.on);
   const cookedG = () => { const b = UI.draft && UI.draft.batch; return b && b.on ? num(b.qty) * (M.cook.UNIT_G[b.unit] || 0) : 0; };
-  function draftTotals() { const n = num(UI.draft.servingsMade, 1) > 0 ? num(UI.draft.servingsMade, 1) : 1; const t = M.foodMath.sum(UI.draft.items); const o = {}; NUT.forEach(k => { o[k] = r1(t[k] / n); }); return o; }
+  function draftTotals() {
+    const n = num(UI.draft.servingsMade, 1) > 0 ? num(UI.draft.servingsMade, 1) : 1;
+    if (Math.abs(n - 1) < 1e-9) return shownTotals(UI.draft.items);   /* KJ-05: one serving adds the rounded rows */
+    const t = M.foodMath.sum(UI.draft.items); const o = {}; NUT.forEach(k => { o[k] = r1(t[k] / n); }); return o;
+  }
   /* Drafts: "+ New meal" keeps its own draft (kind "new"), saved on this phone across reloads,
      apart from "Save Lunch as a meal" and "Edit" drafts, which never replace it. */
   const draftKey = () => "chalk.macros.draft." + (pid() || "x");
@@ -2092,7 +2334,7 @@ window.M = window.M || {};
     const d = UI.draft;
     return (d.items.length ? '<div class="ex-list m-mealitems">' + d.items.map((it, i) => {
       const t = entryTotals(it), zero = !(rawServings(it) > 0);
-      return '<button class="ex-row m-row" data-m="mb-item" data-i="' + i + '"><div class="ex-main"><div class="n" style="font-size:15px">' + esc(it.name) + '</div><div class="t">' + (zero ? '<span class="m-zero">0 · left out when you save</span>' : esc(wholeAmount(it)) + ' · ' + macroLine(t)) + '</div></div><div class="m-kcal num">' + kcal(t.cal) + '</div></button>';
+      return '<button class="ex-row m-row" data-m="mb-item" data-i="' + i + '"><div class="ex-main"><div class="n">' + esc(it.name) + '</div><div class="t">' + (zero ? '<span class="m-zero">0 · left out when you save</span>' : (it.brand ? esc(it.brand) + " · " : "") + esc(wholeAmount(it)) + ' · ' + macroLine(t)) + '</div></div><div class="m-kcal num">' + kcal(t.cal) + '</div></button>';
     }).join("") + '</div>' : '<div class="empty" style="padding:14px">No items yet.</div>') +
       '<button class="btn block" data-m="mb-add" style="margin-top:8px">+ Add item</button>';
   }
@@ -2143,7 +2385,9 @@ window.M = window.M || {};
   UI.openBuilder = function () {
     const d = UI.draft; if (!d) return;
     if (!isObj(d.batch)) d.batch = draftBatch(null);
-    const resume = d.kind === "new" && d.resumed ? '<div class="m-resume" role="status"><span>Unsaved meal from before</span><button class="btn ghost" data-m="mb-fresh">Start over</button></div>' : "";
+    const resume = (d.kind === "new" || d.kind === "edit") && d.resumed ? '<div class="m-resume" role="status"><span>' + (d.kind === "edit" ? "Changes you didn't save" : "Unsaved meal from before") + '</span><button class="btn ghost" data-m="mb-fresh">Start over</button></div>' : "";
+    /* NJ-02: the cooked weight's unit follows the items until a weight is typed */
+    if (d.batch.on && !(num(d.batch.qty) > 0) && !d.batch.picked) d.batch.unit = batchUnit0(d);
     UI.sheet(d.id ? "Edit meal" : "New meal", '<div class="m-form">' + resume + '<label class="m-f"><span>Name</span><input type="text" data-m="mb" data-k="name" value="' + esc(d.name) + '" placeholder="e.g. Chicken rice bowl" autocomplete="off"></label>' +
       '<label class="m-f"><span>Description</span><textarea class="m-ta m-mbdesc" data-m="mb" data-k="desc" rows="2" maxlength="120" placeholder="Optional. What\'s in it, or how you make it" aria-label="Description">' + esc(d.desc) + '</textarea></label>' +
       '<div class="m-f3 m-mbrow' + (d.batch.on ? " batch" : "") + '" id="m-mb-row"><label class="m-f m-mbslot"><span>When</span><select class="sel" data-m="mb" data-k="slot" aria-label="When you eat it">' + M.SLOTS.concat(["Any"]).map(s => '<option value="' + s + '"' + (s === d.slot ? " selected" : "") + '>' + slotName(s) + '</option>').join("") + '</select></label><label class="m-f m-mbsm"><span>Servings it makes</span><input type="number" inputmode="decimal" step="any" min="0.25" data-m="mb" data-k="servingsMade" value="' + esc(fmtQty(d.servingsMade)) + '" aria-label="Servings it makes"></label></div>' +
@@ -2160,6 +2404,12 @@ window.M = window.M || {};
     const d = UI.draft; if (!d) return;
     if (!isObj(d.batch)) d.batch = draftBatch(null);
     d.batch.on = !d.batch.on;
+    /* NJ-02: no weight typed yet → start in the unit the items suggest */
+    if (d.batch.on && !(num(d.batch.qty) > 0) && !d.batch.picked) {
+      const u = batchUnit0(d); d.batch.unit = u;
+      const inp = qs('[data-m="mb-cooked"]'); if (inp) inp.placeholder = PH[u] || "";
+      qsa('[data-m="mb-cunit"]').forEach(b => { b.classList.toggle("on", b.dataset.v === u); b.setAttribute("aria-pressed", b.dataset.v === u ? "true" : "false"); });
+    }
     el.setAttribute("aria-checked", d.batch.on ? "true" : "false");
     const tg = el.querySelector(".toggle"); if (tg) tg.classList.toggle("on", d.batch.on);
     const box = $("m-mb-batch"); if (box) box.hidden = !d.batch.on;
@@ -2168,7 +2418,9 @@ window.M = window.M || {};
   };
   I["mb-cooked"] = el => { const d = UI.draft; if (!d || !isObj(d.batch)) return; d.batch.qty = Math.max(0, num(el.value)); builderLive(); saveDraft(); };
   A["mb-cunit"] = el => {
-    const d = UI.draft, u = el.dataset.v; if (!d || !isObj(d.batch) || !M.cook.UNIT_G[u] || u === d.batch.unit) return;
+    const d = UI.draft, u = el.dataset.v; if (!d || !isObj(d.batch) || !M.cook.UNIT_G[u]) return;
+    d.batch.picked = true;   /* NJ-02: a unit they tap is kept (the items no longer pick it) */
+    if (u === d.batch.unit) { saveDraft(); return; }
     const g = num(d.batch.qty) * M.cook.UNIT_G[d.batch.unit];
     /* WK-04: while "That's 2250 oz cooked…" shows, a unit tap fixes the unit and keeps the number */
     const keep = el.dataset.keep === "1" || !!batchOdd();
@@ -2193,7 +2445,8 @@ window.M = window.M || {};
       const o = M.cook.unitsFor(f, units()).find(x => x.key === "g-raw"); if (!o || !(num(o.g) > 0)) return e;
       if (rawG1 && one) return e;
       const rawG = info.state === "cooked" ? info.grams / num(c.y) : info.grams;
-      return Object.assign({}, e, { state: "raw", cook: { y: c.y, word: c.word }, servingLabel: "1 " + o.label, g: o.g, per: o.per, servings: Math.round(rawG / o.g) });
+      /* typedIn: the unit family it was typed in (NJ-02: 64 oz of chicken doesn't make the batch weigh in g) */
+      return Object.assign({}, e, { state: "raw", cook: { y: c.y, word: c.word }, servingLabel: "1 " + o.label, g: o.g, per: o.per, servings: Math.round(rawG / o.g), typedIn: info.fam || null });
     } catch (err) { return e; }
   }
   /* + Add item: whatever they pick (search, scan, label, new food, describe, photo, ideas) comes back here */
@@ -2226,7 +2479,7 @@ window.M = window.M || {};
     box.hidden = false;
     const iu = itemUnit(it);
     const nm = esc(it.name);
-    box.innerHTML = '<div class="m-mbedit-n">' + nm + ' <span class="mut small" id="m-mbedit-amt"></span></div><div class="m-det-grid"><div><span class="lbl">' + (iu ? "Amount (" + esc(iu.name) + ")" : "Servings") + '</span><div class="stepper sm"><button data-m="mb-step" data-v="-1" aria-label="Less ' + nm + '">−</button><input type="number" inputmode="decimal" step="' + (iu ? iu.step : isCountItem(it) ? 1 : 0.25) + '" min="0" data-m="mb-qty" value="' + fmtQty(rawServings(it)) + '" aria-label="How many: ' + nm + '"><button data-m="mb-step" data-v="1" aria-label="More ' + nm + '">+</button></div></div><div class="m-btnrow" style="margin-top:0"><button class="btn danger" data-m="mb-remove">Remove</button><button class="btn" data-m="mb-done">Done</button></div></div>';
+    box.innerHTML = '<div class="m-mbedit-n">' + nm + ' <span class="mut small" id="m-mbedit-amt"></span></div><div class="m-det-grid"><div><span class="lbl">' + (iu ? "Amount (" + esc(iu.name) + ")" : "Servings") + '</span><div class="stepper sm"><button data-m="mb-step" data-v="-1" aria-label="Less ' + nm + '">−</button><input type="number" inputmode="decimal" step="' + (iu ? iu.step : itemStep(it)) + '" min="0" data-m="mb-qty" value="' + fmtQty(rawServings(it)) + '" aria-label="How many: ' + nm + '"><button data-m="mb-step" data-v="1" aria-label="More ' + nm + '">+</button></div></div><div class="m-btnrow" style="margin-top:0"><button class="btn danger" data-m="mb-remove">Remove</button><button class="btn" data-m="mb-done">Done</button></div></div>';
     mbEditAmt(it);
     try { box.scrollIntoView({ block: "nearest" }); } catch (e) {}
   };
@@ -2234,7 +2487,7 @@ window.M = window.M || {};
   /* steppers never go below one step (Remove takes an item out); typing 0 leaves it out on save */
   A["mb-step"] = el => {
     const it = UI.draft && UI.draft.items[UI.draft.editIdx]; if (!it) return;
-    const iu = itemUnit(it), st = iu ? iu.step : isCountItem(it) ? 1 : 0.25;
+    const iu = itemUnit(it), st = iu ? iu.step : itemStep(it);
     it.servings = Math.max(st, stepQty(rawServings(it), num(el.dataset.v), st));
     const inp = qs('[data-m="mb-qty"]'); if (inp) inp.value = fmtQty(it.servings); mbRepaint();
   };
@@ -2255,7 +2508,7 @@ window.M = window.M || {};
     const odd = batchCheck();
     if (odd && !confirmTap(el, "save anyway")) { mbMsg(odd); return; }
     const bu = batchOn() ? dFam() : null;
-    const patch = { name, desc: String(d.desc || "").trim(), slot: d.slot, servingsMade: batchOn() ? 1 : num(d.servingsMade, 1), items: keep, batch: batchOn() ? { cookedG: cg, unit: bu } : null };
+    const patch = { name, desc: String(d.desc || "").trim(), slot: d.slot, servingsMade: batchOn() ? 1 : num(d.servingsMade, 1), items: keep.map(it => { if (!isObj(it) || !("typedIn" in it)) return it; const o = Object.assign({}, it); delete o.typedIn; return o; }), batch: batchOn() ? { cookedG: cg, unit: bu } : null };
     const editing = !!(d.id && M.meals.get(d.id));
     const p0 = editing ? M.meals.get(d.id).pid : null;
     const m = editing ? keepPid(p0, M.meals.update(d.id, patch)) : M.meals.add(patch);
@@ -2279,6 +2532,9 @@ window.M = window.M || {};
   A["mb-fresh"] = el => {
     if (!UI.draft) return;
     if (draftHasContent(UI.draft) && !confirmTap(el, "start over")) return;
+    /* U3-04: an edit starts over from the saved meal */
+    const m = UI.draft.kind === "edit" && UI.draft.id ? M.meals.get(UI.draft.id) : null;
+    if (m) { UI.draft = editDraft(m); UI.openBuilder(); return; }
     clearDraft(); UI.draft = freshDraft(); UI.openBuilder();
   };
   /* + New meal resumes only its own draft (in memory, or saved on this phone) */

@@ -151,7 +151,7 @@ t("add flow (cook food): Lunch + Add → 'chicken' → Chicken breast → units 
   change(q('[data-m="det-unit"]'), "oz-raw");
   assert.strictEqual(q('[data-m="det-qty"]').value, "6.2", "175 g = 6.2 oz");
   input(q('[data-m="det-qty"]'), "6");
-  assert.strictEqual($("m-det-amt").textContent, "6 oz raw (4.4 oz cooked)", "servings screen reads raw first");
+  assert.strictEqual($("m-det-amt").textContent, "170 g raw (123 g cooked)", "servings screen reads raw first, in grams (decision 6)");
   assert.ok(/167cal/.test($("m-live").textContent.replace(/\s/g, "")), "6 oz raw = 167 kcal: " + $("m-live").textContent);
   click(q('[data-m="det-step"][data-v="1"]'));
   assert.strictEqual(q('[data-m="det-qty"]').value, "6.5", "oz steps by half");
@@ -172,13 +172,16 @@ t("add flow (cook food): Lunch + Add → 'chicken' → Chicken breast → units 
 t("entry sheet (cook): raw → cooked keeps the typed number (6 oz raw → 6 oz cooked); 5 oz cooked uses the cooked profile; grams read in grams", () => {
   click(q('[data-m="entry"][data-id="' + addedEntry.id + '"]'));
   assert.strictEqual($("m-det-go").textContent, "Save");
-  assert.strictEqual(q('[data-m="det-unit"]').value, "oz-raw");
+  /* decision 6: an oz entry of the chicken opens in raw grams, its saved numbers kept */
+  assert.strictEqual(q('[data-m="det-unit"]').value, "g-raw");
+  assert.strictEqual(q('[data-m="det-qty"]').value, "170");
+  change(q('[data-m="det-unit"]'), "oz-raw");
   assert.strictEqual(q('[data-m="det-qty"]').value, "6");
   change(q('[data-m="det-unit"]'), "oz-cooked");
   assert.strictEqual(q('[data-m="det-qty"]').value, "6", "raw → cooked only says how it was weighed: the number stays");
-  assert.strictEqual($("m-det-amt").textContent, "8.3 oz raw (6 oz cooked)");
+  assert.strictEqual($("m-det-amt").textContent, "234 g raw (170 g cooked)");
   input(q('[data-m="det-qty"]'), "5");
-  assert.strictEqual($("m-det-amt").textContent, "6.9 oz raw (5 oz cooked)");
+  assert.strictEqual($("m-det-amt").textContent, "195 g raw (142 g cooked)");
   click($("m-det-go"));
   let e = M.log.slotEntries(M.today(), "Lunch")[0];
   assert.deepStrictEqual([e.state, e.servingLabel, e.servings], ["cooked", "1 oz cooked", 5]);
@@ -520,12 +523,14 @@ t("rice: 1/4 cup dry by default; log by cooked cups, then by cooked grams", asyn
   change(q('[data-m="det-unit"]'), "cup-cooked");
   assert.strictEqual(q('[data-m="det-qty"]').value, "0.25", "dry → cooked keeps the typed number");
   input(q('[data-m="det-qty"]'), "1");
-  assert.strictEqual($("m-det-amt").textContent, "2 oz dry (1 cup cooked)");
+  /* weighed cooked reads cooked first, like the Diary row (F1 NJ-05); older cores read dry first */
+  assert.ok(/^(1 cup cooked \(2 oz dry\)|2 oz dry \(1 cup cooked\))$/.test($("m-det-amt").textContent), $("m-det-amt").textContent);
   assert.ok(/205cal/.test($("m-live").textContent.replace(/\s/g, "")), $("m-live").textContent);
   click($("m-det-go"));
   const e = M.log.slotEntries(M.today(), "Dinner").find(x => x.foodId === "g_white_rice");
   assert.deepStrictEqual([e.state, e.servingLabel, e.servings, e.g], ["cooked", "1 cup cooked", 1, 158]);
-  assert.ok(/2 oz dry \(1 cup cooked\)/.test(q('[data-m="entry"][data-id="' + e.id + '"]').textContent));
+  /* F1 NJ-05: an entry saved cooked may lead with its cooked amount ("1 cup cooked (2 oz dry)") */
+  assert.ok(/(2 oz dry \(1 cup cooked\)|1 cup cooked \(2 oz dry\))/.test(q('[data-m="entry"][data-id="' + e.id + '"]').textContent), q('[data-m="entry"][data-id="' + e.id + '"]').textContent);
   click(q('[data-m="entry"][data-id="' + e.id + '"]'));
   assert.strictEqual(q('[data-m="det-unit"]').value, "cup-cooked", "reopens in the unit it was logged in");
   change(q('[data-m="det-unit"]'), "g-cooked");
@@ -534,7 +539,7 @@ t("rice: 1/4 cup dry by default; log by cooked cups, then by cooked grams", asyn
   click($("m-det-go"));
   const e2 = M.log.slotEntries(M.today(), "Dinner").find(x => x.id === e.id);
   assert.strictEqual(Math.round(M.foodMath.scale(e2.per, e2.servings).cal), 260, "200 g cooked rice");
-  assert.ok(/71 g dry \(200 g cooked\)/.test(q('[data-m="entry"][data-id="' + e.id + '"]').textContent), q('[data-m="entry"][data-id="' + e.id + '"]').textContent);
+  assert.ok(/(71 g dry \(200 g cooked\)|200 g cooked \(71 g dry\))/.test(q('[data-m="entry"][data-id="' + e.id + '"]').textContent), q('[data-m="entry"][data-id="' + e.id + '"]').textContent);
   M.log.remove(M.today(), e.id); M.ui.render();
 });
 
@@ -546,8 +551,8 @@ t("entries saved before the merge read raw first and reopen in their old weight"
   assert.ok(/(8\.2 oz raw \(6 oz cooked\)|234 g raw \(170 g cooked\))/.test(row.textContent), row.textContent);
   const before = M.log.totals(M.today()).cal;
   click(row);
-  assert.strictEqual(q('[data-m="det-unit"]').value, "oz-cooked");
-  assert.strictEqual(q('[data-m="det-qty"]').value, "6", "shown rounded; the exact amount stays inside");
+  assert.strictEqual(q('[data-m="det-unit"]').value, "g-cooked", "decision 6: the chicken reopens in grams, in the state it was saved in");
+  assert.strictEqual(q('[data-m="det-qty"]').value, "170", "shown rounded; the exact amount stays inside");
   /* the old cooked chicken id resolves (M.DB.alias) to the one Kirkland breast, still weighed cooked */
   const ck100 = M.foods.get("g_kirkland_organic_chicken").cook.per100gCooked.cal;
   /* FX-01 (decision 2): opened and saved with no change → its own numbers, name and unit stay */
@@ -556,14 +561,19 @@ t("entries saved before the merge read raw first and reopen in their old weight"
   let e = M.log.slotEntries(M.today(), "Snacks").find(x => x.id === "legacy1");
   assert.deepStrictEqual([e.name, e.servingLabel, e.servings, e.per.cal], ["Chicken breast, cooked", "4 oz (113 g)", 1.5, 186], JSON.stringify(e));
   assert.strictEqual(M.log.totals(M.today()).cal, before, "not re-priced");
-  /* a new amount is priced with today's numbers */
+  /* NJ-01: a new amount or unit keeps the entry's own numbers (only picking the food again takes today's) */
   click(q('[data-m="entry"][data-id="legacy1"]'));
+  change(q('[data-m="det-unit"]'), "oz-cooked");
+  assert.strictEqual(q('[data-m="det-qty"]').value, "6");
+  assert.ok(/279cal/.test($("m-live").textContent.replace(/\s/g, "")), "a unit change alone never re-prices: " + $("m-live").textContent);
   input(q('[data-m="det-qty"]'), "7");
   click($("m-det-go"));
   e = M.log.slotEntries(M.today(), "Snacks").find(x => x.id === "legacy1");
-  assert.deepStrictEqual([e.foodId, e.state, e.servingLabel], ["g_kirkland_organic_chicken", "cooked", "1 oz cooked"]);
+  /* F1 (leftovers): an updated old entry may keep its own (aliased) id */
+  assert.ok(e.foodId === "g_kirkland_organic_chicken" || e.foodId === "g_chicken_breast_cooked", e.foodId);
+  assert.deepStrictEqual([e.state, e.servingLabel], ["cooked", "1 oz cooked"]);
   near(e.servings * e.g, 7 * OZ, 0.5, "7 oz cooked");
-  near(M.log.totals(M.today()).cal - before, 7 * OZ * ck100 / 100 - 1.5 * 186, 2, "priced with the Kirkland numbers");
+  near(M.log.totals(M.today()).cal - before, 7 * OZ * 186 / 113 - 1.5 * 186, 2, "priced with the entry's own numbers (NJ-01), not Kirkland's " + ck100);
   assert.ok(/(oz raw \(7 oz cooked\)|g raw \(198 g cooked\))/.test(q('[data-m="entry"][data-id="legacy1"]').textContent), "still reads raw first: " + q('[data-m="entry"][data-id="legacy1"]').textContent);
   M.log.remove(M.today(), "legacy1"); M.ui.render();
   /* an old raw entry (g_chicken_breast) reads raw first and reopens in its own unit */
@@ -571,7 +581,7 @@ t("entries saved before the merge read raw first and reopen in their old weight"
   M.ui.render();
   assert.ok(/(6 oz raw \([\d.]+ oz cooked\)|170 g raw \([\d.]+ g cooked\))/.test(q('[data-m="entry"][data-id="legacy2"]').textContent), "old raw id reads raw first: " + q('[data-m="entry"][data-id="legacy2"]').textContent);
   click(q('[data-m="entry"][data-id="legacy2"]'));
-  assert.deepStrictEqual([q('[data-m="det-unit"]').value, q('[data-m="det-qty"]').value], ["oz-raw", "6"], "edit keeps the unit it was saved in");
+  assert.deepStrictEqual([q('[data-m="det-unit"]').value, q('[data-m="det-qty"]').value], ["g-raw", "170"], "decision 6: an oz entry of the chicken reopens in raw grams");
   M.ui.close();
   M.log.remove(M.today(), "legacy2"); M.ui.render();
 });
@@ -585,7 +595,9 @@ t("recents: the row shows last time's raw (cooked) amount and reopens with it; M
   assert.strictEqual(rc.name, "Chicken breast, organic", "live name");
   assert.strictEqual(rc.state, "raw", "chicken breast recents come back raw");
   const info = M.cook.entryInfo(rc);
-  near(info.grams, 5 * OZ / cf.cook.y, 3, "5 oz cooked = ~195 g raw");
+  /* 5 oz cooked = ~195 g raw; or, after F1's NJ-04, the food's own 175 g (an old recent under another name
+     never pre-fills its amount) */
+  assert.ok(Math.abs(info.grams - 5 * OZ / cf.cook.y) <= 3 || Math.abs(info.grams - 175) <= 1, "5 oz cooked = ~195 g raw, or the breast's 175 g: " + info.grams);
   const label = M.cook.label(info.grams, "raw", cf.cook, "g");
   assert.ok(/^\d+ g raw \(\d+ g cooked\)$/.test(label), label);
   click(q('[data-m="add"][data-slot="Lunch"]'));
@@ -1176,8 +1188,9 @@ t("Log food: no auto-focus, no scanner preload; tools step aside while searching
     assert.strictEqual(pre, 0, "scanner not preloaded");
     assert.ok(!q(".m-add").classList.contains("m-typing"));
     $("m-search").focus();
-    assert.ok(q(".m-add").classList.contains("m-typing"), "typing mode while focused");
+    assert.ok(!q(".m-add").classList.contains("m-typing"), "PL-04: focus alone keeps the tools, so Tab reaches them");
     input($("m-search"), "zzqxv");
+    assert.ok(q(".m-add").classList.contains("m-typing"), "typing mode once there's text");
     await sleep(200);
     assert.ok(/Searching online…/.test($("m-results").textContent), $("m-results").textContent);
     assert.ok(q('#m-results .m-addnew[data-m="open-form"]'), "add-new button already there");
@@ -1323,10 +1336,10 @@ t("quick add: calories (and macros) → one entry, not saved as a food; checks t
   click(q('.m-tools [data-m="quick"]'));
   assert.ok(/^Quick add/.test($("sheetT").textContent));
   click(q('[data-m="qa-go"]'));
-  assert.strictEqual($("m-qa-msg").textContent, "Enter the calories.");
+  assert.strictEqual($("m-qa-msg").textContent, "Type the calories.", "PL-14");
   input(q('[data-m="qa"][data-k="cal"]'), "-5");
   click(q('[data-m="qa-go"]'));
-  assert.ok(/below zero/.test($("m-qa-msg").textContent));
+  assert.strictEqual($("m-qa-msg").textContent, "Numbers can't be below 0.", "PL-14");
   input(q('[data-m="qa"][data-k="cal"]'), "350");
   input(q('[data-m="qa"][data-k="p"]'), "20");
   input(q('[data-m="qa"][data-k="name"]'), "Cake at work");
@@ -1598,6 +1611,193 @@ t("F2a decisions 3–5 + VI-19: cal with commas, carbs/fat say 'N over', empty m
     assert.ok(!/kcal/.test($("app").textContent), "no 'kcal' on the Diary");
     assert.strictEqual(q('.m-foot [data-m="suggest"]').textContent, "Meal ideas");
   } finally { M.ui.date = M.today(); M.ui.render(); }
+});
+
+/* ---------------- F2a round 5 (swarm #3) ---------------- */
+t("F2a LK-01 / LK-02: m.css beats Chalk's inline rules on specificity; Log food tools fill a 12-column grid; short phones compact", () => {
+  const css = fs.readFileSync(path.join(__dirname, "..", "m.css"), "utf8");
+  [".card.m-slot .hd{align-items:center;padding:12px 6px 0 14px}", ".card.m-slot.m-empty .hd{padding-bottom:8px}", ".card.m-sug .hd h3{font-size:20px}",
+    ".seg.m-useg button{font-size:17px}", ".seg.scope.m-cookseg button{padding:6px 4px}", ".stats.m-live,.stats.m-stats4{gap:6px}",
+    ".m-tools{grid-template-columns:repeat(12,minmax(0,1fr))}", ".m-tools>button{grid-column:span 3}"].forEach(r => assert.ok(css.indexOf(r) >= 0, "m.css has " + r));
+  assert.ok(/HEADS UP \(LK-01\)/.test(css.slice(0, 600)), "the note sits at the top of m.css");
+  assert.ok(/@media \(max-height:700px\)\{[^}]*\.sheet:has\(#m-search\)\{height:92%;max-height:92%\}/.test(css), "a taller Log food sheet on short phones");
+  /* seven tools (4 + 3) and six in the meal builder (3 + 3) */
+  M.ui.openAdd({ slot: "Lunch" });
+  assert.strictEqual(qa(".m-tools>button").length, 7);
+  M.ui.close();
+  M.ui.openAdd({ slot: "Lunch", onPick: () => {} });
+  assert.strictEqual(qa(".m-tools>button").length, 6);
+  M.ui.close();
+});
+
+t("F2a decision 6 (MF-05 / U3-02 / PL-11): the chicken reads in grams in the editor; breasts show the count and reopen in breasts; an oz entry reopens in raw grams", async () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const f = M.foods.get("g_kirkland_organic_chicken");
+  const ids = [];
+  try {
+    M.ui.openAdd({ slot: "Dinner", seg: "foods" }); input($("m-search"), "chicken breast"); await sleep(220);   /* the food itself, not a recent */
+    click(qa('#m-results [data-m="pick"]').find(r => /Chicken breast, organic/.test(r.textContent)));
+    assert.strictEqual(q('[data-m="det-unit"]').value, "g-raw");
+    change(q('[data-m="det-unit"]'), "oz-raw");
+    assert.ok(/^\d+ g raw \(\d+ g cooked\)$/.test($("m-det-amt").textContent), "oz picked, the line still in grams: " + $("m-det-amt").textContent);
+    change(q('[data-m="det-unit"]'), "breast-raw");
+    input(q('[data-m="det-qty"]'), "2");
+    assert.strictEqual($("m-det-amt").textContent, "2 breasts · 350 g raw (254 g cooked)");
+    input(q('[data-m="det-qty"]'), "1");
+    assert.strictEqual($("m-det-amt").textContent, "1 breast · 175 g raw (127 g cooked)");
+    input(q('[data-m="det-qty"]'), "2");
+    click($("m-det-go"));
+    const e = M.log.slotEntries(M.today(), "Dinner").find(x => x.foodId === f.id); ids.push(e.id);
+    M.ui.render();
+    click(q('[data-m="entry"][data-id="' + e.id + '"]'));
+    assert.deepStrictEqual([q('[data-m="det-unit"]').value, q('[data-m="det-qty"]').value, $("m-det-amt").textContent], ["breast-raw", "2", "2 breasts · 350 g raw (254 g cooked)"], "logged in breasts, reopens in breasts");
+    M.ui.close();
+    /* an entry weighed in oz opens in raw grams, its own numbers kept until changed */
+    const e2 = M.log.add(M.today(), { slot: "Dinner", name: f.name, brand: f.brand, foodId: f.id, servings: 12.3, servingLabel: "1 oz raw", g: OZ, per: M.cook.perFor(f, "raw", OZ), state: "raw", cook: { y: f.cook.y, word: "raw" } }); ids.push(e2.id);
+    const cal = Math.round(M.foodMath.scale(e2.per, 12.3).cal);
+    M.ui.render(); click(q('[data-m="entry"][data-id="' + e2.id + '"]'));
+    assert.deepStrictEqual([q('[data-m="det-unit"]').value, q('[data-m="det-qty"]').value], ["g-raw", "349"]);
+    assert.strictEqual($("m-det-amt").textContent, "349 g raw (253 g cooked)");
+    assert.ok($("m-live").textContent.replace(/\s/g, "").indexOf(cal + "cal") === 0, "its own numbers: " + $("m-live").textContent);
+    M.ui.close();
+  } finally { ids.forEach(id => M.log.remove(M.today(), id)); if (M.ui.sheetOpen()) M.ui.close(); M.ui.render(); }
+});
+
+t("F2a NJ-01: editing an old entry never re-prices it with the food's newer numbers (a unit change keeps the entry's own per)", () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  /* 200 oz of the old generic chicken: 120 cal / 100 g (the Kirkland breast is 98) */
+  const e = M.log.add(M.today(), { slot: "Snacks", name: "Chicken breast, boneless skinless", foodId: "g_chicken_breast", servings: 200, servingLabel: "1 oz raw", g: OZ, per: { cal: 34.02, p: 6.38, c: 0, f: 0.735 }, state: "raw" });
+  try {
+    M.ui.render(); click(q('[data-m="entry"][data-id="' + e.id + '"]'));
+    const cal = () => Number($("m-live").querySelector(".v").textContent.replace(/[^\d]/g, ""));
+    assert.strictEqual(cal(), 6804);
+    change(q('[data-m="det-unit"]'), "oz-raw");
+    assert.strictEqual(cal(), 6804, "oz ↔ g alone never re-prices");
+    change(q('[data-m="det-unit"]'), "g-raw");
+    input(q('[data-m="det-qty"]'), "200");
+    assert.strictEqual(cal(), 240, "200 g at the entry's own 120 cal / 100 g (not the Kirkland 196)");
+    click($("m-det-go"));
+    const s = M.log.slotEntries(M.today(), "Snacks").find(x => x.id === e.id);
+    near(M.foodMath.scale(s.per, s.servings).cal, 240, 1);
+  } finally { M.log.remove(M.today(), e.id); if (M.ui.sheetOpen()) M.ui.close(); M.ui.render(); }
+});
+
+t("F2a MF-03 (decision 7, L1): Log food opens the serving editor at the amount typed when the food has that unit", async () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const real = M.searchAmount;
+  const parse = qq => { const m = /^(\d+(?:\.\d+)?)\s*(eggs?|cups?|oz|g|slices?|breasts?|tbsp)\b\s*(raw|cooked|dry)?/i.exec(String(qq).trim()); return m ? { qty: +m[1], unit: m[2].toLowerCase().replace(/s$/, ""), state: m[3] ? m[3].toLowerCase() : null } : null; };
+  const open = async (qq, re) => { M.ui.openAdd({ slot: "Lunch", seg: "foods" }); input($("m-search"), qq); await sleep(220); const r = qa('#m-results [data-m="pick"]').find(x => re.test(x.textContent)); assert.ok(r, qq + ": a row for " + re); click(r); return [q('[data-m="det-unit"]') ? q('[data-m="det-unit"]').value : "", q('[data-m="det-qty"]').value, $("m-det-amt").textContent]; };
+  try {
+    /* the real parser (F1) when it has landed: "2 eggs" is 2 eggs */
+    if (typeof real === "function") { const r = await open("2 eggs", /Eggs, whole/); assert.strictEqual(r[1], "2", "real M.searchAmount: " + JSON.stringify(r)); M.ui.close(); }
+    M.searchAmount = parse;
+    let r = await open("2 eggs", /Eggs, whole/); assert.deepStrictEqual([r[1], r[2]], ["2", "2 large eggs · 100 g"]); M.ui.close();
+    r = await open("1 cup cooked quinoa", /^Quinoa/); assert.deepStrictEqual([r[0], r[1]], ["cup-cooked", "1"]); M.ui.close();
+    r = await open("2 breasts chicken", /Chicken breast, organic/); assert.deepStrictEqual(r, ["breast-raw", "2", "2 breasts · 350 g raw (254 g cooked)"]); M.ui.close();
+    r = await open("8 oz chicken breast", /Chicken breast, organic/); assert.deepStrictEqual([r[0], r[1]], ["oz-raw", "8"]); M.ui.close();
+    r = await open("4 slices turkey", /Turkey slices/); assert.deepStrictEqual([r[1], r[2]], ["4", "4 slices · 37 g"]); M.ui.close();
+    r = await open("150 g greek yogurt", /yogurt/i); assert.deepStrictEqual([r[0], r[1]], ["g", "150"]); M.ui.close();
+    /* no amount typed, or a unit the food doesn't have: the food's own default */
+    r = await open("chicken breast", /Chicken breast, organic/); assert.deepStrictEqual([r[0], r[1]], ["g-raw", "175"]); M.ui.close();
+    r = await open("3 tbsp eggs", /Eggs, whole/); assert.strictEqual(r[1], "1"); M.ui.close();
+  } finally { if (real) M.searchAmount = real; else delete M.searchAmount; if (M.ui.sheetOpen()) M.ui.close(); }
+});
+
+t("F2a KJ-03: a serving of several pieces opens on one piece (turkey 6 slices → 1 slice × 6), so typing 4 logs 4 slices", async () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const real = M.searchAmount; delete M.searchAmount;
+  const ids = [];
+  try {
+    M.ui.openAdd({ slot: "Lunch" }); input($("m-search"), "turkey slices"); await sleep(220);
+    click(qa('#m-results [data-m="pick"]').find(x => /Turkey slices/.test(x.textContent)));
+    assert.deepStrictEqual([q('[data-m="det-qty"]').value, $("m-det-amt").textContent], ["6", "6 slices · 56 g"]);
+    assert.ok(/^1 slice/.test(q('[data-m="det-unit"]').selectedOptions[0].textContent), q('[data-m="det-unit"]').selectedOptions[0].textContent);
+    input(q('[data-m="det-qty"]'), "4");
+    click($("m-det-go"));
+    const e = M.log.slotEntries(M.today(), "Lunch").find(x => /Turkey slices/.test(x.name)); ids.push(e.id);
+    near(e.servings * e.g, 37.2, 0.5, "4 slices, not 24");
+    near(M.foodMath.scale(e.per, e.servings).cal, 40, 1);
+    /* baby carrots too */
+    M.ui.openAdd({ slot: "Snacks" }); input($("m-search"), "baby carrots"); await sleep(220);
+    click(qa('#m-results [data-m="pick"]').find(x => /baby/i.test(x.textContent)));
+    assert.deepStrictEqual([q('[data-m="det-qty"]').value, $("m-det-amt").textContent], ["10", "10 baby carrots · 100 g"]);
+    M.ui.close();
+  } finally { if (real) M.searchAmount = real; ids.forEach(id => M.log.remove(M.today(), id)); if (M.ui.sheetOpen()) M.ui.close(); M.ui.render(); }
+});
+
+t("F2a U3-01: Quick add left open past midnight saves to the new day (and says so)", () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  M.ui.tab = "diary"; M.ui.date = M.today(); M.ui.render();
+  M.ui.openAdd({ slot: "Snacks" });
+  click(q('.m-tools [data-m="quick"]'));
+  assert.strictEqual($("sheetT").textContent, "Quick add");
+  const old = M.today();
+  let nd = null;
+  try {
+    M.now = () => realNow() + DAYMS;
+    nd = M.today(); assert.notStrictEqual(nd, old);
+    M.ui.wake();
+    assert.strictEqual($("sheetT").textContent, "Quick add", "retitled for the new day (today again)");
+    input(q('[data-m="qa"][data-k="cal"]'), "123");
+    click(q('[data-m="qa-go"]'));
+    assert.ok(M.log.slotEntries(nd, "Snacks").some(x => x.per && Math.round(x.per.cal) === 123), "saved to the new day");
+    assert.ok(!M.log.slotEntries(old, "Snacks").some(x => x.per && Math.round(x.per.cal) === 123), "not to yesterday");
+  } finally {
+    if (nd) M.log.slotEntries(nd, "Snacks").slice().forEach(x => M.log.remove(nd, x.id));
+    M.now = realNow; M.ui.wake(); if (M.ui.sheetOpen()) M.ui.close(); M.ui.date = M.today(); M.ui.render();
+  }
+});
+
+t("F2a L3 / U3-03: Log food tags the other person's meals with their name and lists this person's meals first", () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const it = (n, cal) => ({ name: n, servings: 1, servingLabel: "1 serving", per: { cal, p: 30, c: 10, f: 5 } });
+  const k = M.meals.add({ name: "Zz smoothie", slot: "Breakfast", servingsMade: 1, items: [it("Smoothie", 250)] }); M.meals.get(k.id).pid = "kat";
+  const n = M.meals.add({ name: "Zz oats", slot: "Breakfast", servingsMade: 1, items: [it("Oats", 300)] }); M.meals.get(n.id).pid = M.pid();
+  try {
+    M.ui.openAdd({ slot: "Breakfast" });
+    const names = () => qa('#m-results [data-m="pick"]').map(r => r.querySelector(".n").textContent);
+    let rows = names().filter(x => /^Zz/.test(x));
+    assert.ok(rows.indexOf("Zz oats Meal") >= 0 && rows.indexOf("Zz oats Meal") < rows.findIndex(x => /^Zz smoothie/.test(x)), "Recent: my meal first: " + JSON.stringify(rows));
+    const kat = qa('#m-results [data-m="pick"]').find(r => /Zz smoothie/.test(r.textContent));
+    assert.ok(kat.querySelector(".tag.m-who") && /Kat/.test(kat.querySelector(".tag.m-who").textContent), "the other person's name tag: " + kat.innerHTML);
+    assert.ok(!qa('#m-results [data-m="pick"]').find(r => /Zz oats/.test(r.textContent)).querySelector(".m-who"), "no tag on my own meal");
+    click(q('[data-m="add-seg"][data-v="meals"]'));
+    rows = names().filter(x => /^Zz/.test(x));
+    assert.ok(/^Zz oats/.test(rows[0]) && /^Zz smoothie/.test(rows[1]), "Meals: mine first: " + JSON.stringify(rows));
+    M.ui.close();
+  } finally { M.meals.remove(k.id); M.meals.remove(n.id); if (M.ui.sheetOpen()) M.ui.close(); M.ui.render(); }
+});
+
+t("F2a P3: rows never break inside P·C·F (LK-05), VoiceOver labels (PL-05/06/07), plain fiber stats (LK-12), 'Save food' (U3-08), bracket grams read once (MF-09)", async () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const e = M.log.add(M.today(), { slot: "Breakfast", name: "Eggs, whole", servings: 3, servingLabel: "1 large egg (50 g)", g: 50, per: { cal: 72, p: 6.3, c: 0.4, f: 4.8 } });
+  try {
+    M.ui.tab = "diary"; M.ui.date = M.today(); M.ui.more = true; M.ui.render();
+    const row = q('[data-m="entry"][data-id="' + e.id + '"]');
+    assert.strictEqual(row.getAttribute("aria-label"), "Eggs, whole. 3 large eggs (150 g). 216 cal. Protein 19 g, carbs 1 g, fat 14 g.");
+    assert.strictEqual(q('.m-slot-add [data-m="add"][data-slot="Breakfast"]').getAttribute("aria-label"), "Add to Breakfast");
+    assert.ok(q('[data-m="more"] span[aria-hidden="true"]'), "▾ / ▴ hidden from VoiceOver");
+    assert.ok(q("#m-more .m-nutri") && !q("#m-more .chip"), "fiber, sugar, sodium are plain stats, not chips");
+    M.ui.openAdd({ slot: "Lunch", seg: "foods" }); input($("m-search"), "eggs"); await sleep(220);
+    const r = q('#m-results [data-m="pick"]');
+    assert.ok(/ cal\. Protein \d+ g, carbs \d+ g, fat \d+ g\.$/.test(r.getAttribute("aria-label")), r.getAttribute("aria-label"));
+    assert.ok(/P \d+ · C \d+ · F \d+/.test(r.querySelector(".t").textContent), "one unbreakable P · C · F run: " + r.querySelector(".t").textContent);
+    M.ui.close();
+    /* the streak chip's fire is decorative */
+    const chip = q(".m-foot .m-streak"); if (chip) assert.ok(chip.querySelector('[aria-hidden="true"]'));
+    /* an entry with no food: "Save food" */
+    const e2 = M.log.add(M.today(), { slot: "Snacks", name: "Mystery bar", servings: 1, servingLabel: "1 bar (40 g)", g: 40, per: { cal: 190, p: 10, c: 20, f: 7 } });
+    M.ui.render(); click(q('[data-m="entry"][data-id="' + e2.id + '"]'));
+    assert.strictEqual(q('[data-m="det-savefood"]').textContent, "Save food");
+    M.ui.close(); M.log.remove(M.today(), e2.id);
+    /* MF-09 / KJ-07 */
+    assert.strictEqual(M.ui._.amountLabel({ servings: 1, servingLabel: "1 container (6 oz, 170 g)", g: 170 }), "1 container (6 oz, 170 g)");
+    assert.strictEqual(M.ui._.amountLabel({ servings: 2, servingLabel: "1 container (6 oz, 170 g)", g: 170 }), "2 containers (340 g)");
+    assert.strictEqual(M.ui._.amountLabel({ servings: 2, servingLabel: "1 container (6 oz) (170 g)", g: 170 }), "2 containers (340 g)");
+    const css = fs.readFileSync(path.join(__dirname, "..", "m.css"), "utf8");
+    assert.ok(css.indexOf(':root:not([data-theme="dark"]) .m-foot .chip.m-streak{color:#7A4F06}') >= 0, "PL-15");
+    assert.ok(css.indexOf(".stats.m-live .stat .k,.stats.m-stats4 .stat .k{font-size:12px}") >= 0 && css.indexOf(".m-ring-l{font-size:12px}") >= 0, "PL-08");
+  } finally { M.ui.more = false; M.log.remove(M.today(), e.id); if (M.ui.sheetOpen()) M.ui.close(); M.ui.render(); }
 });
 
 (async () => {

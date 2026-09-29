@@ -2029,10 +2029,10 @@ window.M = window.M || {};
     slice: ["slice", "slices"], piece: ["piece", "pieces", "pc", "pcs"], scoop: ["scoop", "scoops"], serving: ["serving", "servings", "portion", "portions"],
     small: ["small", "sm"], medium: ["medium", "med"], large: ["large", "lg"], can: ["can", "cans"], bottle: ["bottle", "bottles"], bar: ["bar", "bars"],
     egg: ["egg", "eggs"], handful: ["handful", "handfuls"], bag: ["bag", "bags"], packet: ["packet", "packets", "pack"], link: ["link", "links"], stick: ["stick", "sticks"],
-    ear: ["ear", "ears"], spear: ["spear", "spears"], stalk: ["stalk", "stalks"], floret: ["floret", "florets"], clove: ["clove", "cloves"], wedge: ["wedge", "wedges"], strip: ["strip", "strips"]
+    glass: ["glass", "glasses"], shot: ["shot", "shots"], ear: ["ear", "ears"], spear: ["spear", "spears"], stalk: ["stalk", "stalks"], floret: ["floret", "florets"], clove: ["clove", "cloves"], wedge: ["wedge", "wedges"], strip: ["strip", "strips"]
   };
   /* "6 asparagus spears", "2 garlic cloves": a count word after the food is its unit */
-  const TRAIL_COUNT = /\s+(spears?|stalks?|florets?|cloves?|wedges?|strips?|pieces?)$/i;
+  const TRAIL_COUNT = /\s+(spears?|stalks?|florets?|cloves?|wedges?|strips?|pieces?|shots?)$/i;
   const UNIT_LOOKUP = {}; Object.keys(UNIT_WORDS).forEach(u => UNIT_WORDS[u].forEach(w => { UNIT_LOOKUP[w] = u; }));
   const WORD_NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, dozen: 12 };
 
@@ -2045,6 +2045,7 @@ window.M = window.M || {};
     let qty = null, unit = null;
     s = s.replace(/(\d)\s*-\s*(?=(oz|ounce|g|gram|lb|cup|tbsp|tsp|ml)\b)/i, "$1 ");          /* "5-oz" → "5 oz" */
     s = s.replace(/^(\d+(?:\.\d+)?)\s*[x×]\s+(?=[a-z])/i, "$1 ");                            /* "2x chicken breast" → "2 chicken breast" */
+    s = s.replace(/^[x×]\s*(\d+(?:\.\d+)?)\s+(?=[a-z])/i, "$1 ");                             /* "x2 eggs" → "2 eggs" */
     /* "2% cottage cheese" and "80/20 ground beef" name the food; they aren't amounts */
     const partOfName = /^\d+(?:[.,]\d+)?\s*%/.test(s) || /^\d{2,}\s*\/\s*\d{1,2}\b/.test(s);
     const m = partOfName ? null : /^(\d+\s*[½¼¾⅓⅔⅛]|[½¼¾⅓⅔⅛])\s*/.exec(s)
@@ -2061,18 +2062,31 @@ window.M = window.M || {};
       s = s.slice(m[0].length);
       if (/^(a|an)\s+/i.test(s) && qty === 0.5) s = s.replace(/^(a|an)\s+/i, "");
     }
+    /* SD-18: "whole avocado" is 1 avocado (not its usual ½); "whole milk", "whole wheat" are names */
+    if (qty == null && /^whole\s+(?!milk|wheat|grains?|foods?|eggs?\b)[a-z]/i.test(s)) qty = 1;
     const xm = /\s*[x×]\s*(\d+(?:\.\d+)?)\s*$/i.exec(s);
     if (xm) { qty = (qty == null ? 1 : qty) * num(xm[1], 1); s = s.slice(0, xm.index); }
     if (qty == null) {                                   /* trailing amount: "chicken thigh 8 oz", "rice (1 cup)", "quinoa 1/4 cup dry" */
       const tm = /\s*\(?\s*(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)\s*([a-zA-Z]+)?\.?(?:\s+(?:raw|dry|uncooked|cooked))?\s*\)?\s*$/i.exec(s);
       /* "chicken 1 banana" is two foods, not 1 chicken: a word after the number must be a unit */
       const tw = tm ? lc(tm[2] || "") : "";
-      if (tm && tm.index > 0 && (!tw || UNIT_LOOKUP[tw] || tw === "floz" || /^(breasts?|fillets?|filets?|pieces?|whole|jumbo|big|mini)$/.test(tw))) {
+      /* SD-03: "toast 2 eggs" is toast and 2 eggs ("eggs" after a number is a food, not a unit) */
+      if (tm && tm.index > 0 && (!tw || (UNIT_LOOKUP[tw] && UNIT_LOOKUP[tw] !== "egg") || tw === "floz" || /^(breasts?|fillets?|filets?|pieces?|whole|jumbo|big|mini)$/.test(tw))) {
         qty = qtyOf(tm[1]);
         const uw = lc(tm[2] || "");
         if (uw && UNIT_LOOKUP[uw] && UNIT_LOOKUP[uw] !== "egg") unit = UNIT_LOOKUP[uw];
         else if (uw === "floz") unit = "fl oz";
         s = s.slice(0, tm.index);
+      }
+    }
+    if (qty == null) {                                   /* SD-17: "rice half cup", "blueberries a half cup" */
+      const hm = /\s+(?:a\s+)?(half|quarter|one|two|three|four|five|six)\s+(?:an?\s+)?([a-z]+)\.?(?:\s+(?:raw|dry|uncooked|cooked))?\s*$/i.exec(s);
+      const hu = hm ? lc(hm[2]) : "";
+      if (hm && hm.index > 0 && UNIT_LOOKUP[hu] && UNIT_LOOKUP[hu] !== "egg") {
+        const w = lc(hm[1]);
+        qty = w === "half" ? 0.5 : w === "quarter" ? 0.25 : WORD_NUM[w];
+        unit = UNIT_LOOKUP[hu];
+        s = s.slice(0, hm.index);
       }
     }
     const gm = /^(\d+(?:\.\d+)?)(g|oz|ml|lb|lbs)\b\.?\s*/i.exec(s);        /* "4oz" glued */
@@ -2103,6 +2117,7 @@ window.M = window.M || {};
   const VOL_CUPS = { cup: 1, tbsp: 1 / 16, tsp: 1 / 48, ml: 1 / 240, "fl oz": 1 / 8 };
   const COUNTISH = /^(large|medium|small|whole|each|piece|pieces|slice|slices|egg|eggs|large egg|large eggs|link|links|bar|bars|cake|cakes|stick|sticks|fruit|tomato|tomatoes|patty|patties|breast|thigh|fillet|filet|tortilla|bagel|muffin|banana|apple|orange|potato|can|bottle|container|cup of yogurt|scoop|packet|pouch)$/i;
   const unitBase = u => lc(u).replace(/,.*$/, "").replace(/\(.*$/, "").trim();
+  const PKG_UNIT = /^(bottle|can|container|packet|pouch|bag|box|jar|carton|tub)s?\b/i;
   const isWeightUnit = u => /^(g|gram|grams|oz|ounce|ounces|lb|lbs|pound|pounds)$/.test(unitBase(u));
   const isVolUnit = u => VOL_CUPS[volKey(u)] !== undefined;
   function volKey(u) { const b = unitBase(u).replace(/s$/, ""); return b === "tablespoon" ? "tbsp" : b === "teaspoon" ? "tsp" : b === "fl oz" || b === "floz" ? "fl oz" : b; }
@@ -2155,7 +2170,15 @@ window.M = window.M || {};
         return own(q.qty / svQty);
       }
       /* "10 shrimp" on a "4 oz" food → 10 × "1 large shrimp", not 10 × 4 oz */
-      const count = alts.find(a => { const p = M.parseServing ? M.parseServing(a.label) : null; return p && (COUNTISH.test(unitBase(p.unit)) || /^(large|medium|small|jumbo)\s+[a-z]/.test(unitBase(p.unit))); });
+      /* SD-06: never a package ("2 wines" isn't 2 bottles) unless they said that word */
+      const said = wordsOf(q.words || "");
+      const count = alts.find(a => {
+        const p = M.parseServing ? M.parseServing(a.label) : null;
+        if (!p) return false;
+        const b = unitBase(p.unit);
+        if (PKG_UNIT.test(b) && said.indexOf(singular(b.split(/\s+/)[0])) < 0) return false;
+        return COUNTISH.test(b) || /^(large|medium|small|jumbo)\s+[a-z]/.test(b);
+      });
       if (count) { const p = M.parseServing(count.label); const r = altRow(count, q.qty / (p.qty || 1)); if (r) return r; }
       return own(q.qty);
     }
@@ -2230,7 +2253,10 @@ window.M = window.M || {};
     (Array.isArray(food.alts) ? food.alts : []).forEach(a => { if (a && a.label && num(a.g) > 0 && !isVolUnit(M.parseServing ? (M.parseServing(a.label) || {}).unit || "" : "") && !isWeightUnit(M.parseServing ? (M.parseServing(a.label) || {}).unit || "" : "")) look(a.label, a.g, false); });
     if (!cands.length) return null;
     const want = num(qty, 0);
-    const key = c => [-c.cover, c.own && Math.abs(c.qty - 1) < 1e-6 ? 0 : 1, want && Math.abs(c.qty - want) < 1e-6 ? 0 : 1, Math.abs(c.qty - 1) < 1e-6 ? 0 : 1, c.own ? 0 : 1];
+    /* a size they said picks that size ("10 jumbo shrimp" → the jumbo one, not large) */
+    const sizes = wordsOf(words || "").filter(w => /^(small|medium|large|jumbo)$/.test(w));
+    const sizeKey = c => (!sizes.length ? 0 : sizes.some(z => new RegExp("\\b" + z + "\\b", "i").test(c.alt ? c.alt.label : String((food.serving || {}).unit || ""))) ? 0 : 1);
+    const key = c => [-c.cover, sizeKey(c), c.own && Math.abs(c.qty - 1) < 1e-6 ? 0 : 1, want && Math.abs(c.qty - want) < 1e-6 ? 0 : 1, Math.abs(c.qty - 1) < 1e-6 ? 0 : 1, c.own ? 0 : 1];
     cands.sort((a, b) => { const ka = key(a), kb = key(b); for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i]; return 0; });
     return cands[0];
   }
@@ -2250,7 +2276,7 @@ window.M = window.M || {};
   const singular = w => (w.length > 3 && /s$/.test(w) && !/ss$/.test(w) ? w.replace(/(ie)s$/, "y").replace(/(o|ch|sh|x)es$/, "$1").replace(/s$/, "") : w);
   /* Words of a name or a phrase: M.searchTokens (m-core) when it is there, so describe and search
      read words the same way; numbers ("2%", "93", "80/20") are kept for the scoring. */
-  const wordsOf = s => {
+  const wordsOfRaw = s => {
     const own = lc(s).replace(/['’]/g, "").split(WORD_SPLIT).filter(w => w && (w.length > 1 || /\d/.test(w)));
     if (typeof M.searchTokens === "function") {
       try {
@@ -2260,8 +2286,30 @@ window.M = window.M || {};
     }
     return own.map(singular);
   };
+  /* SD-05: describe reads the same names thousands of times, so the words of a string and the
+     parts of a food's name are worked out once and remembered (read-only arrays: never change
+     what these return) */
+  const WORDS_MEMO = new Map();
+  const wordsOf = s => {
+    const key = String(s == null ? "" : s);
+    let out = WORDS_MEMO.get(key);
+    if (out) return out;
+    out = wordsOfRaw(key);
+    if (WORDS_MEMO.size > 8000) WORDS_MEMO.clear();
+    WORDS_MEMO.set(key, out);
+    return out;
+  };
   const toks = s => wordsOf(s).filter(w => !STOP.test(w));
+  const PARTS_MEMO = new WeakMap();
+  const wordsKey = f => (typeof f.words === "string" ? f.words : Array.isArray(f.words) ? f.words.join(" ") : "");
   function nameParts(food) {
+    const wk = wordsKey(food), hit = PARTS_MEMO.get(food);
+    if (hit && hit.name === food.name && hit.brand === food.brand && hit.wk === wk) return hit.v;
+    const v = namePartsRaw(food);
+    PARTS_MEMO.set(food, { name: food.name, brand: food.brand, wk, v });
+    return v;
+  }
+  function namePartsRaw(food) {
     const full = lc(food.name), main = full.replace(/\([^)]*\)/g, " "), head = main.split(/[,(]/)[0];
     const mw = main.split(WORD_SPLIT).filter(Boolean);
     const optional = new Set();
@@ -2272,7 +2320,9 @@ window.M = window.M || {};
     let noun = "";
     for (let i = hw.length - 1; i >= 0; i--) { const w = hw[i]; if (/\d/.test(w) || DESCRIPTOR.test(w) || PACK_WORD.test(w)) continue; noun = w; break; }
     const extra = typeof food.words === "string" ? wordsOf(food.words) : Array.isArray(food.words) ? wordsOf(food.words.join(" ")) : [];
-    return { full, all: wordsOf(full), main: wordsOf(main), head: hw, noun, brand: wordsOf(food.brand || ""), optional, extra };
+    /* the words after the first comma ("Egg bites, bacon and gruyere" → bacon, gruyere) */
+    const after = main.indexOf(",") >= 0 ? wordsOf(main.slice(main.indexOf(",") + 1)) : [];
+    return { full, all: wordsOf(full), main: wordsOf(main), head: hw, noun, brand: wordsOf(food.brand || ""), optional, extra, after, brandStr: lc(food.brand || "").replace(/['’]/g, "") };
   }
   /* Words that may be missing from a food's name without making it a different food: colors,
      sizes, stores ("red bell pepper" → Bell pepper, "baby carrots" → Carrots). Any other word
@@ -2281,7 +2331,7 @@ window.M = window.M || {};
   const LOOSE = /^(red|green|yellow|orange|white|purple|brown|golden|baby|mini|jumbo|extra|thin|thick|thinly|shredded|cubed|halved|whole|fresh|frozen|leftover|homemade|costco|kroger|king|soopers|trader|joe|walmart|target|safeway|store|bought|pieces?|chunks?)$/i;
   /* A word in the food's name that makes it a different food when they didn't say it:
      "cream" is not sour cream or ice cream, "butter" is not peanut butter. */
-  const CHANGER = /^(sour|peanut|almond|cashew|coconut|soy|oat|ice|string|cream)$/i;
+  const CHANGER = /^(sour|peanut|almond|cashew|coconut|soy|oat|ice|string|cream|cottage)$/i;
   /* a dish is more than its parts: "a turkey sandwich" isn't turkey slices + a slice of bread */
   const DISH = /^(sandwich|sub|hoagie|wrap|burger|burrito|taco|pizza|soup|stew|casserole|bake|pie|quesadilla|omelet|omelette|lasagna|curry|chili|salad)$/i;
   /* foods that come in kinds named by another food ("banana bread", "grape juice", "banana
@@ -2290,6 +2340,8 @@ window.M = window.M || {};
   const SEASONING = /^(lemon|lime|garlic|honey|ginger|salt|chili|chile|cinnamon|sesame|mustard|maple|sriracha|pesto|buffalo|bbq|cajun|teriyaki|curry|herb|soy|balsamic|jerk|chipotle|smoky|spicy)$/i;
   /* how many times a run-on note ("cod asparagus quinoa") may be cut into foods */
   const SPLIT_DEPTH = 4;
+  /* words that only describe: never a food of their own inside a note ("white claw", "diet coke") */
+  const ADJ = /^(diet|light|lite|zero|sugar|free|low|fat|nonfat|organic|natural|original|classic|plain|sweet|spicy|hot|cold|iced|mini|big|small|large|medium|jumbo|red|green|black|yellow|brown|dark|golden|fresh|frozen|raw|cooked|extra|lean|baby|whole|half|quarter|unsweetened|sweetened|salted|unsalted|reduced|protein)$/;
   /* raw / cooked words in what they typed → "raw" | "cooked" | null */
   function stateOf(text) {
     const s = String(text == null ? "" : text);
@@ -2308,7 +2360,10 @@ window.M = window.M || {};
      "chicken veggie bake" → bake) must be in the name or brand, and a food whose own main
      word is a different food ("Avocado oil") needs that word said. */
   function nameScore(qWords, food, state) {
-    const n = nameParts(food), qs = qWords.map(singular), brandStr = lc(food.brand || "").replace(/['’]/g, "");
+    const n = nameParts(food), brandStr = n.brandStr;
+    /* SD-14: a word that is the start of the food's main word (4+ letters) says it ("mayo"),
+       unless it is a food word of its own ("apple" isn't applesauce) */
+    const qs = qWords.map(singular).map(w => (w.length >= 4 && n.noun && n.noun !== w && n.noun.startsWith(w) && DCTX && !DCTX.idx.has(w) ? n.noun : w));
     /* search words count, but a dish word there ("sandwich meat") doesn't make the dish */
     const inFood = w => n.all.indexOf(w) >= 0 || n.brand.indexOf(w) >= 0 || (n.extra.indexOf(w) >= 0 && !DISH.test(w)) || (w.length >= 3 && (n.all.some(x => x.startsWith(w) || (w.startsWith(x) && x.length > 3)) || brandStr.indexOf(w) >= 0));
     const words = qs.filter(w => !/\d/.test(w));
@@ -2325,7 +2380,14 @@ window.M = window.M || {};
       else s -= 8;
     }
     if (!hits) return -1;
-    if (n.noun && qs.indexOf(n.noun) < 0 && !n.optional.has(n.noun)) { if (OTHER_FOOD.test(n.noun)) return -1; s -= 6; }
+    if (n.noun && qs.indexOf(n.noun) < 0 && !n.optional.has(n.noun)) {
+      /* SD-14: "mayo" is the start of mayonnaise; "fairlife" names their Fairlife milk by brand;
+         "ranch", "teriyaki", "marinara" are the first word of a sauce or dressing */
+      const nounSaid = qs.some(w => w.length >= 4 && n.noun.startsWith(w));
+      const brandSaid = qs.some(w => n.brand.indexOf(w) >= 0 || (w.length >= 3 && brandStr.indexOf(w) >= 0));
+      const condiment = /^(sauce|dressing|dip|spread)$/.test(n.noun) && n.head.length >= 2 && qs.indexOf(n.head[0]) >= 0;
+      if (!nounSaid) { if (OTHER_FOOD.test(n.noun) && !brandSaid && !condiment) return -1; s -= 6; }
+    }
     let pen = 0;
     n.main.forEach(w => { if (qs.indexOf(w) >= 0 || w === "or" || n.optional.has(w) || n.brand.indexOf(w) >= 0) return; pen += DESCRIPTOR.test(w) || /^\d/.test(w) ? 0.5 : 4; });
     s -= Math.min(10, pen);
@@ -2343,60 +2405,127 @@ window.M = window.M || {};
      the product by brand ("dave's bread" → their Dave's Killer Bread loaf); 0 = neither
      (a bare "rice" must not pick their "Rice cakes"). */
   function savedTier(qWords, food) {
-    const n = nameParts(food), qs = qWords.map(singular), brandStr = lc(food.brand || "").replace(/['’]/g, "");
+    const n = nameParts(food), qs = qWords.map(singular), brandStr = n.brandStr;
     const inName = w => n.all.indexOf(w) >= 0 || (w.length >= 3 && n.all.some(x => x.startsWith(w)));
     const inBrand = w => n.brand.indexOf(w) >= 0 || (w.length >= 3 && brandStr.indexOf(w) >= 0);
     if (!qs.every(w => inName(w) || inBrand(w))) return 0;
     if (n.main.every(w => qs.indexOf(w) >= 0 || DESCRIPTOR.test(w) || /^\d/.test(w) || n.optional.has(w) || w === "or" || n.brand.indexOf(w) >= 0)) return 2;
     return qs.some(w => !inName(w) && inBrand(w)) ? 1 : 0;
   }
-  function myFoods() { try { return M.foods && M.foods.list ? M.foods.list().filter(f => f && f.name) : []; } catch (e) { return []; } }
-  function builtInFoods() { try { const g = M.DB && M.DB.generic; return Array.isArray(g) ? g.filter(f => f && f.name) : []; } catch (e) { return []; } }
-  function myMeals() { try { return M.meals && M.meals.list ? M.meals.list().filter(m => m && m.id && m.name && Array.isArray(m.items) && m.items.length) : []; } catch (e) { return []; } }
-  const STATE_WORD = /^(raw|uncooked|dry|cooked|grilled|baked|roasted|boiled|steamed|fried|sauteed|sautéed|seared|broiled|poached|smoked|leftover|leftovers)$/i;
+  function myFoodsRaw() { try { return M.foods && M.foods.list ? M.foods.list().filter(f => f && f.name) : []; } catch (e) { return []; } }
+  function builtInRaw() { try { const g = M.DB && M.DB.generic; return Array.isArray(g) ? g.filter(f => f && f.name) : []; } catch (e) { return []; } }
+  function myMealsRaw() { try { return M.meals && M.meals.list ? M.meals.list().filter(m => m && m.id && m.name && Array.isArray(m.items) && m.items.length) : []; } catch (e) { return []; } }
+  /* SD-05: one describe call reads the lists once and remembers every answer (DCTX) */
+  let DCTX = null;
+  function myFoods() { return DCTX ? DCTX.mine : myFoodsRaw(); }
+  function builtInFoods() { return DCTX ? DCTX.built : builtInRaw(); }
+  function myMeals() { return DCTX ? DCTX.meals : myMealsRaw(); }
+  /* the word index is kept between calls while the foods stay the same */
+  let IDX_MEMO = null;
+  function newCtx() {
+    const ctx = { mine: myFoodsRaw(), built: builtInRaw(), meals: myMealsRaw(), local: new Map(), meal: new Map(), cand: new Map(), idx: null, brands: null };
+    const all = ctx.mine.concat(ctx.built);
+    const sig = all.map(f => (f.id || "") + "\u0001" + f.name + "\u0001" + (f.brand || "") + "\u0001" + wordsKey(f)).join("\u0002");
+    if (IDX_MEMO && IDX_MEMO.sig === sig && IDX_MEMO.all.length === all.length && IDX_MEMO.all.every((f, i) => f === all[i])) { ctx.idx = IDX_MEMO.idx; ctx.brands = IDX_MEMO.brands; return ctx; }
+    ctx.idx = new Map(); ctx.brands = new Map();
+    /* every word of every name / brand / search word → the foods that have it */
+    const add = (map, t, f) => { let a = map.get(t); if (!a) map.set(t, a = new Set()); a.add(f); };
+    all.forEach(f => {
+      const n = nameParts(f);
+      n.all.forEach(t => add(ctx.idx, t, f)); n.brand.forEach(t => add(ctx.idx, t, f)); n.extra.forEach(t => add(ctx.idx, t, f));
+      if (n.brandStr) add(ctx.brands, n.brandStr, f);
+    });
+    IDX_MEMO = { sig, all, idx: ctx.idx, brands: ctx.brands };
+    return ctx;
+  }
+  /* The foods that can hold the word w at all (nameScore's test for the last word they said, a
+     little wider): a food outside this set can't match, so it isn't scored. */
+  function candidates(ctx, w) {
+    let set = ctx.cand.get(w);
+    if (set) return set;
+    set = new Set();
+    ctx.idx.forEach((foods, t) => { if (t === w || (w.length >= 3 && t.startsWith(w)) || (t.length > 3 && w.startsWith(t))) foods.forEach(f => set.add(f)); });
+    if (w.length >= 3) ctx.brands.forEach((foods, b) => { if (b.indexOf(w) >= 0) foods.forEach(f => set.add(f)); });
+    ctx.cand.set(w, set);
+    return set;
+  }
+  const STATE_WORD = /^(raw|uncooked|dry|cooked|grilled|baked|roasted|boiled|steamed|fried|sauteed|sautéed|seared|broiled|poached|smoked|leftover|leftovers|rotisserie|stirfry)$/i;
   const coreWords = words => { let qw = toks(words); const core = qw.filter(w => !STATE_WORD.test(w) && !STYLE.test(w)); if (core.length) qw = core; return qw; };
+  /* SD-16: a saved food found only through words after its comma ("Egg bites, bacon and
+     gruyere" for "eggs bacon") isn't what they said, unless they named its main word or brand */
+  function flavorOnly(qw, f) {
+    if (builtIn(f)) return false;
+    const n = nameParts(f), qs = qw.map(singular);
+    if (!n.after.length || !n.noun || qs.indexOf(n.noun) >= 0) return false;
+    if (qs.some(w => n.brand.indexOf(w) >= 0)) return false;
+    return qs.some(w => !/\d/.test(w) && !DESCRIPTOR.test(w) && n.after.indexOf(w) >= 0 && n.head.indexOf(w) < 0);
+  }
   /* The person's own saved foods first (a full name match wins outright), then everything
      with a small bonus for saved foods; near-ties go to their own saved food, then to a food
      they buy (built-in `staple`), then to the food with fewer name words they didn't say,
-     then to the food listed first. */
-  M.food.matchLocal = function (words) {
+     then to the food listed first. `keep` (optional) limits which foods count. */
+  function matchFood(words, keep) {
     const qw = coreWords(words);
     if (!qw.length) return null;
     const state = stateOf(words);
+    const ctx = DCTX;
+    let pool = null;
+    if (ctx) {
+      const plain = qw.map(singular).filter(w => !/\d/.test(w));
+      if (plain.length) pool = candidates(ctx, plain[plain.length - 1]);
+    }
+    const ok = f => (!pool || pool.has(f)) && (!keep || keep(f));
     const mine = myFoods();
     let bestMine = null, bestMineS = -Infinity;
-    mine.forEach(f => { const tier = savedTier(qw, f); if (!tier) return; const sc = nameScore(qw, f, state); if (sc < 0) return; const s = tier * 100 + sc + Math.min(8, Math.log2(num(f.uses) + 1) * 2); if (s > bestMineS) { bestMineS = s; bestMine = f; } });
+    mine.forEach(f => { if (!ok(f)) return; const tier = savedTier(qw, f); if (!tier) return; const sc = nameScore(qw, f, state); if (sc < 0 || flavorOnly(qw, f)) return; const s = tier * 100 + sc + Math.min(8, Math.log2(num(f.uses) + 1) * 2); if (s > bestMineS) { bestMineS = s; bestMine = f; } });
     if (bestMine) return bestMine;
     const scored = [];
-    mine.forEach((f, i) => { const s = nameScore(qw, f, state); if (s >= 0) scored.push({ f, s: s + 8 + Math.min(8, Math.log2(num(f.uses) + 1) * 2), i }); });
+    /* a saved food with a flavor they didn't say ("Greek yogurt, vanilla" for "greek yogurt")
+       gets no saved-food head start */
+    const qsx = qw.map(singular);
+    const flavorUnsaid = f => nameParts(f).after.some(w => !/\d/.test(w) && !DESCRIPTOR.test(w) && !LOOSE.test(w) && qsx.indexOf(w) < 0);
+    mine.forEach((f, i) => { if (!ok(f)) return; const s = nameScore(qw, f, state); if (s < 0 || flavorOnly(qw, f)) return; const fl = flavorUnsaid(f); scored.push({ f, s: s + (fl ? 0 : 8 + Math.min(8, Math.log2(num(f.uses) + 1) * 2)), i: fl ? 50000 + i : i }); });
     /* a food they buy (built-in `staple`) gets a small bonus: "bread" → their Dave's loaf */
-    builtInFoods().forEach((f, i) => { const s = nameScore(qw, f, state); if (s >= 0) scored.push({ f, s: s - (f.brand ? 1 : 0) + (f.staple === true ? 3 : 0), i: 100000 + i }); });
+    builtInFoods().forEach((f, i) => { if (!ok(f)) return; const s = nameScore(qw, f, state); if (s >= 0) scored.push({ f, s: s - (f.brand ? 1 : 0) + (f.staple === true ? 3 : 0), i: 100000 + i }); });
     if (!scored.length) return null;
     const top = Math.max.apply(null, scored.map(x => x.s));
     if (top < 8) return null;
-    const rank = x => (x.i < 100000 ? 0 : x.f.staple === true ? 1 : 2);
+    const rank = x => (x.i < 50000 ? 0 : x.f.staple === true ? 1 : 2);
     /* DA-02: between raw / cooked twins, the state they said (none said: raw) */
     const want = state || "raw";
     const st = x => { const ns = nameState(x.f); return !ns ? (hasCook(x.f) ? 0 : 1) : ns === want ? 0 : 2; };
     const near = scored.filter(x => x.s >= top - 3).map(x => Object.assign(x, { u: unsaid(qw, x.f) })).sort((a, b) => rank(a) - rank(b) || st(a) - st(b) || a.u - b.u || a.i - b.i);
     return near[0].f;
+  }
+  M.food.matchLocal = function (words) {
+    const key = String(words == null ? "" : words);
+    if (DCTX && DCTX.local.has(key)) return DCTX.local.get(key);
+    const f = matchFood(words, null);
+    if (DCTX) DCTX.local.set(key, f);
+    return f;
   };
   /* A saved meal named in the words: every word they said is in its name (two words or more,
      "chicken bake" → "Chicken veggie bake"), or every real word of its name was said. */
   M.food.matchMeal = function (words, strict) {
+    const key = (strict ? "1|" : "0|") + String(words == null ? "" : words);
+    if (DCTX && DCTX.meal.has(key)) return DCTX.meal.get(key);
     const qs = coreWords(words).filter(w => !/\d/.test(w));
-    if (!qs.length) return null;
-    const near = (a, b) => a === b || (a.length > 3 && b.length > 3 && (a.startsWith(b) || b.startsWith(a)));
+    /* every word said counts toward the meal's name ("greek yogurt bowl" → Greek yogurt bowl) */
+    const said = toks(words).filter(w => !/\d/.test(w) && STYLE.test(w));
     let best = null, bestS = 0;
-    myMeals().forEach(m => {
-      const mw = wordsOf(m.name).filter(w => !STOP.test(w) && !/\d/.test(w));
-      if (!mw.length) return;
-      const allQuery = qs.every(q => mw.some(w => near(q, w)));
-      const allName = mw.every(w => DESCRIPTOR.test(w) || qs.some(q => near(q, w)));
-      if (!((allQuery && allName) || (!strict && ((allQuery && qs.length >= 2) || (allName && mw.length >= 2))))) return;
-      const s = (allQuery && allName ? 300 : allName ? 200 : 100) + mw.length * 10 + Math.min(9, num(m.uses));
-      if (s > bestS) { bestS = s; best = m; }
-    });
+    if (qs.length) {
+      const near = (a, b) => a === b || (a.length > 3 && b.length > 3 && (a.startsWith(b) || b.startsWith(a)));
+      myMeals().forEach(m => {
+        const mw = wordsOf(m.name).filter(w => !STOP.test(w) && !/\d/.test(w));
+        if (!mw.length) return;
+        const allQuery = qs.every(q => mw.some(w => near(q, w)));
+        const allName = mw.every(w => DESCRIPTOR.test(w) || qs.some(q => near(q, w)) || said.indexOf(w) >= 0);
+        if (!((allQuery && allName) || (!strict && ((allQuery && qs.length >= 2) || (allName && mw.length >= 2))))) return;
+        const s = (allQuery && allName ? 300 : allName ? 200 : 100) + mw.length * 10 + Math.min(9, num(m.uses));
+        if (s > bestS) { bestS = s; best = m; }
+      });
+    }
+    if (DCTX) DCTX.meal.set(key, best);
     return best;
   };
   /* A saved meal as a describe item. Batch meals are logged by cooked weight ("9 oz chicken
@@ -2428,13 +2557,15 @@ window.M = window.M || {};
   }
   /* SC-06: names that hold a split word stay whole ("half and half", "PB&J"): PB&J becomes
      "pbj sandwich" (expanded to bread + peanut butter + jam), half and half one word. */
-  const PBJ_RE = /\b(?:pb\s*(?:&|and|n|'n'|’n’)\s*j|pbj|pbnj|peanut\s*butter\s*(?:and|&|n|'n'|’n’)?\s*(?:jelly|jam))\b(?:\s+sandwich(?:es)?\b)?/gi;
+  const PBJ_RE = /\b(?:pb\s*(?:&|and|n|'n'|’n’)\s*(?:jelly|jam|j)|pbj|pbnj|peanut\s*butter\s*(?:and|&|n|'n'|’n’)?\s*(?:jelly|jam))s?\b(?:\s+sandwich(?:es)?\b)?/gi;
   function protectPhrases(text) {
     return String(text == null ? "" : text)
       .replace(PBJ_RE, "pbj sandwich")
       .replace(/\bpeanut\s*butter\s+sandwich(es)?\b/gi, "pb sandwich")
       .replace(/\b(?:strawberry\s+)?(?:jelly|jam)\s+sandwich(es)?\b/gi, "jam sandwich")
-      .replace(/\bhalf\s*(?:and|&|n|'n'|’n’)\s*half\b/gi, "halfnhalf");
+      .replace(/\bhalf\s*(?:and|&|n|'n'|’n’)\s*half\b/gi, "halfnhalf")
+      .replace(/\bstir[\s-]*(?:fry|fried|fries)\b/gi, "stirfry")
+      .replace(/\bpb\b(?!\s+sandwich)/gi, "peanut butter");
   }
   function splitDescribe(text) {
     return protectPhrases(text)
@@ -2446,10 +2577,10 @@ window.M = window.M || {};
      unless they say raw / dry. The item then says which weight it is (state + cook). A saved
      scanned meat / rice from before cook info existed borrows it here (cookFor). */
   const SAYS_RAW = /\b(raw|uncooked|dry)\b/i;
-  const SAYS_COOKED = /\b(cooked|grilled|baked|roasted|boiled|steamed|fried|sauteed|sautéed|seared|broiled|poached|smoked|leftovers?)\b/i;
+  const SAYS_COOKED = /\b(cooked|grilled|baked|roasted|boiled|steamed|fried|sauteed|sautéed|seared|broiled|poached|smoked|leftovers?|stirfry)\b/i;
   /* rawFirst (chicken breast, Nick's rule): the grams are raw unless the words say "cooked" */
   const saysCookedWord = part => /\bcooked\b/i.test(part) && !/\b(raw|uncooked)\b/i.test(part);
-  function plateView(food, part, rawFirst) {
+  function plateView(food, part, rawFirst, q) {
     let c = null;
     try { c = M.cook && typeof M.cook.of === "function" ? M.cook.of(food) : null; } catch (e) { c = null; }
     if (!c && M.cook && typeof M.cook.of === "function") { const cf = cookFor(food); if (cf) { food = Object.assign({}, food, { cook: cf }); c = cf; } }
@@ -2458,7 +2589,9 @@ window.M = window.M || {};
     /* decision 1: meat and fish are raw weights unless they say cooked / grilled / baked …;
        rice, pasta and quinoa are cooked unless they say dry / uncooked */
     const meatRaw = cook.word === "raw" && !SAYS_COOKED.test(part);
-    if ((SAYS_RAW.test(part) && !SAYS_COOKED.test(part)) || (rawFirst && !saysCookedWord(part)) || (!rawFirst && meatRaw)) return { food, extra: { state: "raw", cook } };
+    /* MF-02: "2 oz pasta", "¼ cup rice", "50 g quinoa" are dry amounts */
+    const dryAmt = cook.word === "dry" && !SAYS_COOKED.test(part) && dryAmount(food, q);
+    if ((SAYS_RAW.test(part) && !SAYS_COOKED.test(part)) || (rawFirst && !saysCookedWord(part)) || (!rawFirst && meatRaw) || dryAmt) return { food, extra: { state: "raw", cook } };
     let v = null;
     try { v = typeof M.cook.view === "function" ? M.cook.view(food, "cooked") : null; } catch (e) { v = null; }
     if (!v || v === food) return { food, extra: null };
@@ -2482,7 +2615,7 @@ window.M = window.M || {};
   }
   const builtIn = f => !!(f && (f.source === "generic" || /^g_/.test(String(f.id || ""))));
   const isBreastFood = f => !!(f && builtIn(f) && (BREAST_IDS.test(String(f.id || "")) || (f.alwaysRaw === true && /\bchicken\b/i.test(f.name))));
-  const BREAST_WORD = /^(chicken|breast|kirkland|organic|boneless|skinless|frozen|fresh|plain|raw|uncooked|cooked|grilled|baked|roasted|seared|leftover)$/;
+  const BREAST_WORD = /^(chicken|breast|kirkland|organic|boneless|skinless|frozen|fresh|plain|raw|uncooked|cooked|grilled|baked|roasted|seared|leftover|rotisserie)$/;
   const saysChicken = words => { const w = toks(words); return w.indexOf("chicken") >= 0 && w.every(x => BREAST_WORD.test(x)); };
   /* the breast's own "1 breast" serving (m-data), else 1 breast = 175 g */
   function breastServing(food) {
@@ -2587,21 +2720,99 @@ window.M = window.M || {};
       return Object.assign({}, it, { name: food.name, brand: food.brand || "", per, foodId: food.id }, extra || {});
     } catch (e) { return it; }
   }
+  /* SP-01: words about the meal or the time aren't food: "lunch: chicken breast", "for
+     breakfast 2 eggs", "lunch was a chicken breast", "I had 2 eggs this morning". "Lunch meat",
+     "breakfast sausage" and "breakfast burrito" stay. */
+  const MEALW = "breakfast|brunch|lunch|dinner|supper|snacks?|dessert";
+  const MEAL_KEEP = "(?!\\s*(?:meats?|sausages?|burritos?|sandwich(?:es)?|bars?|packs?|sizes?)\\b)";
+  const MEAL_AT = new RegExp("\\b(?:for|at|as|during)\\s+(?:the\\s+|my\\s+|a\\s+)?(?:" + MEALW + ")\\b" + MEAL_KEEP, "gi");
+  const MEAL_LEAD = new RegExp("^\\s*(?:" + MEALW + ")\\b" + MEAL_KEEP + "\\s*(?:[:\\-–—]|\\b(?:was|were|is)\\b)?", "i");
+  const TIME_WORDS = /\b(?:later|today|tonight|this\s+(?:morning|afternoon|evening)|last\s+night|yesterday|i|we|had|ate|eaten|was|were|just|then|also)\b/gi;
+  function stripMealWords(part) {
+    let s = String(part == null ? "" : part).replace(MEAL_AT, " ");
+    for (let k = 0; k < 2; k++) s = s.replace(TIME_WORDS, " ").replace(/\s+/g, " ").trim().replace(MEAL_LEAD, " ").trim();
+    return s.replace(/^[\s:\-–—]+/, "").replace(/\s+/g, " ").trim();
+  }
+  /* PL-01: a part nothing matched, said back plainly ("a large mocha frappuccino" → "mocha
+     frappuccino") so it can become a new food */
+  const unfound = p => {
+    const s = String(p).replace(/\bhalfnhalf\b/gi, "half and half").replace(/\bpbj sandwich\b/gi, "PB&J");
+    return s.replace(/^(?:(?:a|an|some|the|my|large|small|medium|big|little)\s+)+/i, "").trim() || s;
+  };
+  const PBJ_NAME = /\b(?:pb\s*(?:&|and|n|'n'|’n’)\s*j|pbj|pbnj|peanut\s*butter\s*(?:and|&|n|'n'|’n’)?\s*(?:jelly|jam))\b/i;
+  /* SD-01: a meal said loosely ("chicken bake" → "Chicken veggie bake") counts only with a dish word */
+  const MEAL_ONLY = /^(bowl|plate|bake|taco|scramble|skillet|casserole|stir|fry|wrap|sandwich|salad|shake|smoothie|burrito|parfait|stew|soup|chili|curry|omelet|omelette|quesadilla|pizza|burger|toast|oat|oatmeal|platter|combo|hash)$/;
+  const saysDish = words => toks(words).some(w => MEAL_ONLY.test(w));
+  /* SD-07: "1 cup egg whites" is the liquid kind: a food with a cup / spoon portion */
+  const hasVolume = f => {
+    const sv = f && f.serving ? f.serving : {};
+    if (isVolUnit(String(sv.unit || ""))) return true;
+    return (Array.isArray(f && f.alts) ? f.alts : []).some(a => { const p = a && a.label && M.parseServing ? M.parseServing(a.label) : null; return !!(p && isVolUnit(String(p.unit || ""))); });
+  };
+  /* MF-02: pasta weighed is dry pasta (the box's numbers); rice or quinoa at ¼–⅓ cup or 40–60 g
+     is dry; more than that is a cooked portion */
+  function dryAmount(food, q) {
+    if (!q || !q.explicitQty) return false;
+    const u = q.unit, n = num(q.qty);
+    const pasta = /\b(pasta|spaghetti|penne|noodles?|macaroni|linguine|fettuccine|rotini|fusilli|rigatoni|orzo)\b/i.test(String(food && food.name));
+    const g = u === "g" ? n : u === "oz" ? n * 28.35 : u === "lb" ? n * 453.6 : 0;
+    if (pasta) return g > 0;
+    if (g > 0) return g >= 40 && g <= 60;
+    return u === "cup" && n >= 0.2 && n <= 0.34;
+  }
+  function editDist(a, b, max) {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+    let prev = []; for (let j = 0; j <= b.length; j++) prev[j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i]; let low = i;
+      for (let j = 1; j <= b.length; j++) { cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); if (cur[j] < low) low = cur[j]; }
+      if (low > max) return max + 1;
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+  /* SD-13: "chiken breast", "brocoli", "bannana": a word (5+ letters) that no food has becomes the
+     closest food word that starts with the same 2 letters (1 letter off; 2 for long words) */
+  function fixTypos(text) {
+    const ctx = DCTX;
+    if (!ctx) return text;
+    return String(text).replace(/[a-z]{5,}/gi, w => {
+      const lw = lc(w), sw = singular(lw);
+      if (ctx.idx.has(sw) || ctx.idx.has(lw) || UNIT_LOOKUP[lw] || STOP.test(lw) || STATE_WORD.test(lw) || STYLE.test(lw) || WORD_NUM[lw] !== undefined || /^(half|quarter|couple|dozen|with|plus|juiced|whole|large|small|medium|halfnhalf|sandwich|later|today|tonight)$/.test(lw)) return w;
+      const max = lw.length >= 7 ? 2 : 1;
+      let best = null, bd = max + 1;
+      ctx.idx.forEach((_, t) => { if (t.length < 4 || t.slice(0, 2) !== lw.slice(0, 2) || /\d/.test(t)) return; const d = editDist(lw, t, max); if (d < bd) { bd = d; best = t; } });
+      return best && bd <= max ? best : w;
+    });
+  }
   M.food.describeLocal = function (text) {
+    const outer = DCTX;
+    if (!outer) DCTX = newCtx();
+    try { return describeRun(text); } finally { if (!outer) DCTX = null; }
+  };
+  function describeRun(text) {
     const items = [], unmatched = [], memo = new Map();
-    const parts = splitDescribe(text);
+    /* SP-01: meal and time words go first, unless the part is a saved meal's name */
+    const parts = splitDescribe(text).map(p => { const q = M.food.parseQuantity(p); return M.food.matchMeal(q.words || p, true) ? p : stripMealWords(p); }).filter(Boolean);
     for (let i = 0; i < parts.length; i++) {
-      /* a saved meal whose name the split cut apart ("eggs and toast"): exact names only */
+      /* a saved meal whose name the split cut apart ("eggs and toast"): exact names only, at
+         most 3 parts ("salmon and sweet potato") */
       let took = 0;
-      for (let j = parts.length - 1; j > i && !took; j--) {
+      for (let j = Math.min(parts.length - 1, i + 2); j > i && !took; j--) {
         const joined = parts.slice(i, j + 1).join(" and "), q = M.food.parseQuantity(joined);
         const m = M.food.matchMeal(q.words || joined, true);
         if (m) { items.push(mealItem(m, q, joined)); took = j - i + 1; }
       }
       if (took) { i += took - 1; continue; }
-      const got = build(parts[i], 0);
-      if (got) got.forEach(it => items.push(it));
-      else unmatched.push(parts[i].replace(/\bhalfnhalf\b/gi, "half and half").replace(/\bpbj sandwich\b/gi, "PB&J"));
+      let got = build(parts[i], 0);
+      /* SD-13: words nothing matched may be typos: try the closest food words */
+      const lost = g => (g ? g.filter(it => it.unknown != null).length : Infinity);
+      if (lost(got) > 0) {
+        const fx = fixTypos(parts[i]);
+        if (fx !== parts[i]) { const g2 = build(fx, 0); if (lost(g2) < lost(got)) got = g2; }
+      }
+      if (got) got.forEach(it => { if (it.unknown != null) unmatched.push(unfound(it.unknown)); else items.push(it); });
+      else unmatched.push(unfound(parts[i]));
     }
     return { items, unmatched };
     /* one part → [items] or null (nothing found) */
@@ -2612,13 +2823,16 @@ window.M = window.M || {};
       /* SC-06: PB&J = 2 slices of bread, 2 tbsp peanut butter, 1 tbsp jam (per sandwich) */
       const sw = lc(q.words).trim();
       if (/^(pbj|pb|jam) sandwich$/.test(sw) && !q.unit) {
-        const n = q.explicitQty ? q.qty : 1, f = x => String(+(x * n).toFixed(2));
         const kind = sw.split(" ")[0];
+        /* SD-02: their own PB&J meal, when they saved one */
+        if (kind === "pbj") { const m = myMeals().find(x => PBJ_NAME.test(String(x.name))); if (m) return [mealItem(m, q, part)]; }
+        const n = q.explicitQty ? q.qty : 1, f = x => String(+(x * n).toFixed(2));
         const bits = [f(2) + " slices bread"];
         if (kind !== "jam") bits.push(f(2) + " tbsp peanut butter");
         if (kind !== "pb") bits.push(f(1) + " tbsp jam");
         const out = [];
-        for (const b of bits) { const got = build(b, depth + 1); if (!got) return null; got.forEach(it => out.push(Object.assign(it, { text: part }))); }
+        /* the parts are foods only (never a saved meal like "Peanut butter toast") */
+        for (const b of bits) { const got = build(b, SPLIT_DEPTH); if (!got) return null; got.forEach(it => out.push(Object.assign(it, { text: part }))); }
         return out;
       }
       const key = (depth < SPLIT_DEPTH ? "s|" : "n|") + part;
@@ -2631,19 +2845,32 @@ window.M = window.M || {};
       return res;
     }
     function buildOne(part, q, depth) {
-      const out = [];
-      const ok = one(part, q);
-      if (ok) { out.push(ok); return out; }
       /* SC-05: foods said together ("chicken rice", "avocado toast", quick notes like "greek
          yogurt blueberries agave" or "2 chicken breasts 1 cup rice broccoli"): when the words
          split into parts that are all foods, each is logged */
-      const ws = String(q.words || "").split(/\s+/).filter(Boolean);
-      if (depth < SPLIT_DEPTH && ws.length >= 2 && ws.length <= 12 && !ws.some(w => DISH.test(singular(lc(w).replace(/[^a-z]/g, ""))))) {
-        const at = lc(part).lastIndexOf(lc(q.words));
-        const lead = at > 0 ? part.slice(0, at) : "";
+      const wsW = String(q.words || "").split(/\s+/).filter(Boolean);
+      const canSplit = depth < SPLIT_DEPTH && wsW.length >= 2 && wsW.length <= 12 && !wsW.some(w => DISH.test(singular(lc(w).replace(/[^a-z]/g, ""))));
+      /* SD-07: an amount left inside the words ("eggs 2 whites", "toast 2 eggs") means more than
+         one food: cut first */
+      const midNum = canSplit && wsW.some((w, k) => k > 0 && /^\d+(?:[.,]\d+)?[a-z]*$/i.test(w));
+      const at = q.words ? lc(part).lastIndexOf(lc(q.words)) : -1;
+      const lead = at > 0 ? part.slice(0, at) : "";
+      /* an amount at the end ("chicken 200g rice 1 cup") is the last food's: cut the whole part */
+      const tail = at === 0 && q.explicitQty ? part.slice(q.words.length).replace(/[()]/g, " ").trim() : "";
+      const ws = tail ? wsW.concat(tail.split(/\s+/).filter(Boolean)) : wsW;
+      if (midNum) { const sp = split(); if (sp) return sp; }
+      const ok = one(part, q, depth);
+      if (ok) return [ok];
+      if (canSplit && !midNum) { const sp = split(); if (sp) return sp; }
+      return null;
+      function split() {
         const n = ws.length;
         const isNum = w => /^(\d+(?:[.,\/]\d+)?[a-z]*|[½¼¾⅓⅔⅛])$/i.test(w);
         const bare = w => singular(lc(w).replace(/[^a-z]/g, ""));
+        /* SD-04: a note that puts amounts first ("1 cup rice broccoli 6oz salmon"): an amount
+           between two foods starts the next food; else it is the amount of the food before it
+           ("chicken 200g rice") */
+        const amountsFirst = !!lead || isNum(ws[0]);
         /* A piece is one food: a number only at its start ("1 cup rice") or as its last amount
            ("chicken 200g", "pork tenderloin 6 oz"), never in the middle. */
         const pieceOk = (i, j) => {
@@ -2659,45 +2886,66 @@ window.M = window.M || {};
           if (i > 0 && ((UNIT_LOOKUP[lc(ws[i])] && UNIT_LOOKUP[lc(ws[i])] !== "egg") || /^(breasts?|fillets?|filets?)$/i.test(ws[i]))) return false;
           /* a piece needs a food word, not only an amount ("1 cup") */
           if (!ws.slice(i, j).some(w => !isNum(w) && !(UNIT_LOOKUP[lc(w)] && UNIT_LOOKUP[lc(w)] !== "egg"))) return false;
-          if (!coreWords(ws.slice(i, j).join(" ")).length) return false;
-          /* "cream cheese", "almond milk": that word makes it a different food, not two foods */
-          if (j < n && CHANGER.test(bare(ws[j - 1]))) return false;
+          const cw = coreWords(ws.slice(i, j).join(" ")).filter(w => !/\d/.test(w));
+          if (!cw.length || cw.every(w => ADJ.test(w))) return false;
+          /* "cream cheese", "almond milk": that word makes it a different food, not two foods
+             (SD-12: only before a word like milk / cheese / butter: "almonds banana" is two) */
+          if (j < n && CHANGER.test(bare(ws[j - 1])) && KIND_OF.test(bare(ws[j]))) return false;
           return true;
         };
         /* the fewest foods that cover every word ("turkey slices | cucumber | cottage cheese",
-           not "cottage | cheese"); on a tie, a number after a food with no amount of its own is
-           that food's amount ("chicken 200g | rice"), else it starts the next food */
+           not "cottage | cheese"); ties by the amount rule above */
         const best = new Array(n + 1).fill(null);
         best[0] = { cost: 0, items: [] };
         for (let j = 1; j <= n; j++) {
           for (let i = j - 1; i >= 0 && j - i <= 6; i--) {      /* on a tie, the longer earlier food ("egg whites | spinach") */
             if (!best[i] || !pieceOk(i, j)) continue;
-            if (i === 0 && j === n) continue;                     /* the whole thing: tried above */
+            if (i === 0 && j === n) continue;                     /* the whole thing: tried apart */
             /* "banana bread", "grape juice", "banana peppers": one word naming the kind of a
                food that comes in kinds is one food, not two */
             if (n === 2 && KIND_OF.test(bare(ws[1]))) continue;
             /* "lemon pepper chicken", "garlic shrimp": a flavor word before a food is how it
                was made, not a food of its own */
             if (j < n && j - i === 1 && SEASONING.test(bare(ws[i]))) continue;
+            /* "lemon pepper chicken", "salt and pepper": pepper after a flavor word is the spice */
+            if (j < n && bare(ws[i]) === "pepper" && i > 0 && (SEASONING.test(bare(ws[i - 1])) || /^(black|white|salt)$/.test(bare(ws[i - 1])))) continue;
             const text = (i === 0 ? lead : "") + ws.slice(i, j).join(" ");
             const got = build(text.trim(), SPLIT_DEPTH);
             if (!got) continue;
-            const odd = i > 0 && isNum(ws[i]) && !(q.explicitQty || lead) && !ws.slice(0, i).some(isNum) ? 1 : 0;
+            const trail = ws.slice(i + 1, j).some(isNum);
+            const odd = amountsFirst ? (trail ? 1 : 0) : (i > 0 && isNum(ws[i]) && !ws.slice(0, i).some(isNum) ? 1 : 0);
             const cost = best[i].cost + 10 + odd;
             if (!best[j] || cost < best[j].cost) best[j] = { cost, items: best[i].items.concat(got) };
           }
+          /* decision 2: a word no food fits is said back as not found, and the rest of the note
+             still counts ("greek yogurt blueberries granola" → 2 foods + "granola") */
+          if (best[j - 1] && !(n === 2 && KIND_OF.test(bare(ws[1])))) {
+            const prev = best[j - 1].items, last = prev[prev.length - 1];
+            const w = (j === 1 ? lead : "") + ws[j - 1];
+            const items = last && last.unknown != null ? prev.slice(0, -1).concat([{ unknown: last.unknown + " " + w }]) : prev.concat([{ unknown: w }]);
+            const cost = best[j - 1].cost + 100;
+            if (!best[j] || cost < best[j].cost) best[j] = { cost, items };
+          }
         }
-        if (best[n]) return best[n].items;
+        const got = best[n] ? best[n].items : null;
+        /* nothing found at all, or a two-word note with one unknown word ("french toast",
+           "mashed potatoes", "teriyaki chicken": a dish, not two foods): the whole part is not found */
+        if (!got || !got.some(it => it.unknown == null)) return null;
+        /* two words: an unknown word after the food ("chicken strips") or a describing word before
+           it ("french toast") makes one dish; a plural before it is its own food ("oats banana") */
+        if (n === 2 && (got[got.length - 1].unknown != null || (got[0].unknown != null && !/s$/i.test(ws[0])))) return null;
+        return got.filter(it => it.unknown == null || coreWords(it.unknown.replace(/^[\d\s.,\/½¼¾⅓⅔⅛]+/, "")).length);
       }
-      return null;
     }
-    function one(part, q) {
+    function one(part, q, depth) {
       const words = q.words;
-      const meal = M.food.matchMeal(words || part);
+      /* SD-01: a saved meal only when they said its name, and never for one piece of a note */
+      const piece = depth >= SPLIT_DEPTH;
+      const meal = piece ? null : M.food.matchMeal(words || part, true);
       if (meal) return mealItem(meal, q, part);
       let food = words ? M.food.matchLocal(words) : null;
       /* "2 tacos" / "a scoop of whey": the unit word may be the food itself */
-      if (!food && q.unit && !/^(g|oz|lb|ml|fl oz|cup|tbsp|tsp|small|medium|large|serving|piece)$/.test(q.unit)) { food = M.food.matchLocal(q.unit + " " + words); if (food) q.unit = null; }
+      if (!food && q.unit && !/^(g|oz|lb|ml|fl oz|cup|tbsp|tsp|small|medium|large|serving|piece|glass)$/.test(q.unit)) { food = M.food.matchLocal(q.unit + " " + words); if (food) q.unit = null; }
       if (!food && !words && q.unit) { food = M.food.matchLocal(q.unit); if (food) q.unit = null; }
       if (!food && words) food = M.food.matchLocal(part);
       /* toast is bread ("2 slices of toast", "sourdough toast") */
@@ -2706,6 +2954,13 @@ window.M = window.M || {};
       if (!food && /\bjuiced\b/i.test(words || part)) food = M.food.matchLocal(String(words || part).replace(/\bjuiced\b/gi, "juice"));
       /* "1 cod fillet", "1 large ear of corn": the piece word isn't the food */
       if (!food && words && /\b(fillets?|filets?|ears?)\b/i.test(words)) { const w2 = words.replace(/\b(fillets?|filets?|ears?)\b(\s+of\b)?/gi, " ").replace(/\s+/g, " ").trim(); if (w2) food = M.food.matchLocal(w2); }
+      /* SD-07: a cup of a food that only comes by the piece ("1 cup egg whites"): the same food
+         that comes by the cup (liquid egg whites) */
+      if (food && words && q.unit && isVolUnit(q.unit) && !hasVolume(food)) {
+        const noun = nameParts(food).noun;
+        const liq = matchFood(words, f => f !== food && hasVolume(f) && nameParts(f).noun === noun);
+        if (liq) food = liq;
+      }
       /* chicken breast = the Kirkland breast, raw (Nick's rule) */
       if (saysChicken(words || part) && (!food || builtIn(food) || !/\bbreast/i.test(food.name))) { const b = chickenBreast(); if (b) food = b; }
       if (food && isBreastFood(food)) {
@@ -2717,8 +2972,12 @@ window.M = window.M || {};
       /* turkey slices, jam / jelly, cottage cheese = the products they buy (Nick's rule) */
       const np = namedProduct(words || part);
       if (np && (!food || builtIn(food) || !np.word.test(nameBrand(food)))) food = np.food;
-      if (!food) return null;
-      const pv = plateView(food, part, /\bchicken\b/i.test(food.name) && /\bbreast/i.test(food.name) && saysChicken(words || part));
+      if (!food) {
+        /* SD-01: a meal said loosely ("chicken bake") only when no food fits and they said a dish word */
+        if (!piece && saysDish(words || part)) { const m = M.food.matchMeal(words || part); if (m) return mealItem(m, q, part); }
+        return null;
+      }
+      const pv = plateView(food, part, /\bchicken\b/i.test(food.name) && /\bbreast/i.test(food.name) && saysChicken(words || part), q);
       const sc = scaleToQuantity(pv.food, q);
       const per = M.foodMath ? M.foodMath.scale(sc.per || pv.food.per, 1) : (sc.per || pv.food.per);
       const servings = Math.max(0.05, r2(num(sc.servings, 1)));
@@ -2726,7 +2985,7 @@ window.M = window.M || {};
       if (pv.extra) Object.assign(it, pv.extra);
       return it;
     }
-  };
+  }
 
   /* A promise that gives up (code "slow") after ms; the original keeps running. */
   function capWait(p, ms) {
@@ -2824,6 +3083,8 @@ window.M = window.M || {};
     const over = per.cal - Math.max(0, rem.cal) - 150;
     if (over > 0) s -= 60 + over / 5;
     const want = { cal: Math.max(150, rem.cal), p: Math.max(10, rem.p), c: Math.max(0, rem.c), f: Math.max(0, rem.f) };
+    /* a snack is snack sized: a lunch or dinner idea isn't a better snack for having more */
+    if (slot === "Snacks") { want.cal = Math.min(want.cal, 350); want.p = Math.min(want.p, 25); }
     const calDiff = Math.abs(per.cal - Math.min(want.cal, 900)) / Math.max(150, Math.min(want.cal, 900));
     const pDiff = Math.abs(per.p - Math.min(want.p, 60)) / Math.max(15, Math.min(want.p, 60));
     const cDiff = want.c > 0 ? Math.max(0, per.c - want.c) / Math.max(30, want.c) : per.c / 60;
@@ -2865,7 +3126,7 @@ window.M = window.M || {};
     const remaining = remainingOf(opt);
     const n = num(opt.n, 6) || 6;
     const exclude = new Set(Array.isArray(opt.exclude) ? opt.exclude : []);
-    const scored = list.filter(s => s && s.id && !exclude.has(s.id)).map(s => ({ s, score: M.food.scoreSuggestion(s, opt.slot, remaining, opt.prefs, opt.jitter) + 8 * stapleShare(s) }));
+    const scored = list.filter(s => s && s.id && !exclude.has(s.id)).map(s => ({ s, score: M.food.scoreSuggestion(s, opt.slot, remaining, opt.prefs, opt.jitter) + 8 * stapleShare(s) + (opt.slot && s.slot === opt.slot ? 15 : 0) }));
     scored.sort((a, b) => b.score - a.score);
     const cap = Math.max(0, remaining.cal) + 150;
     const kcalOf = x => num((x.s.per || sumPer(x.s.items)).cal);
@@ -2897,13 +3158,24 @@ window.M = window.M || {};
     let meals = [];
     try { meals = M.meals && M.meals.list ? M.meals.list(opt.slot) : []; } catch (e) { meals = []; }
     /* batch meals (per = the whole batch, logged by cooked weight) are left to the Foods tab */
+    /* KJ-04: the person's own meals first; the other person's carry their name ("Nick's meal") */
+    let me = null;
+    try { me = M.pid ? M.pid() : null; } catch (e) { me = null; }
+    const own = m => !m.pid || !me || m.pid === me;
+    const whoOf = pid => {
+      try { const p = M.MS && M.MS.profiles && M.MS.profiles[pid]; if (p && p.name) return String(p.name).trim().split(/\s+/)[0]; } catch (e) {}
+      try { if (typeof PRESETS !== "undefined" && PRESETS && PRESETS[pid] && PRESETS[pid].name) return String(PRESETS[pid].name); } catch (e) {}
+      return pid === "kat" ? "Katerina" : "Nick";
+    };
     return meals.filter(m => m && m.id && !exclude.has(m.id) && Array.isArray(m.items) && m.items.length && !(isObj(m.batch) && num(m.batch.cookedG) > 0) && fits(m.per, rem))
-      .map(m => ({ m, score: M.food.scoreSuggestion({ per: m.per, slot: m.slot }, opt.slot, rem, null, 0) + Math.min(10, Math.log2(num(m.uses) + 1) * 3) + (m.slot === opt.slot ? 5 : 0) }))
-      .sort((a, b) => b.score - a.score).slice(0, num(opt.n, 3) || 3)
-      .map(({ m }) => {
+      .map(m => ({ m, own: own(m), score: M.food.scoreSuggestion({ per: m.per, slot: m.slot }, opt.slot, rem, null, 0) + Math.min(10, Math.log2(num(m.uses) + 1) * 3) + (m.slot === opt.slot ? 5 : 0) }))
+      .sort((a, b) => (b.own ? 1 : 0) - (a.own ? 1 : 0) || b.score - a.score).slice(0, num(opt.n, 3) || 3)
+      .map(({ m, own: mine }) => {
         const made = num(m.servingsMade, 1) > 0 ? num(m.servingsMade, 1) : 1;
         const items = m.items.map(it => Object.assign(snap(it), { servings: r2(num(it.servings, 1) / made) }));
-        return { id: m.id, mealId: m.id, name: m.name, desc: m.desc || "", slot: m.slot, items, per: Object.assign({}, m.per || sumPer(items)), tags: [], source: "mine", uses: num(m.uses) };
+        const o = { id: m.id, mealId: m.id, name: m.name, desc: m.desc || "", slot: m.slot, items, per: Object.assign({}, m.per || sumPer(items)), tags: [], source: "mine", uses: num(m.uses), pid: m.pid || me || "", own: mine };
+        if (!mine) { o.who = whoOf(m.pid); o.whoLabel = o.who + "'s meal"; }
+        return o;
       });
   };
   /* (b) foods logged together in this slot, over the last 60 days (a saved meal counts as one

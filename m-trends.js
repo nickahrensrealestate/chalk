@@ -354,7 +354,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   const dow2 = key => { const d = keyDate(key); return d ? DOW2[d.getDay()] : ""; };
   /* kg always with one decimal; lb as typed (185, 185.5) */
   const dispW = (lb, u) => (!isNum(lb) ? "—" : u === "metric" ? M.units.lb2kg(lb).toFixed(1) : String(r1(lb)));
-  const tile = (v, k, small, sub) => `<div class="stat"><div class="v num">${v}${small ? `<small>${small}</small>` : ""}</div><div class="k">${k}</div>${sub ? `<div class="mt-sub">${sub}</div>` : ""}</div>`;
+  const tile = (v, k, small, sub, cls) => `<div class="stat${cls ? " " + cls : ""}"><div class="v num">${v}${small ? `<small>${small}</small>` : ""}</div><div class="k">${k}</div>${sub ? `<div class="mt-sub">${sub}</div>` : ""}</div>`;
   /* what the weekly rate covers: M.body.ratePerWeek fits the weigh-ins of the 56 days ending at
      the latest one (8 weeks), so the words say the real span: "last 2 weeks" … "last 8 weeks" */
   function rateSpan(all) {
@@ -388,7 +388,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     } else {
       const latest = all[all.length - 1];
       const a7 = avgAll[avgAll.length - 1].v;
-      /* one weigh-in in the week: "latest 0.0" says nothing */
+      /* how many weigh-ins the 7-day average holds ("7 weigh-ins"), like "7 readings" for heart rate */
       const inWeek = all.filter(x => M.daysBetween(x.date, latest.date) <= 6).length;
       const rate = M.body.ratePerWeek(id);
       const steady = rate != null && Math.abs(rate) < STEADY;
@@ -396,7 +396,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       const conv1 = lb => (u === "metric" ? M.units.lb2kg(lb) : lb);
       const stats = `<div class="stats">
         ${tile(dispW(latest.v, u), "Latest", wUnit(u), esc(fmtShort(latest.date)))}
-        ${tile(dispW(a7, u), "7-day average", wUnit(u), inWeek < 2 ? "1 weigh-in" : "latest " + signed(conv1(latest.v - a7), 1))}
+        ${tile(dispW(a7, u), "7-day average", wUnit(u), inWeek + " weigh-in" + (inWeek === 1 ? "" : "s"))}
         ${tile(rate == null ? "—" : steady ? "Steady" : signed(conv1(rate), u === "metric" ? 2 : 1), "Per week", rate == null || steady ? "" : wUnit(u), rate == null ? "needs 2 weeks" : rateSpan(all))}
       </div>`;
       let goalLine;
@@ -459,7 +459,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const stats = `<div class="stats">
       ${tile(n, "Days logged", "of 7")}
       ${tile(none ? "—" : fmtN(ws.avgCal), "Calories a day", "", "of " + fmtN(t.cal))}
-      ${tile(none ? "—" : r0(ws.avgP), "Protein a day", none ? "" : "g", "of " + r0(t.p) + " g")}
+      ${tile(none ? "—" : r0(ws.avgP), "Protein a day", none ? "" : "g", "of " + r0(t.p) + " g", "pro")}
     </div>`;
     const chart = M.charts.bars(vals, { target: t.cal, unit: "cal", label: "Calories each day, last 7 days", h: 150 });
     const note = !ws.logged ? `<p class="hint">Log a day of food and the bars fill in.</p>`
@@ -619,7 +619,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     return `<div class="srow"><div class="l">Units</div><div class="seg" role="group" aria-label="Units"><button ${pressed(u === "us")} ${segAttr("units")} data-v="us">lb · ft</button><button ${pressed(u === "metric")} ${segAttr("units")} data-v="metric">kg · cm</button></div></div>
       <div class="srow" data-row="sex"><div class="l">Sex</div><div class="seg" role="group" aria-label="Sex"><button ${pressed(p.sex === "m")} ${segAttr("sex")} data-v="m">Male</button><button ${pressed(p.sex === "f")} ${segAttr("sex")} data-v="f">Female</button></div></div>
       <div class="srow" data-row="age"><div class="l">Age</div><div class="mt-ctl">${box("age", 'inputmode="numeric" min="5" max="120"', isNum(p.age) ? p.age : "", "e.g. 35", "Age in years")}<span class="mt-u">years</span></div></div>
-      ${mode === "setup" ? "" : `<p class="mt-msg" id="mt-amsg-you" role="status" hidden></p>`}
+      <p class="mt-msg" id="mt-amsg-${mode}" role="status" hidden></p>
       <div class="srow" data-row="height"><div class="l">Height</div><div class="mt-ctl mt-hgt">${height}</div></div>
       <p class="mt-msg" id="mt-hmsg-${mode}" role="status" hidden></p>
       <div class="srow" data-row="weight"><div><div class="l">Weight</div><div class="s">${mode === "setup" ? "Today's weight" : "Changing it logs today's weigh-in"}</div></div><div class="mt-ctl">${box("weight", 'step="0.1" min="0" inputmode="decimal"', toDispW(p.weightLb, u), u === "metric" ? "e.g. 80" : "e.g. 180", "Weight in " + (u === "metric" ? "kilograms" : "pounds"))}<span class="mt-u">${wUnit(u)}</span></div></div>
@@ -633,10 +633,13 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
 
   /* Write one field from an input element into a profile / draft. Returns true when it changed something.
      The draft (setup, live) clears a value whose box is empty or not a number, so Save never keeps an old one. */
+  /* ages 5 to 120; a number outside says so (You and setup) and is never saved */
+  const AGE_LO = 5, AGE_HI = 120, AGE_MSG = "Age should be 5 to 120.";
+  const ageBad = raw => { raw = String(raw == null ? "" : raw).trim(); if (raw === "") return false; const n = r0(num(raw, NaN)); return !(isNum(n) && n >= AGE_LO && n <= AGE_HI); };
   function applyField(p, f, el, live) {
     const u = units(p), v = el ? el.value : "";
     switch (f) {
-      case "age": { const n = r0(num(v)); p.age = n > 0 ? clamp(n, 5, 120) : null; return true; }
+      case "age": { const n = r0(num(v)); p.age = n >= AGE_LO && n <= AGE_HI ? n : null; return true; }   /* a typo is not saved as 5 or 120 */
       case "hft": case "hin": {
         const box = el && el.closest ? el.closest(".mt-hgt") : null;
         const g = k => { const i = box ? box.querySelector('[data-f="' + k + '"]') : null; return i ? num(i.value) : (f === k ? num(v) : 0); };
@@ -703,6 +706,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       : `<div class="mt-opts">${opts}</div>${custom}`;
     return `<div class="card mt-card"><div class="hd"><h3>Macro targets</h3></div>
       ${splits}
+      <h4 class="mt-thd">Your daily targets</h4>
       <div class="mt-tbox" id="mt-tbox">${targetsBoxHTML(p)}</div>
       <div class="srow mt-manrow"><div><div class="l" id="mt-man-l">Type my own targets</div><div class="s">Turn off to go back to the calculator.</div></div><button class="toggle ${manual ? "on" : ""}" data-m="t-manual" role="switch" aria-checked="${manual}" aria-labelledby="mt-man-l" aria-label="Type my own targets"><i></i></button></div>
     </div>`;
@@ -714,7 +718,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const zero = !(cal > 0);
     const off = !zero && Math.abs(mc - cal) / cal > 0.05;
     const water = "Water is in oz" + (u === "metric" ? " (" + fmtN(t.water) + " oz is about " + fmtN(M.units.oz2ml(num(t.water))) + " ml)" : "") + ".";
-    const lead = zero ? "Your calorie target is 0. Type the calories you want a day. " : off ? "Protein, carbs and fat add up to " + fmtN(mc) + " cal. Your calorie target is " + fmtN(cal) + ". " : "You're typing these yourself. ";
+    const lead = zero ? "Your calorie target is 0. Type how many calories you want each day. " : off ? "Protein, carbs and fat add up to " + fmtN(mc) + " cal. Your calorie target is " + fmtN(cal) + ". " : "You're typing these yourself. ";
     return `<p class="hint${off || zero ? " mt-warn" : ""}" id="mt-tnote" role="status">${lead}${water}</p>`;
   }
   /* TR-02: what a typed target may be. Outside it, the box shows the nearest allowed number. */
@@ -727,7 +731,8 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const manual = !!p.targetsManual;
     const u = units(p);
     const unitWord = unit => (unit === "g" ? "grams" : unit === "oz" ? "ounces" : unit);
-    const cell = (k, label, unit) => `<div class="stat"><div class="v num">${manual ? `<input class="mini" type="number" inputmode="numeric" enterkeyhint="done" min="0" data-m="t-target" data-f="${k}" value="${r0(num(t[k]))}" aria-label="${label} target${unit ? " in " + unitWord(unit) : ""}">` : fmtN(t[k])}${manual || !unit ? "" : `<small>${unit}</small>`}</div><div class="k">${label + (manual && unit ? " " + unit : "")}</div></div>`;
+    const MC = { p: "pro", c: "carb", f: "fat" };   /* LK-07: the macro colors the Diary uses */
+    const cell = (k, label, unit) => `<div class="stat${MC[k] ? " " + MC[k] : ""}"><div class="v num">${manual ? `<input class="mini" type="number" inputmode="numeric" enterkeyhint="done" min="0" data-m="t-target" data-f="${k}" value="${r0(num(t[k]))}" aria-label="${label} target${unit ? " in " + unitWord(unit) : ""}">` : fmtN(t[k])}${manual || !unit ? "" : `<small>${unit}</small>`}</div><div class="k">${label + (manual && unit ? " (" + unit + ")" : "")}</div></div>`;
     const grid = `<div class="stats mt-tgrid">${cell("cal", "Calories", "")}${cell("p", "Protein", "g")}${cell("c", "Carbs", "g")}${cell("f", "Fat", "g")}${cell("fiber", "Fiber", "g")}${cell("water", "Water", "oz")}</div>`;
     let note = "";
     if (manual) note = `<p class="mt-msg" id="mt-tmsg" role="status" hidden></p>` + manualNote(t, u);
@@ -1103,7 +1108,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   function refresh60HTML() {
     return `<div class="card mt-card mt-banner"><div class="hd"><h3>Still right?</h3></div><div class="bd">
       <p class="mt-text">You set your numbers over 60 days ago. Weight, activity and goal can change.</p>
-      <div class="mt-row mt-wrap"><button class="btn primary" data-m="mode" data-v="macros" data-tab="you">Update</button><button class="btn" data-m="t-reviewed">Still right</button><button class="btn ghost" data-m="t-snooze" data-kind="refresh60" data-days="7">Skip for now</button></div>
+      <div class="mt-row mt-wrap"><button class="${inTrain() ? "btn" : "btn primary"}" data-m="mode" data-v="macros" data-tab="you">Update</button><button class="btn" data-m="t-reviewed">Still right</button><button class="btn ghost" data-m="t-snooze" data-kind="refresh60" data-days="7">Skip for now</button></div>
     </div></div>`;
   }
   function body14HTML(id, p) {
@@ -1120,7 +1125,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
         <div><label class="lbl" for="mt-b14-rhr">Resting heart rate</label><input class="mini" id="mt-b14-rhr" type="number" min="0" inputmode="numeric" enterkeyhint="done" placeholder="${lr ? r0(lr.value) : "e.g. 60"}"></div>
       </div>
       <p class="mt-msg" id="mt-b14-msg" role="status" hidden></p>
-      <div class="mt-row"><button class="btn primary" data-m="t-save-body14">Save</button><button class="btn ghost" data-m="t-snooze" data-kind="body14" data-days="14">Skip</button></div>
+      <div class="mt-row"><button class="${inTrain() ? "btn" : "btn primary"}" data-m="t-save-body14">Save</button><button class="btn ghost" data-m="t-snooze" data-kind="body14" data-days="14">Skip for now</button></div>
     </div></div>`;
   }
   /* Train → Today before first-day setup: a small card that opens Macros. */
@@ -1321,8 +1326,8 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       if (changed) p.goalWeightLb = r.lb;
     } else if (f === "age") {
       const raw = String(el.value == null ? "" : el.value).trim(), n = r0(num(raw, NaN));
-      const ok = raw !== "" && isNum(n) && n >= 5 && n <= 120;
-      say("mt-amsg-you", raw !== "" && !ok ? "Age should be 5 to 120." : "");
+      const ok = raw !== "" && !ageBad(raw);
+      say("mt-amsg-you", raw !== "" && !ok ? AGE_MSG : "");
       if (raw !== "" && !ok) skip = ["age"];
       changed = ok && n !== p.age;
       if (changed) p.age = n;                /* a blank box keeps the age */
@@ -1438,7 +1443,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const id = pid(); if (!id) return;
     const p = person(id), u = units(p);
     const r = readBody(id, u, $("mt-b14-w"), $("mt-b14-rhr"), "mt-b14-msg", el, "tap Save again");
-    if (r.err) { say("mt-b14-msg", r.err === "Type a weight or a heart rate." ? "Type a weight or a heart rate, or tap Skip." : r.err); return; }
+    if (r.err) { say("mt-b14-msg", r.err === "Type a weight or a heart rate." ? "Type a weight or a heart rate, or tap Skip for now." : r.err); return; }
     say("mt-b14-msg", "");
     M.body.add({ date: M.today(), w: r.w, rhr: r.rhr, pid: id });
     M.checkins.done(id, "body14");
@@ -1552,13 +1557,14 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     } catch (e) {}
     fallback();
   };
+  const SYNC_FAIL = "Couldn't sync. Check your internet, then tap Sync now again.";
   A["t-sync-now"] = el => {
     const Cl = cloud(); if (!Cl || !Cl.status().on) return;
     const reset = () => { if (el && el.dataset) { el.disabled = false; el.textContent = "Sync now"; } };
     if (el && el.dataset) { el.disabled = true; el.textContent = "Syncing…"; }
     let pr;
     try { pr = Cl.syncNow(); } catch (e) { pr = null; }
-    return Promise.resolve(pr).then(r => { reset(); patchSync(); toast(r && r.ok ? "Synced" : "Couldn't sync"); }, () => { reset(); patchSync(); toast("Couldn't sync"); });
+    return Promise.resolve(pr).then(r => { reset(); patchSync(); toast(r && r.ok ? "Synced" : SYNC_FAIL); }, () => { reset(); patchSync(); toast(SYNC_FAIL); });
   };
   A["t-sync-restore"] = el => {
     const Cl = cloud(); if (!Cl || !Cl.status().on || typeof Cl.restoreTraining !== "function") return;
@@ -1668,6 +1674,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       /* say a typo right away (Save checks the same) */
       if (f === "hft" || f === "hin" || f === "hcm") { const r = heightRead(el, units(d)); say("mt-hmsg-setup", r.bad || ""); if (r.bad) skip = ["hft", "hin", "hcm"]; }
       if (f === "goal") { const r = goalRead(el.value, units(d)); say("mt-gmsg-setup", r.bad || ""); if (r.bad) skip = ["goal"]; }
+      if (f === "age") { const bad = ageBad(el.value); say("mt-amsg-setup", bad ? AGE_MSG : ""); if (bad) skip = ["age"]; }
     }
     if (commit && card) writeBack(card, "t-setup", d, el, typoSkip("setup", skip));
     if (card) {
@@ -1707,7 +1714,9 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const u = units(d);
     const need = [], bads = [], rows = [];
     if (d.sex !== "m" && d.sex !== "f") need.push("sex");
-    if (!(num(d.age) >= 5)) need.push("age");
+    const ageBox = card ? card.querySelector('input[data-m="t-setup"][data-f="age"]') : null;
+    if (ageBox && ageBad(ageBox.value)) { bads.push(AGE_MSG); rows.push("age"); say("mt-amsg-setup", AGE_MSG); }
+    else if (!(num(d.age) >= AGE_LO)) need.push("age");
     if (!(num(d.heightIn) > 0)) need.push("height");
     else if (!(num(d.heightIn) >= H_LO - 0.05 && num(d.heightIn) <= H_HI + 0.05)) { bads.push(u === "metric" ? "Height should be 92 to 274 cm." : "Height should be 3 to 9 feet."); rows.push("height"); }
     if (!(num(d.weightLb) > 0)) need.push("weight");

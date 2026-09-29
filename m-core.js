@@ -151,9 +151,9 @@ window.M = window.M || {};
     const ml = liq ? M.servingMl(s, food) : null;
     if (!(g > 0) && ml == null) return head;
     const gs = ml != null ? ml + " ml" : String(+g.toFixed(1)) + " g";
-    /* grams always in a bracket of their own at the end ("1 container (6 oz) (170 g)"):
-       the diary row takes that last bracket off before it adds the amount's grams, so
-       "(6 oz, 170 g)" read "1 container (6 oz, 170 g) (170 g)" there. */
+    /* MF-09/KJ-07: grams go inside a bracket the unit already has: "1 container (6 oz, 170 g)",
+       not "(6 oz) (170 g)". M.parseServing and the diary row read both. */
+    if (ml == null && /\)\s*$/.test(head) && head.indexOf("(") >= 0) return head.replace(/\)\s*$/, ", " + gs + ")");
     return head + " (" + gs + ")";
   };
   function parseQty(s) {
@@ -331,18 +331,26 @@ window.M = window.M || {};
   /* First save of each day: copy the last good save on disk to .bak. A good older
      copy is never deleted: when the data is big the copy is trimmed, and when the
      main copy on disk can't be read, today's copy is skipped. */
+  /* SP-04: the day a backup last failed to write (phone full). Kept in the small ui key, so a
+     relaunch doesn't try again that day: a full phone tries at most once a day. */
+  let bakTryDay = null;
   function dailyBak() {
     const day = M.today();
-    if (M.storage.bakDay === day) return;
+    if (M.storage.bakDay === day || bakTryDay === day) return;
     const prev = lsGet(M.KEY);
     if (prev == null) return;
     const s = parseJSON(prev);
     if (!validState(s)) return;
     M.storage.bakDay = day;   /* one try a day, even when the phone is full */
     const at = M.now(), trimmed = () => bakHead(day, at, true) + ',"data":' + narrow(JSON.stringify(trimState(s))) + "}";
-    if (prev.length > num(M.storage.bakMax, 600000)) { lsWrite(BAK_KEY(), trimmed()); return; }
-    const err = lsWrite(BAK_KEY(), bakHead(day, at) + ',"data":' + narrow(prev) + "}");
-    if (err && isQuota(err)) lsWrite(BAK_KEY(), trimmed());   /* a failed write leaves the older copy as it was */
+    let err;
+    if (prev.length > num(M.storage.bakMax, 600000)) err = lsWrite(BAK_KEY(), trimmed());
+    else {
+      err = lsWrite(BAK_KEY(), bakHead(day, at) + ',"data":' + narrow(prev) + "}");
+      if (err && isQuota(err)) err = lsWrite(BAK_KEY(), trimmed());   /* a failed write leaves the older copy as it was */
+    }
+    /* the UI may say once that the phone is full (M.storage.bakFailed = that day) */
+    if (err) { bakTryDay = day; M.storage.bakFailed = day; }
   }
   /* Phone full: swap a full backup for a trimmed one (60 days, then `keep` days) to make room. */
   function shrinkBak(keep) {
@@ -374,6 +382,7 @@ window.M = window.M || {};
        older build (after a rollback) only writes mode/person into the main key. */
     lastUi = null;
     const uiStr = lsGet(M.UI_KEY), ui = parseJSON(uiStr);
+    bakTryDay = isObj(ui) && /^\d{4}-\d{2}-\d{2}$/.test(String(ui.bakTry || "")) ? ui.bakTry : null;
     if (isObj(ui)) {
       const mainAt = num(s && s.updatedAt), uiAt = num(ui.at);
       if (!(mainAt > uiAt + 1000 && uiAt > 0 && !M.storage.restoredFrom)) applyUi(M.MS.ui, ui);
@@ -393,7 +402,11 @@ window.M = window.M || {};
     return out;
   }
   let lastUi = null;
-  function uiJSON() { const u = M.MS.ui || {}; return JSON.stringify({ mode: u.mode === "macros" ? "macros" : "train", person: isPid(u.person) ? u.person : null, tab: isStr(u.tab) && u.tab ? u.tab : "diary", date: u.date || null }); }
+  function uiJSON() {
+    const u = M.MS.ui || {}, o = { mode: u.mode === "macros" ? "macros" : "train", person: isPid(u.person) ? u.person : null, tab: isStr(u.tab) && u.tab ? u.tab : "diary", date: u.date || null };
+    if (bakTryDay) o.bakTry = bakTryDay;   /* SP-04 */
+    return JSON.stringify(o);
+  }
   /* Writes only the small ui key (mode, person, tab, date, at). Never a full save.
      "at" lets M.load() tell it apart from a newer main key written by an older build. */
   M.saveUi = function () {
@@ -445,7 +458,7 @@ window.M = window.M || {};
     [M.KEY, BAK_KEY()].concat(damagedKeys()).forEach(lsDel);
     M.MS = freshState();
     damagedPending = null;
-    M.storage.bakDay = null; M.storage.restoredFrom = null; M.storage.damaged = [];
+    M.storage.bakDay = null; M.storage.restoredFrom = null; M.storage.damaged = []; bakTryDay = null; M.storage.bakFailed = null;
     M.save();
     return M.MS;
   };
@@ -752,6 +765,8 @@ window.M = window.M || {};
       const side = (st, g) => (vol && st === state ? fmtVolume(g / num(vol.g), vol.unit) : fmtWeight(g, fam));
       if (!c) return side(state, grams) + " " + (state === "cooked" ? "cooked" : opt.word === "dry" ? "dry" : "raw");
       const raw = state === "cooked" ? grams / c.y : grams, cooked = state === "cooked" ? grams : grams * c.y;
+      /* NJ-05: what was weighed cooked reads cooked first: "4 oz cooked (5.1 oz raw)" */
+      if (opt.cookedFirst) return side("cooked", cooked) + " cooked (" + side("raw", raw) + " " + c.word + ")";
       return side("raw", raw) + " " + c.word + " (" + side("cooked", cooked) + " cooked)";
     },
     /* The food's own serving, raw first: "4 oz raw (2.9 oz cooked)", "1/4 cup dry (4.6 oz cooked)". */
@@ -759,7 +774,9 @@ window.M = window.M || {};
       const c = M.cook.of(food); if (!c) return "";
       const sv = normServing(food.serving); if (!sv.g) return "";
       const u = unitWord(sv.unit);
-      return M.cook.label(sv.g, "raw", c, units || personUnits(), { vol: u && VOLUME[u] ? { unit: u, g: sv.g / (sv.qty || 1) } : null });
+      /* KJ-06: an oz / lb / g serving counts from its unit (28.3495 g an oz), like the Diary does */
+      const g = u && WEIGHT_G[u] ? sv.qty * WEIGHT_G[u] : sv.g;
+      return M.cook.label(g, "raw", c, units || personUnits(), { vol: u && VOLUME[u] ? { unit: u, g: sv.g / (sv.qty || 1) } : null });
     },
     /* Units for the servings screen: "oz raw", "oz cooked", "g raw", "g cooked", "lb raw", "lb cooked",
        plus volume units ("cup dry", "cup cooked") from the food's portions. Each option:
@@ -843,7 +860,9 @@ window.M = window.M || {};
       /* K8: a food always weighed raw (the chicken breast) reads in grams, whatever the
          person's units: "175 g raw (127 g cooked)", also for "1 breast (175 g)" or "6 oz raw" */
       if (alwaysRawOf(e)) return M.cook.label(i.grams, i.state, i.cook, "g", {});
-      return M.cook.label(i.grams, i.state, i.cook, i.fam || units || personUnits(), { vol: i.vol });
+      /* NJ-05: saved cooked (or an old entry named "…, cooked" with no state): cooked first */
+      const cookedFirst = i.state === "cooked" && (e.state === "cooked" || (!e.state && /,\s*cooked\s*$/i.test(String(e.name || ""))) || (!e.state && !!(e.foodId && M.cook.alias(e.foodId))));
+      return M.cook.label(i.grams, i.state, i.cook, i.fam || units || personUnits(), { vol: i.vol, cookedFirst });
     },
     /* A copy of a cook food seen in its cooked state (serving / per / per100g /
        alts all cooked). For code that only knows plain foods, e.g. describe. */
@@ -914,6 +933,40 @@ window.M = window.M || {};
     return (Array.isArray(a) ? a : []).filter(x => x && x.label).map(x => ({ label: String(x.label), g: num(x.g) > 0 ? num(x.g) : null }));
   }
   function normCode(c) { return String(c == null ? "" : c).replace(/\D/g, "").replace(/^0+/, ""); }
+  /* L2: edit stamps. Every diary entry and meal item carries `u` (ms), set when it is made
+     or its content changes; foods and meals carry a record-level `u`, set on add and on a
+     real change. A record loaded from disk without `u` keeps none until it is edited (old
+     records count as 0), so this update never changes the hash of an untouched record.
+     Sync uses the stamps to settle conflicts the same way on both phones. */
+  const STAMP_SKIP = { u: 1, updatedAt: 1, createdAt: 1, uses: 1, lastUsed: 1 };
+  function bodyStr(o, noItemU) {
+    if (!isObj(o)) return "";
+    const c = {};
+    Object.keys(o).forEach(k => { if (!STAMP_SKIP[k]) c[k] = o[k]; });
+    if (noItemU && Array.isArray(c.items)) c.items = c.items.map(it => { if (!isObj(it) || !("u" in it)) return it; const x = Object.assign({}, it); delete x.u; return x; });
+    try { return canon(c) || ""; } catch (e) { return ""; }
+  }
+  const stampOk = v => isNum(v) && v > 0;
+  /* the stamp after an edit: the caller's own stamp when it gave one, now when the content
+     changed, else the old one (or none) */
+  function restamp(prev, next, given, noItemU) {
+    if (stampOk(given)) { next.u = given; return next; }
+    if (bodyStr(prev, noItemU) !== bodyStr(next, noItemU)) next.u = M.now();
+    else if (isObj(prev) && stampOk(prev.u)) next.u = prev.u;
+    else delete next.u;
+    return next;
+  }
+  /* meal items after an update: new or changed items get a new stamp, the rest keep theirs */
+  function stampItems(prevItems, items) {
+    const old = new Map();
+    (Array.isArray(prevItems) ? prevItems : []).forEach((it, i) => { if (isObj(it)) old.set(it.id ? "i:" + it.id : "n:" + i, it); });
+    items.forEach((it, i) => {
+      const was = old.get("i:" + it.id) || old.get("n:" + i);
+      if (!was) { it.u = M.now(); return; }
+      restamp(was, it, undefined);
+    });
+    return items;
+  }
   function normFood(f) {
     f = isObj(f) ? f : {};
     const now = M.now();
@@ -937,11 +990,12 @@ window.M = window.M || {};
     return o;
   }
   M.foods = {
-    add(food) { const f = normFood(food); M.MS.foods[f.id] = f; M.save(); return f; },
+    add(food) { const f = normFood(food); f.u = M.now(); M.MS.foods[f.id] = f; M.save(); return f; },
     update(id, patch) {
       const f = ownRec(M.MS.foods, id); if (!f) return null;
       const merged = normFood(Object.assign({}, f, isObj(patch) ? patch : {}, { id }));
       merged.createdAt = f.createdAt;
+      restamp(f, merged, isObj(patch) ? patch.u : undefined);
       M.MS.foods[id] = merged; M.save(); return merged;
     },
     remove(id) { if (!ownRec(M.MS.foods, id)) return false; delete M.MS.foods[id]; M.save(); return true; },
@@ -973,7 +1027,7 @@ window.M = window.M || {};
       const own = ownRec(M.MS.foods, foodId);
       if (!own && !genericById(foodId)) return null;
       const id = own ? own.id : genericById(foodId).id;
-      if (own && (!own.barcode || normCode(own.barcode) === normCode(c))) { own.barcode = c; own.updatedAt = M.now(); }
+      if (own && (!own.barcode || normCode(own.barcode) === normCode(c))) { if (own.barcode !== c) own.u = M.now(); own.barcode = c; own.updatedAt = M.now(); }
       else { if (!isObj(M.MS.codes)) M.MS.codes = {}; M.MS.codes[c] = id; }
       M.save();
       return M.foods.get(id);
@@ -1034,22 +1088,36 @@ window.M = window.M || {};
     o.updatedAt = now;
     o.uses = num(o.uses);
     o.lastUsed = num(o.lastUsed);
-    o.pid = o.pid || M.pid() || null;
+    /* the owner (pid) is set once, in M.meals.add; an update keeps what the meal had */
     return o;
   }
-  const byUse = (a, b) => num(b.lastUsed) - num(a.lastUsed) || num(b.uses) - num(a.uses) || lc(a.name).localeCompare(lc(b.name));
+  const byUse =(a, b) => num(b.lastUsed) - num(a.lastUsed) || num(b.uses) - num(a.uses) || lc(a.name).localeCompare(lc(b.name));
   M.meals = {
     computePer(meal) {
       const n = num(meal && meal.servingsMade, 1) > 0 ? num(meal.servingsMade, 1) : 1;
-      const tot = M.foodMath.sum((meal && meal.items) || []);
-      const o = {}; M.NUT.forEach(k => { o[k] = r1(tot[k] / n); });
+      /* KJ-05: summed and kept unrounded (4 places) so a meal adds up like the Breakfast it
+         came from; rounded once, on screen */
+      const tot = {}; M.NUT.forEach(k => { tot[k] = 0; });
+      ((meal && Array.isArray(meal.items)) ? meal.items : []).forEach(it => {
+        if (!it) return;
+        const sv = it.servings == null ? 1 : num(it.servings, 1), per = isObj(it.per) ? it.per : it;
+        M.NUT.forEach(k => { tot[k] += num(per[k]) * sv; });
+      });
+      const o = {}; M.NUT.forEach(k => { o[k] = r4(tot[k] / n); });
       return o;
     },
-    add(meal) { const m = normMeal(meal); M.MS.meals[m.id] = m; M.save(); return m; },
+    add(meal) {
+      const m = normMeal(meal), now = M.now();
+      m.pid = m.pid || M.pid() || null;
+      m.u = now; m.items.forEach(it => { it.u = now; });
+      M.MS.meals[m.id] = m; M.save(); return m;
+    },
     update(id, patch) {
       const m = ownRec(M.MS.meals, id); if (!m) return null;
       const merged = normMeal(Object.assign({}, m, isObj(patch) ? patch : {}, { id }));
       merged.createdAt = m.createdAt;
+      stampItems(m.items, merged.items);
+      restamp(m, merged, isObj(patch) ? patch.u : undefined, true);
       M.MS.meals[id] = merged; M.save(); return merged;
     },
     remove(id) { if (!ownRec(M.MS.meals, id)) return false; delete M.MS.meals[id]; M.save(); return true; },
@@ -1116,6 +1184,7 @@ window.M = window.M || {};
     add(dateKey, entry) {
       const d = M.day(dateKey);
       const e = normEntry(entry);
+      e.u = M.now();   /* L2: a new entry's edit stamp */
       d.entries.push(e);
       if (e.foodId) touchFood(e.foodId);
       if (e.mealId) touchMeal(e.mealId);
@@ -1127,7 +1196,14 @@ window.M = window.M || {};
       const i = d.entries.findIndex(x => x.id === entryId); if (i < 0) return null;
       patch = isObj(patch) ? Object.assign({}, patch) : {};
       if (patch.slot !== undefined && !M.isSlot(patch.slot)) delete patch.slot;
-      const merged = normEntry(Object.assign({}, d.entries[i], patch, { id: entryId }));
+      const prev = d.entries[i];
+      const merged = normEntry(Object.assign({}, prev, patch, { id: entryId }));
+      /* an edit keeps the entry's own name, brand and food id (an old generic chicken entry
+         doesn't turn into "Kirkland" or change its id just because its amount changed) */
+      if (patch.name === undefined && isStr(prev.name) && prev.name.trim()) merged.name = prev.name;
+      if (patch.brand === undefined) merged.brand = isStr(prev.brand) ? prev.brand : "";
+      if (patch.foodId === undefined && isStr(prev.foodId) && prev.foodId && !badRef(prev.foodId)) merged.foodId = prev.foodId;
+      restamp(prev, merged, patch.u);
       d.entries[i] = merged;
       touchDay(d); M.save();
       return merged;
@@ -1161,7 +1237,7 @@ window.M = window.M || {};
       const src = M.dayOf(fromKey); if (!src) return [];
       const items = src.entries.filter(x => x.slot === slot); if (!items.length) return [];
       const d = M.day(toKey);
-      const out = items.map(x => { const c = Object.assign(M.cp(x), { id: M.uid(), at: M.now() }); d.entries.push(c); return c; });
+      const out = items.map(x => { const c = Object.assign(M.cp(x), { id: M.uid(), at: M.now(), u: M.now() }); d.entries.push(c); return c; });
       touchDay(d); M.save();
       return out;
     },
@@ -1330,11 +1406,33 @@ window.M = window.M || {};
       else { const sv = M.parseServing(o.servingLabel); if (lc(sv.unit) === "serving" && sv.qty === 1) o.per = normPer(m.per); }
       return o;
     }
-    if (!o.foodId) return o;
+    if (!o.foodId) return bigGuard(o, null);
     const f = M.foods.get(o.foodId);
-    if (!isObj(f)) return o;
+    if (!isObj(f)) return bigGuard(o, null);
     const al = M.cook.alias(o.foodId), c = M.cook.of(f);
+    /* NJ-04: logged as another food (an old generic chicken now read as the Kirkland breast):
+       its old amount isn't this food's, so the row starts at the food's own serving */
+    const other = lc(o.name) !== lc(f.name) || lc(o.brand || "") !== lc(f.brand || "");
     o.foodId = f.id; o.name = f.name; o.brand = f.brand || "";
+    if (other) return foodServingRecent(o, f, c);
+    return bigGuard(liveFood(o, f, al, c), f);
+  }
+  /* NJ-04: a recent row never starts at more than 3,000 cal: the food's own serving instead */
+  function bigGuard(o, f) {
+    if (num(o.per && o.per.cal) * num(o.servings, 1) <= 3000) return o;
+    if (f) return foodServingRecent(o, f, M.cook.of(f));
+    if (num(o.per && o.per.cal) <= 3000) o.servings = 1;
+    return o;
+  }
+  function foodServingRecent(o, f, c) {
+    const sv = normServing(f.serving);
+    o.servings = 1; o.g = sv.g; o.per = normPer(f.per);
+    o.servingLabel = M.fmtServing(sv, M.isLiquid(f) ? f : undefined);
+    if (c) { o.state = "raw"; o.cook = cookLite(c); } else { delete o.state; delete o.cook; }
+    delete o.batch; delete o.batchG;
+    return o;
+  }
+  function liveFood(o, f, al, c) {
     if (c) { o.state = o.state || (al ? al.state : "raw"); o.cook = cookLite(c); }
     else { delete o.state; delete o.cook; }
     /* A count or cup unit the food has ("1 bar", "1 large egg", "1 slice", "½ cup", "1 breast"):
@@ -1522,14 +1620,46 @@ window.M = window.M || {};
   const Q_AMT = new RegExp("(?:\\d+\\s*\\/\\s*\\d+|\\d+(?:[.,]\\d+)?\\s*[½¼¾⅓⅔⅛]?|[½¼¾⅓⅔⅛])\\s*(?:" + Q_UNIT + ")?(?![\\p{L}])", "gu");
   /* numbers that name a food ("ground beef 90/10", "5% greek yogurt", "21 whole grains") */
   const NUMS = /\d+(?:[.,]\d+)?(?:\/\d+)?%?/g;
-  const numHit = (pq, r) => { const ns = nameInfo(r.name, r.brand).nums; let b = 0; (pq.nums || []).forEach(x => { if (ns.indexOf(x) >= 0) b += 16; }); return b; };
+  /* MF-01: a lean/fat ratio also answers to each side ("90/10" → "90", "10"), and a
+     nonfat / fat-free / skim food answers to "0%". */
+  const ratioParts = x => { const m = /^(\d{1,2})\/(\d{1,2})$/.exec(x); return m && +m[1] + +m[2] === 100 ? [m[1], m[2]] : null; };
+  function nameNums(ni) {
+    if (ni.numSet) return ni.numSet;
+    const s = new Set();
+    ni.nums.forEach(x => { s.add(x); const p = ratioParts(x); if (p) { s.add(p[0]); s.add(p[1]); } });
+    if (/\bnon-?fat\b|\bfat[- ]free\b|\bskim\b/.test(ni.n)) s.add("0%");
+    ni.numSet = s;
+    return s;
+  }
+  /* The query's numbers that can name a food: "90 10" and "90-10" → "90/10" too. */
+  function queryNums(s) {
+    const out = s.match(NUMS) || [];
+    const re = /(?:^|[^\d.,/])(\d{1,2})\s*(?:-|–|\s)\s*(\d{1,2})(?![\d/.,])/g;
+    let m;
+    while ((m = re.exec(s))) { if (+m[1] + +m[2] === 100) out.push(m[1] + "/" + m[2]); re.lastIndex = m.index + m[0].length - m[2].length; }
+    return out;
+  }
+  /* A plain "ground beef" (no ratio typed) → 80/20 first: USDA's standard ground beef and
+     the grind stores sell most. A ratio or a "%" typed picks that one instead. */
+  const COMMON_RATIO = "80/20";
+  const ratioAsked = nums => nums.some(x => /[/%]/.test(x) || (+x >= 50 && +x < 100));
+  /* the query names a ratio or a % ("90/10", "90 10", "2%", "ground beef 90"; not "60 g oats") */
+  const Q_RATIO_BARE = new RegExp("(?:^|\\s)([5-9]\\d)(?![\\d.,/%])(?!\\s*(?:" + "g|grams?|gr|kg|oz|ounces?|lbs?|pounds?|ml|cups?|c|tbsps?|tablespoons?|tsps?|teaspoons?|slices?|pieces?|pcs|servings?|scoops?" + ")(?![\\p{L}]))", "u");
+  const numAsked = (q, nums) => nums.some(x => /[/%]/.test(x)) || Q_RATIO_BARE.test(lc(q));
+  const numHit = (pq, r) => {
+    const ns = nameNums(nameInfo(r.name, r.brand)), qn = pq.nums || [];
+    let b = 0;
+    qn.forEach(x => { if (ns.has(x)) b += 16; });
+    if (!b && ns.has(COMMON_RATIO) && !(pq.asked !== undefined ? pq.asked : ratioAsked(qn))) b += 1.5;
+    return b;
+  };
   const qCache = new Map();
-  function searchQuery(q) {
+  function searchQuery(q, noPb) {
     const key = String(q == null ? "" : q);
-    let o = qCache.get(key);
+    let o = qCache.get((noPb ? "\u0002" : "") + key);
     if (o) return o;
     let s = lc(key).replace(/['’‘`]/g, "");
-    s = s.replace(/\bpb\s*(?:&|and|n)\s*j\b|\bpbj\b|\bpb\b/g, " peanut butter ");
+    if (!noPb) s = s.replace(/\bpb\s*(?:&|and|n)\s*j\b|\bpbj\b|\bpb\b/g, " peanut butter ");
     s = s.replace(/(^|\s)[×x]\s*\d+(?:\.\d+)?(?![\p{L}])/gu, "$1 ").replace(/\d+(?:\.\d+)?\s*[×x](?![\p{L}])/gu, " ");
     s = s.replace(Q_AMT, " ");
     const all = M.searchTokens(s);
@@ -1545,12 +1675,73 @@ window.M = window.M || {};
     let req = all.filter((t, i) => !fill[i] && !opt[i]), op = all.filter((t, i) => !fill[i] && opt[i]);
     if (!req.length) { req = op; op = []; }
     if (!req.length) req = all.slice();
-    o = { req, opt: op, all: kept.length ? kept : all.slice(), nums: lc(key).match(NUMS) || [] };
+    const nums = queryNums(lc(key));
+    o = { req, opt: op, all: kept.length ? kept : all.slice(), nums, asked: numAsked(key, nums), fill: all.filter((t, i) => fill[i]) };
     if (qCache.size > 500) qCache.clear();
-    qCache.set(key, o);
+    qCache.set((noPb ? "\u0002" : "") + key, o);
     return o;
   }
   M.searchQuery = q => { const o = searchQuery(q); return { req: o.req.slice(), opt: o.opt.slice(), all: o.all.slice() }; };
+
+  /* L1: M.searchAmount(q) → { qty, unit, state } or null: the amount typed in a Log food
+     search. unit = the unit word, singular ("egg", "cup", "oz", "g", "slice", "breast",
+     "tbsp"…; a count with no unit word gives the food word: "2 eggs" → egg). state =
+     "raw" | "cooked" | "dry" | null. Only a state ("cooked rice") → qty and unit null.
+     Nothing found → null. */
+  const AMT_UNIT = { g: "g", gr: "g", gram: "g", grams: "g", kg: "kg", kgs: "kg", oz: "oz", ounce: "oz", ounces: "oz", lb: "lb", lbs: "lb", pound: "lb", pounds: "lb", ml: "ml",
+    cup: "cup", cups: "cup", c: "cup", tbsp: "tbsp", tbsps: "tbsp", tbs: "tbsp", tablespoon: "tbsp", tablespoons: "tbsp", tsp: "tsp", tsps: "tsp", teaspoon: "tsp", teaspoons: "tsp",
+    slice: "slice", slices: "slice", piece: "piece", pieces: "piece", pc: "piece", pcs: "piece", serving: "serving", servings: "serving", scoop: "scoop", scoops: "scoop",
+    can: "can", cans: "can", bottle: "bottle", bottles: "bottle", container: "container", containers: "container", packet: "packet", packets: "packet", stick: "stick", sticks: "stick",
+    link: "link", links: "link", spear: "spear", spears: "spear", breast: "breast", breasts: "breast", glass: "glass", glasses: "glass", shot: "shot", shots: "shot" };
+  const AMT_WORD = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, half: 0.5, quarter: 0.25 };
+  const AMT_SKIP = new Set(["large", "medium", "small", "jumbo", "extra", "big", "of", "the", "whole", "raw", "cooked", "dry", "uncooked", "fresh", "a", "an"]);
+  const AFRAC = { "½": 0.5, "¼": 0.25, "¾": 0.75, "⅓": 1 / 3, "⅔": 2 / 3, "⅛": 0.125 };
+  M.searchAmount = function (q) {
+    let s = lc(String(q == null ? "" : q)).replace(/['’‘`]/g, "");
+    if (!s.trim()) return null;
+    const state = /\b(?:raw|uncooked)\b/.test(s) ? "raw" : /\bdry\b/.test(s) ? "dry" : /\bcooked\b/.test(s) ? "cooked" : null;
+    s = s.replace(/(\d)\s*([½¼¾⅓⅔⅛])/g, (m, d, f) => " " + (+d + AFRAC[f]) + " ").replace(/[½¼¾⅓⅔⅛]/g, f => " " + AFRAC[f] + " ");
+    s = s.replace(/\b(\d+)\s+(\d)\/(\d{1,2})\b/g, (m, a, n, d) => " " + (+a + n / d) + " ");
+    s = s.replace(/(?:^|\s)(\d{1,2})\/(\d{1,2})(?=\s|$)/g, (m, n, d) => (+n + +d === 100 ? m : " " + (n / d) + " "));   /* 90/10 is a ratio, not an amount */
+    s = s.replace(/(\d)(?=[a-z])/g, "$1 ").replace(/\b[x×](\d)/g, "x $1").replace(/(\d)[x×]\b/g, "$1 x");
+    const w = s.split(/[\s,;]+/).filter(Boolean);
+    let qty = null, at = -1;
+    for (let i = 0; i < w.length; i++) {
+      const t = w[i];
+      if (/^\d+(?:\.\d+)?$/.test(t) && !/%$/.test(w[i + 1] || "") ) {
+        if (w[i + 1] === "%" ) continue;
+        qty = +t; at = i;
+        if (w[i + 1] && /^\d+(?:\.\d+)?$/.test(w[i + 1]) && +t + +w[i + 1] === 100) { qty = null; at = -1; i++; continue; }   /* "90 10" */
+        break;
+      }
+      if (hasOwn(AMT_WORD, t) && (t !== "a" && t !== "an" || (w[i + 1] && (hasOwn(AMT_UNIT, w[i + 1]) || AMT_WORD[w[i + 1]] === 0.5 || w[i + 1] === "cup")))) {
+        qty = AMT_WORD[t]; at = i;
+        if ((t === "a" || t === "an") && w[i + 1] === "half") { qty = 0.5; at = i + 1; }
+        else if (t === "half" && (w[i + 1] === "a" || w[i + 1] === "an")) at = i + 1;
+        break;
+      }
+    }
+    if (qty == null) {
+      /* "a banana": an article right before a food word counts as 1 */
+      if (/^(?:a|an|one)\s+[a-z]/.test(s.trim())) { qty = 1; at = 0; }
+      else return state ? { qty: null, unit: null, state } : null;
+    }
+    if (!(qty > 0)) return state ? { qty: null, unit: null, state } : null;
+    let unit = null;
+    for (let j = at + 1; j < w.length; j++) {
+      const t = w[j];
+      if (t === "x" || AMT_SKIP.has(t)) continue;
+      if (hasOwn(AMT_UNIT, t)) unit = AMT_UNIT[t];
+      break;
+    }
+    if (!unit) {
+      /* a count: the food word it counts ("2 large eggs" → egg, "eggs x2" → egg, "3 chicken breasts" → breast) */
+      const food = w.filter((t, i) => i !== at && !/^[\d.]+$/.test(t) && t !== "x" && !AMT_SKIP.has(t) && !hasOwn(AMT_WORD, t) && /^[a-z]/.test(t));
+      const last = food.length ? singular(food[food.length - 1].replace(/[^a-z]/g, "")) : "";
+      unit = last ? (hasOwn(AMT_UNIT, last) ? AMT_UNIT[last] : last) : null;
+    }
+    return { qty: Math.round(qty * 1000) / 1000, unit, state };
+  };
 
   /* Typos: "chiken", "cotage cheese", "bannana", "hilshire", "peanutbutter". One letter off
      for words of 4+ letters, two for 7+, against the words of the foods on hand. */
@@ -1574,6 +1765,7 @@ window.M = window.M || {};
     return p1[lb];
   }
   const fuzzMax = t => (t.length >= 7 ? 2 : t.length >= 4 ? 1 : 0);
+  const NO_FIX = new Set(["crab", "clam", "cram"]);
   const sortedLetters = w => w.split("").sort().join("");
   /* Typo distance with guards against real words that aren't in the app: in a word
      under 6 letters only a missing, extra or swapped letter counts ("coke" is not cake,
@@ -1583,6 +1775,10 @@ window.M = window.M || {};
     const d = editDist(t, w, max);
     if (d < 1 || d > max) return d;
     if (t.length < 6 && t.length === w.length && sortedLetters(t) !== sortedLetters(w)) return max + 1;
+    /* SD-20: a short word keeps its first letter; a real food the app doesn't have is never
+       "fixed" into another food ("crab" is not Carb balance tortilla) */
+    if (t.length < 6 && t[0] !== w[0]) return max + 1;
+    if (NO_FIX.has(t)) return max + 1;
     if (d >= 2 && (t.length < 8 || t.slice(0, 2) !== w.slice(0, 2))) return max + 1;
     return d;
   }
@@ -1612,9 +1808,11 @@ window.M = window.M || {};
       return best ? [best] : null;
     };
     let changed = false;
-    const map = list => { const out = []; list.forEach(t => { const r = fix(t); if (r) { changed = true; out.push.apply(out, r); } else out.push(t); }); return out; };
+    /* SD-11: one word typed as two ("rib eye" → ribeye) */
+    const join = list => { const out = []; for (let i = 0; i < list.length; i++) { const j = i + 1 < list.length ? singular(list[i] + list[i + 1]) : ""; if (j && (!vocab.has(list[i]) || !vocab.has(list[i + 1])) && vocab.has(j)) { out.push(j); i++; changed = true; } else out.push(list[i]); } return out; };
+    const map = list => { const out = []; join(list).forEach(t => { const r = fix(t); if (r) { changed = true; out.push.apply(out, r); } else out.push(t); }); return out; };
     const req = map(pq.req), op = pq.opt.slice(), all = map(pq.all);
-    return changed ? { req, opt: op, all, nums: pq.nums } : null;
+    return changed ? { req, opt: op, all, nums: pq.nums, asked: pq.asked } : null;
   }
   const usesBonus = o => Math.min(10, Math.log2(num(o.uses) + 1) * 2);
   /* Cook foods also answer to "raw" / "dry" / "cooked" ("cooked chicken", "dry pasta"). */
@@ -1632,6 +1830,12 @@ window.M = window.M || {};
       hit: f => f.staple === true && hasW(f, "turkey") && (hasW(f, "slice") || hasW(f, "deli") || hasW(f, "lunch") || hasW(f, "hillshire")) }
   ];
   function stapleRule(toks) { const q = toks.join(" "); return STAPLE_WORDS.find(r => r.q.indexOf(q) >= 0) || null; }
+  const COOK_Q = new Set(["raw", "cooked", "uncooked", "dry"]);
+  /* SD-08: the rule for these words, also with raw / cooked left out ("chicken cooked") */
+  const ruleFor = pq => stapleRule(pq.req) || stapleRule(pq.all) || stapleRule(pq.req.filter(w => !COOK_Q.has(w))) || stapleRule(pq.all.filter(w => !COOK_Q.has(w)));
+  /* Amount words: missing one never pushes a saved food down ("cup of rice"). */
+  const Q_MEASURE = new Set(["g", "gram", "oz", "ounce", "lb", "pound", "kg", "ml", "cup", "tbsp", "tsp", "tablespoon", "teaspoon"]);
+  const Q_KEEPFILL = new Set(["the", "and", "with", "some", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]);
   /* Their own foods, meals and recents that match on whole words or word starts always
      come before built-in foods (a tier of their own, above any name score). */
   const STAPLE = 12;     /* a built-in food they buy: above other built-in foods */
@@ -1643,19 +1847,26 @@ window.M = window.M || {};
     if (c) { r.cook = c; r.state = "raw"; const l = M.cook.servingLabel(f); if (l) r.sub = l; }
     return r;
   }
-  function mealResult(m) {
+  /* L3: a saved meal's owner. pid = who made it (null on old meals); own = made by the
+     person searching, or by nobody in particular (old meals). */
+  const mealOwn = (m, pid) => { const o = isObj(m) && isPid(m.pid) ? m.pid : null; return { pid: o, own: !o || o === (pid || M.pid()) }; };
+  function mealResult(m, pid) {
     const r = { kind: "meal", id: m.id, name: m.name, brand: "", desc: m.desc || "", slot: m.slot, sub: "1 serving", per: normPer(m.per), serving: { qty: 1, unit: "serving", g: null }, alts: [], foodId: null, mealId: m.id, ref: m };
+    Object.assign(r, mealOwn(m, pid));
     if (isObj(m.batch) && num(m.batch.cookedG) > 0) {
-      const u = personUnits(), pg = M.cook.portionG(u);
+      /* the batch's own unit when it has one ("Batch · 1,400 g cooked · per 100 g") */
+      const u = WEIGHT_G[m.batch.unit] ? m.batch.unit : personUnits(), pg = M.cook.portionG(u);
       Object.assign(r, { batch: true, portionG: pg, per: M.cook.batchPer(m, pg), sub: M.cook.batchSub(m, u), portion: "per " + fmtWeight(pg, famOf(u)) });
     }
     return r;
   }
-  function recentResult(rc) {
+  function recentResult(rc, pid) {
     const f = rc.foodId ? M.foods.get(rc.foodId) : null;
     const serving = f ? normServing(f.serving) : Object.assign(M.parseServing(rc.servingLabel), rc.g ? { g: rc.g } : {});
     const r = { kind: "recent", id: "r:" + lc(rc.name) + "|" + lc(rc.brand), name: rc.name, brand: rc.brand || "", sub: rc.servingLabel || "1 serving", per: normPer(rc.per), serving, alts: f ? normAlts(f.alts) : [], foodId: rc.foodId || null, mealId: rc.mealId || null, ref: rc };
     if (rc.state) { r.state = rc.state; r.cook = rc.cook || (f && cookLite(f.cook)) || null; }
+    /* L3: a recent of a saved meal carries the meal's owner too */
+    if (rc.mealId) { const m = ownRec(M.MS.meals, rc.mealId); if (m) Object.assign(r, mealOwn(m, pid)); }
     return r;
   }
   /* opt.recents === false / opt.meals === false leave those out (the add sheet's Foods list),
@@ -1678,11 +1889,13 @@ window.M = window.M || {};
     opt = isObj(opt) ? opt : {};
     const pid = opt.pid || M.pid(), slot = opt.slot, limit = num(opt.limit, 40) || 40;
     const wantRecents = opt.recents !== false, wantMeals = opt.meals !== false;
-    const pq = searchQuery(q), toks = pq.req;
+    let pq = searchQuery(q);
+    const toks = pq.req;
     const out = [], seen = new Set();
-    /* Dedupe: same kind+name+brand, or a food/meal a recent already points at. */
+    /* Dedupe: same kind+name+brand, or a food/meal a recent already points at. Saved
+       meals only by id (L3): two people's meals with one name both show. */
     const push = r => {
-      const keys = [r.kind + "|" + lc(r.name) + "|" + lc(r.brand)];
+      const keys = r.kind === "meal" ? [] : [r.kind + "|" + lc(r.name) + "|" + lc(r.brand)];
       if (r.foodId) keys.push("f:" + r.foodId);
       if (r.mealId) keys.push("m:" + r.mealId);
       if (keys.some(k => seen.has(k))) return false;
@@ -1690,39 +1903,74 @@ window.M = window.M || {};
       out.push(r);
       return true;
     };
+    /* the person's own meals first, the order of use kept inside each group */
+    const mealsOwnFirst = () => { const all = M.meals.list(); return all.filter(m => mealOwn(m, pid).own).concat(all.filter(m => !mealOwn(m, pid).own)); };
     if (!toks.length) {
       /* In a meal: what they ate in this meal lately, their meals for this meal, their
          "Any time" meals, then other recents, other meals and their own foods. */
       const rec = wantRecents ? M.recents(pid, 30, slot) : [];
-      const meals = wantMeals ? M.meals.list() : [];
-      if (slot) rec.filter(rc => num(rc.slotCount) > 0).forEach(rc => push(recentResult(rc)));
-      if (slot) meals.filter(m => m.slot === slot).forEach(m => push(mealResult(m)));
-      meals.filter(m => m.slot === "Any").forEach(m => push(mealResult(m)));
-      rec.forEach(rc => push(recentResult(rc)));
-      meals.forEach(m => push(mealResult(m)));
+      const meals = wantMeals ? mealsOwnFirst() : [];
+      if (slot) rec.filter(rc => num(rc.slotCount) > 0).forEach(rc => push(recentResult(rc, pid)));
+      if (slot) meals.filter(m => m.slot === slot).forEach(m => push(mealResult(m, pid)));
+      meals.filter(m => m.slot === "Any").forEach(m => push(mealResult(m, pid)));
+      rec.forEach(rc => push(recentResult(rc, pid)));
+      meals.forEach(m => push(mealResult(m, pid)));
       M.foods.list().forEach(f => push(foodResult("food", f)));
       return out.slice(0, limit);
     }
     const cands = [];
     const cand = (r, bonus, extra, kw, own, gen) => cands.push({ r, bonus, extra, kw, own, gen });
-    if (wantRecents) M.recents(pid, 40, slot).forEach((rc, i) => cand(recentResult(rc), 25 + Math.max(0, 10 - i / 4), "", "", true));
-    if (wantMeals) M.meals.list().forEach(m => cand(mealResult(m), 15 + (slot && m.slot === slot ? 25 : m.slot === "Any" ? 6 : 0) + usesBonus(m), mealText(m), "", true));
-    M.foods.list().forEach(f => cand(foodResult("food", f), 10 + usesBonus(f), "", (cookWords(f) + " " + foodWords(f)).trim(), true));
+    if (wantRecents) M.recents(pid, 40, slot).forEach((rc, i) => cand(recentResult(rc, pid), 25 + Math.max(0, 10 - i / 4), "", "", true));
+    /* L3: the person's own meals get a small plus over the other person's */
+    if (wantMeals) M.meals.list().forEach(m => { const r = mealResult(m, pid); cand(r, 15 + (slot && m.slot === slot ? 25 : m.slot === "Any" ? 6 : 0) + usesBonus(m) + (r.own ? 4 : 0), mealText(m), "", true); });
+    /* SD-20: built-in foods' extra words count as weak extra words, not name words */
+    M.foods.list().forEach(f => cand(foodResult("food", f), 10 + usesBonus(f), foodWords(f), cookWords(f), true));
     /* built-in foods: a food they named for these words first, then foods they buy,
        then plain meat / fish / rice / pasta (the cook foods) before mixed dishes that share a word */
     genericList().forEach(f => {
       if (!isObj(f) || !f.name) return;
-      cand(foodResult("generic", f), (f.staple === true ? STAPLE : 0) + (M.cook.of(f) ? 3 : 0), "", (cookWords(f) + " " + foodWords(f)).trim(), false, f);
+      cand(foodResult("generic", f), (f.staple === true ? STAPLE : 0) + (M.cook.of(f) ? 3 : 0), foodWords(f), cookWords(f), false, f);
     });
+    /* SD-10: a filler word that is a whole word of one of their own names ("rice bowl",
+       "yogurt bowl") stays, as a word the food may have */
+    if (pq.fill && pq.fill.length) {
+      const ownW = new Set();
+      cands.forEach(c => { if (c.own) nameInfo(c.r.name, c.r.brand).words.forEach(w => ownW.add(w)); });
+      const keep = pq.fill.filter(w => w.length >= 3 && !Q_KEEPFILL.has(w) && ownW.has(w) && pq.req.indexOf(w) < 0 && pq.opt.indexOf(w) < 0);
+      if (keep.length) pq = Object.assign({}, pq, { opt: pq.opt.concat(keep), keep });
+    }
+    /* SD-09: their own names are also matched against the words as typed ("pb&j", "pbj") */
+    const rq = /\bpb/.test(lc(q)) ? searchQuery(q, true) : null;
+    const rqLetters = rq ? rq.all.join("") : "";
+    /* MF-01: a typed ratio or % ("ground beef 90/10", "2% milk"): a saved item without it drops like one missing a word */
+    const askedNum = !!pq.asked;
     const pass = (pq, fuzzy) => {
-      const qn = pq.req.join(" "), rule = stapleRule(pq.req) || stapleRule(pq.all), res = [];
+      const qn = pq.req.join(" "), rule = ruleFor(pq), res = [];
       cands.forEach(c => {
         let named = false;
-        if (rule && c.gen) { try { named = !!rule.hit(c.gen); } catch (e) {} }
+        /* SD-08: the food they named for these words, or a recent / saved food pointing at it */
+        const g = c.gen || (rule && c.r.kind !== "meal" && c.r.foodId && !ownRec(M.MS.foods, c.r.foodId) ? genericById(c.r.foodId) : null);
+        if (rule && g) { try { named = !!rule.hit(g); } catch (e) {} }
+        /* a kept word ("chicken bowl") must be in the named food too */
+        if (named && pq.keep && pq.keep.some(w => !optHit(w, c.r.name, c.r.brand, "", c.kw))) named = false;
         let s = scoreQuery(pq, c.r.name, c.r.brand, c.extra, c.kw);
-        const weak = scoreWeak, inside = s >= 0 && scoreInside;
+        let weak = scoreWeak, inside = s >= 0 && scoreInside, exact = nameInfo(c.r.name, c.r.brand).j === qn;
+        if (rq && c.own && !fuzzy) {
+          const ni = nameInfo(c.r.name, c.r.brand);
+          let s2 = scoreQuery(rq, c.r.name, c.r.brand, c.extra, c.kw);
+          const w2 = scoreWeak;
+          if (rqLetters.length >= 2 && ni.words.join("") === rqLetters) { s2 = Math.max(s2, 50); exact = true; }
+          if (s2 > s) { s = s2; weak = w2 && !exact; inside = false; }
+        }
         if (s < 0) { if (!named) return; s = 0; }
-        res.push({ r: c.r, inside, tier: (c.own && !weak ? 0 : 1) + (fuzzy ? 2 : 0), s: s + c.bonus + (named ? NAMED : 0) + (nameInfo(c.r.name, c.r.brand).j === qn ? 40 : 0) + numHit(pq, c.r) });
+        /* SD-08: a saved item missing a word the query has ("turkey slices" → Turkey wrap)
+           drops to the built-in foods' tier, without its own bonus */
+        /* (the word must be in its own name: a meal's ingredients don't count here) */
+        const miss = c.own && !named && (pq.opt.some(o => !Q_MEASURE.has(o) && !optHit(o, c.r.name, c.r.brand, "", c.kw)) || (askedNum && !numHit(pq, c.r)));
+        const tier = named || (c.own && !weak && !miss) ? 0 : 1;
+        /* a saved item found only through its ingredients or brand ranks like a built-in food */
+        const bonus = c.own && (miss || weak) ? 0 : c.bonus;
+        res.push({ r: c.r, inside, tier: tier + (fuzzy ? 2 : 0), s: s + bonus + (named ? NAMED : 0) + (exact ? 40 : 0) + numHit(pq, c.r) });
       });
       /* letters inside a word ("apple" in Pineapple) only when no word matches whole or at its start */
       return res.some(x => !x.inside) ? res.filter(x => !x.inside) : res;
@@ -1736,7 +1984,11 @@ window.M = window.M || {};
     /* still nothing ("red onion", "chopped tomato"): the last word must match and the
        describing words before it may be missing. Never drops a word that names a food. */
     const lq = fq || pq;
-    if (!scored.length && lq.req.length > 1 && lq.req.slice(0, -1).every(w => Q_DESC.has(w))) scored = pass({ req: lq.req.slice(-1), opt: lq.req.slice(0, -1).concat(lq.opt), all: lq.all, nums: lq.nums }, true);
+    if (!scored.length && lq.req.length > 1) {
+      /* MF-01: a describing word anywhere may go ("lean ground beef", "ground beef lean") */
+      const keep = lq.req.filter(w => !Q_DESC.has(w)), drop = lq.req.filter(w => Q_DESC.has(w));
+      if (keep.length && drop.length) scored = pass({ req: keep, opt: drop.concat(lq.opt), all: lq.all, nums: lq.nums, asked: lq.asked }, true);
+    }
     scored.sort((a, b) => a.tier - b.tier || b.s - a.s || lc(a.r.name).localeCompare(lc(b.r.name)));
     for (const x of scored) { if (out.length >= limit) break; push(x.r); }
     return out;
@@ -1907,6 +2159,7 @@ window.M = window.M || {};
     if ("state" in it && it.state !== "raw" && it.state !== "cooked") delete it.state;
     cCook(it);
     cNum(it, "batchG", false, 0, C_MAX);
+    cNum(it, "u", false, 0);   /* L2 edit stamp */
     if (!okKey(it.id) || it.id.length > 120) it.id = M.uid();
     return it;
   }
@@ -1922,7 +2175,7 @@ window.M = window.M || {};
       cPer(o, "per"); if ("per100g" in o) cPer(o, "per100g", true);
       if ("alts" in o) o.alts = Array.isArray(o.alts) ? o.alts.filter(a => isObj(a) && isStr(a.label)).map(a => { cStr(a, "label", C_LEN); cNum(a, "g", true, 0, C_MAX); return a; }) : [];
       cCook(o);
-      ["createdAt", "updatedAt", "uses", "lastUsed"].forEach(k => cNum(o, k, false, 0));
+      ["createdAt", "updatedAt", "uses", "lastUsed", "u"].forEach(k => cNum(o, k, false, 0));
       return o;
     },
     meal(o, id) {
@@ -1932,7 +2185,7 @@ window.M = window.M || {};
       o.items = Array.isArray(o.items) ? o.items.filter(isObj).map(it => cLine(it, "Item")) : [];
       cNum(o, "servingsMade", false, 1e-9, 1e4); cPer(o, "per");
       if ("batch" in o) { if (!isObj(o.batch)) delete o.batch; else { cNum(o.batch, "cookedG", false, 0, C_MAX); cNum(o.batch, "rawG", false, 0, C_MAX); if (o.batch.unit !== undefined && ["g", "oz", "lb"].indexOf(o.batch.unit) < 0) delete o.batch.unit; } }
-      ["createdAt", "updatedAt", "uses", "lastUsed"].forEach(k => cNum(o, k, false, 0));
+      ["createdAt", "updatedAt", "uses", "lastUsed", "u"].forEach(k => cNum(o, k, false, 0));
       return o;
     },
     day(o, id) {

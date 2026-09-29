@@ -219,8 +219,7 @@ function swRig(opts) {
     registration: { scope: BASE, update: async () => { updates++; } },
     clients: { claim: async () => {}, matchAll: async () => opts.clients || [{ postMessage: m => posted.push(m) }] }
   };
-  const src = SWSRC.replace("const NET_MS = 8000;", "const NET_MS = " + (opts.netMs || 120) + ";")
-    .replace("const HIDDEN_MS = 60000, HIDDEN_POLL_MS = 2000;", "const HIDDEN_MS = " + (opts.hiddenMs || 600) + ", HIDDEN_POLL_MS = " + (opts.pollMs || 100) + ";");
+  const src = SWSRC.replace("const NET_MS = 8000;", "const NET_MS = " + (opts.netMs || 120) + ";");
   vm.runInNewContext(src, { self, caches, fetch, Request: R, Response, Headers, URL, AbortController, ReadableStream, TextEncoder, setTimeout, clearTimeout, Promise, console });
   const fire = (url, o) => {
     o = o || {};
@@ -255,6 +254,19 @@ t("Train | Macros reads as one two-way switch: one rounded frame, the side you'r
   assert.ok(/background:var\(--acc\)/.test(last(".modebar button.on")) && /color:var\(--acc-ink\)/.test(last(".modebar button.on")), "selected side filled");
   const all = sel => [...css.matchAll(new RegExp(sel.replace(/[.+]/g, "\\$&") + "\\{([^}]*)\\}", "g"))].map(m => m[1]);
   assert.ok(all(".modebar button").some(r => /min-height:4[4-9]px/.test(r)), "44 px or taller");
+});
+t("LK-03: dark mode OFF switches stand out (both dark blocks); ON stays in the accent color", () => {
+  assert.ok(HTML.includes('@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .toggle:not(.on){background:#4A525B} :root:not([data-theme="light"]) .toggle i{background:#F2EFE8} }'));
+  assert.ok(HTML.includes(':root[data-theme="dark"] .toggle:not(.on){background:#4A525B}') && HTML.includes(':root[data-theme="dark"] .toggle i{background:#F2EFE8}'));
+  assert.ok(HTML.includes(".toggle.on{background:var(--acc)}"));
+});
+t("round 5 P3: Today's plan buttons fit one line (LK-06); no Train label under 12 px (PL-08)", () => {
+  assert.ok(HTML.includes('data-a="plan-add">+ Exercise</button>') && HTML.includes('${P.abs?"Skip abs":"Add abs"}'));
+  assert.strictEqual((HTML.match(/style="flex:1;white-space:nowrap" data-a="plan-/g) || []).length, 3, "three one-line buttons");
+  const css = (HTML.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || "";
+  const small = [...css.matchAll(/([^{}]+)\{[^}]*font-size:(\d+(?:\.\d+)?)px/g)].filter(m => +m[2] < 12).map(m => m[1].trim() + " " + m[2] + "px");
+  assert.deepStrictEqual(small, [], "labels under 12 px");
+  assert.ok(HTML.includes('<div class="k">${H.length} session${H.length===1?"":"s"}</div>'), "LK-10: 1 session, 2 sessions");
 });
 t("light theme tokens: muted and warning text dark enough, placeholders in --mut (IOS-07); content starts 10px under the bar (TRN-11)", () => {
   const root = (HTML.match(/:root\{([^}]*)\}/) || [])[1] || "";
@@ -496,37 +508,21 @@ async function runSwPass() {
     await next.activate();
     assert.deepStrictEqual([...next.stores.keys()].sort(), ["chalk-v" + (SWV - 1), "chalk-v" + SWV].sort());
   });
-  await ta("OF-02: after v15, an old page that stays in the background a full minute reloads onto the new version; open, newer and self-updating pages, and pages opened during that minute, don't", async () => {
-    const nav = [];
-    const win = (id, vis, posted) => ({ id, visibilityState: vis, url: "https://nickahrensrealestate.github.io/chalk/", postMessage: m => posted && posted.push(m), navigate: u => { nav.push(id); return Promise.resolve(null); } });
-    const said = [];
-    const list = [win("v15-hidden", "hidden", said), win("v15-open", "visible", said), win("v17-hidden", "hidden", said), win("v15-back", "hidden", said), Object.assign(win("other-app", "hidden", said), { url: "https://nickahrensrealestate.github.io/apollo/" })];
-    const m = () => new Map([["x", new Response("x")]]);
-    const rig = swRig({ clients: list, caches: [["chalk-v15", m()]] });   /* the version before was 15: no update listener */
-    await rig.activate();
-    assert.ok(said.every(m => m.type === "chalk-updated") && said.length === 5, "every open page is told first");
-    rig.message({ type: "chalk-self" }, { id: "v17-hidden" });   /* a v17+ page answers: it reloads itself when quiet */
-    assert.deepStrictEqual(nav, [], "nothing reloaded straight away (fetches never wait on it either)");
-    list.push(win("new-page", "hidden"));                        /* opened after the update: already on the new version */
-    await sleep(1600);
-    assert.deepStrictEqual(nav, [], "not at 1.5 s: a page must stay in the background a full minute first");
-    list[3].visibilityState = "visible"; await sleep(150); list[3].visibilityState = "hidden";   /* opened for a moment (a set typed) */
-    await sleep(900);
-    assert.deepStrictEqual(nav, ["v15-hidden"], "only the old page that stayed in the background the whole time");
-    /* a page that can't be reloaded from outside is left alone, without an error */
-    const bad = swRig({ caches: [["chalk-v15", m()]], clients: [{ id: "x", visibilityState: "hidden", url: "u", postMessage() {}, navigate: () => Promise.reject(new TypeError("not controlled")) }, { postMessage() {} }] });
-    await bad.activate(); await sleep(2400);
-  });
-  await ta("OF-02 safety: after v16 or later (and on a first install) the worker never reloads a page itself — v16+ pages wait for a quiet moment, so a rest clock, a HIIT clock, a set being typed or an open sheet is never lost", async () => {
+  await ta("T3-03: the worker never reloads a page from outside, whatever version came before (v15 pages get the new version at their next launch); v16+ pages still reload themselves when quiet", async () => {
+    assert.ok(!/\.navigate\(|reloadHidden|isOldHidden|SELF_SINCE|HIDDEN_MS/.test(SWSRC), "no outside reload code left in sw.js");
     const m = () => new Map([["x", new Response("x")]]);
     const nav = [];
-    await Promise.all([["chalk-v16"], ["chalk-v15", "chalk-v16"], []].map(async before => {
+    await Promise.all([["chalk-v15"], ["chalk-v16"], ["chalk-v17"], ["chalk-v15", "chalk-v16"], []].map(async before => {
       const name = before.join("+") || "no older cache";
-      const pg = { id: "busy", visibilityState: "hidden", url: "https://nickahrensrealestate.github.io/chalk/index.html", postMessage() {}, navigate: () => { nav.push(name); return Promise.resolve(null); } };
-      const rig = swRig({ clients: [pg], caches: before.map(k => [k, m()]) });
+      const said = [];
+      const pg = id => ({ id, visibilityState: "hidden", url: "https://nickahrensrealestate.github.io/chalk/index.html", postMessage: x => said.push(x), navigate: () => { nav.push(name + ":" + id); return Promise.resolve(null); } });
+      const rig = swRig({ clients: [pg("busy"), pg("idle")], caches: before.map(k => [k, m()]) });
       await rig.activate();
+      rig.message({ type: "chalk-self" }, { id: "busy" });     /* a v17+ page still says it updates itself: harmless */
+      assert.strictEqual(said.length, 2, name + ": every open page is told");
+      assert.ok(said.every(x => x.type === "chalk-updated" && x.cache === "chalk-v" + SWV), name);
     }));
-    await sleep(2600);
+    await sleep(1800);
     assert.deepStrictEqual(nav, [], "no reload from outside");
   });
   await ta("a page still loading the version before gets its own files from the kept cache, even offline", async () => {
@@ -739,6 +735,227 @@ function runLiveDataPass() {
   }
 }
 
+/* ------------------- KJ-02: a borrowed phone keeps each person's plan. The live saves (workout finished, so Switch
+   is allowed) go Nick → Katerina → Nick: chalk.v1 comes back byte for byte (only updatedAt moves), workouts, weights
+   and custom moves are never touched, a person never used on this phone gets their preset, and the plan kept for
+   later lives in its own key, never inside chalk.v1 (the current person's cloud training backup). */
+function runPlanStashPass() {
+  console.log("KJ-02: switch person and back keeps each person's plan (live saves)");
+  const LIVE = JSON.parse(read("tests/fixtures/chalk-v1-live.json"));
+  const PLAN = ["program", "mix", "goal", "block", "cyc", "next", "plan", "pick", "absNext", "lastSummary"];
+  const HIST = ["log", "ex", "custom", "settings"];
+  for (const who of ["nick", "kat"]) {
+    const other = who === "nick" ? "kat" : "nick";
+    const S0 = JSON.parse(LIVE[who]); S0.active = null;        /* same key order as the live save */
+    const raw0 = JSON.stringify(S0);
+    const { dom, w, d, errors } = boot({ real: true, hook: swHook, store: { "chalk.v1": raw0, "chalk.bak.d": "2000-01-01" } });
+    const stored = () => JSON.parse(w.localStorage.getItem("chalk.v1"));
+    const kept = () => JSON.parse(w.localStorage.getItem("chalk.people") || "null");
+    const tab = name => click(w, q(d, '#tabs [data-tab="' + name + '"]'));
+    const switchTo = pid => { tab("settings"); click(w, q(d, '#app [data-a="switch-profile"]')); click(w, q(d, '#app [data-a="pick-profile"][data-v="' + pid + '"]')); tab("today"); };
+    const sameBytes = (now, ref) => JSON.stringify(Object.assign({}, now, { updatedAt: ref.updatedAt }));
+    try {
+      t(who + ": one person on the phone: boot, every tab and Macros write nothing extra", () => {
+        ["history", "progress", "settings", "today"].forEach(tab);
+        click(w, q(d, '#modebar [data-v="macros"]')); click(w, q(d, '#modebar [data-v="train"]'));
+        assert.strictEqual(w.localStorage.getItem("chalk.v1"), raw0);
+        assert.strictEqual(w.localStorage.getItem("chalk.people"), null, "nothing kept aside");
+        assert.deepStrictEqual(errors, []);
+      });
+      t(who + ": switching to someone never used here gives their preset; history untouched; the plan kept aside is not in chalk.v1", () => {
+        switchTo(other);
+        const now = stored(), pr = JSON.parse(w.eval("JSON.stringify(PRESETS." + other + ")"));
+        assert.strictEqual(now.profile, other);
+        assert.deepStrictEqual(now.mix, pr.mix); assert.strictEqual(now.goal.mode, pr.goal); assert.strictEqual(now.block, 0);
+        assert.strictEqual(now.program.mode, pr.goal, "their own program");
+        HIST.forEach(k => assert.deepStrictEqual(now[k], S0[k], k + " untouched"));
+        const k = kept(); assert.ok(k && k[who] && !k[other], "only the person who left is kept");
+        PLAN.forEach(f => assert.deepStrictEqual(k[who][f], S0[f], f + " kept exactly"));
+        assert.ok(!("people" in now) && !JSON.stringify(now.program).includes(JSON.stringify(S0.program.workouts[S0.program.order[0]].items)), "chalk.v1 (the training backup) holds only the current person's plan");
+        assert.deepStrictEqual(errors, []);
+      });
+      t(who + ": switching back restores the first plan byte for byte (program, edits, rotation, 45-day clock)", () => {
+        const mem = () => w.eval("JSON.stringify(" + JSON.stringify(PLAN) + ".map(f => S[f] === undefined ? null : S[f]))");
+        const otherPlan = mem();   /* as on screen: Today builds the day's plan in memory */
+        switchTo(who);
+        const now = stored();
+        assert.strictEqual(sameBytes(now, S0), raw0, "chalk.v1 as it was, except updatedAt");
+        PLAN.forEach((f, i) => assert.strictEqual(JSON.stringify(kept()[other][f] === undefined ? null : kept()[other][f]), JSON.stringify(JSON.parse(otherPlan)[i]), "the other person's plan kept for them: " + f));
+        assert.ok(d.getElementById("app").textContent.length > 0);
+        /* and the other way round: their plan comes back exactly too */
+        switchTo(other);
+        assert.strictEqual(mem(), otherPlan);
+        switchTo(who);
+        assert.strictEqual(sameBytes(stored(), S0), raw0);
+        assert.deepStrictEqual(errors, []);
+      });
+      t(who + ": a damaged kept plan falls back to the preset; Erase removes the kept plans", () => {
+        w.localStorage.setItem("chalk.people", JSON.stringify({ [other]: { program: { order: ["X"], workouts: {} } }, zz: 1 }));
+        switchTo(other);
+        assert.deepStrictEqual(stored().mix, JSON.parse(w.eval("JSON.stringify(PRESETS." + other + ".mix)")));
+        assert.ok(!("zz" in kept()), "unknown names dropped");
+        switchTo(who); assert.strictEqual(sameBytes(stored(), S0), raw0);
+        w.localStorage.setItem("chalk.people", "{not json"); switchTo(other); assert.strictEqual(stored().profile, other, "unreadable key: still switches");
+        tab("settings"); click(w, q(d, '#app [data-a="wipe"]')); click(w, q(d, '#sheet [data-a="wipe-do"]'));
+        assert.strictEqual(w.localStorage.getItem("chalk.people"), null);
+        assert.deepStrictEqual(errors, []);
+      });
+    } finally { dom.window.close(); }
+  }
+}
+
+/* ------------------- SP-04 (training half): chalk.v1 and chalk.bak are written with characters past U+00FF as \uXXXX,
+   so Safari keeps them at 1 byte a character; the live build (v15) reads them back as exactly the same data */
+function runNarrowPass() {
+  console.log("SP-04: Chalk's save and daily backup escape wide characters");
+  const LIVE = JSON.parse(read("tests/fixtures/chalk-v1-live.json"));
+  const WIDE = /[\u0100-\uffff]/;
+  /* the live build's own load(), straight from git (skipped when there is no history) */
+  let liveLoad = null;
+  try {
+    const { execFileSync } = require("child_process");
+    const v15 = execFileSync("git", ["show", "d757f4b:index.html"], { cwd: ROOT, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 << 20 }).toString("utf8");
+    const src = (v15.match(/function load\(\)\{[^\n]*\n/) || [])[0];
+    assert.ok(src, "the live build's load() found");
+    liveLoad = text => vm.runInNewContext("(" + src.replace(/^function load/, "function") + ")()", { KEY: "chalk.v1", localStorage: { getItem: () => text, setItem() {} }, JSON });
+  } catch (e) { if (e instanceof assert.AssertionError) throw e; liveLoad = null; }
+  for (const who of ["nick", "kat"]) {
+    const raw = LIVE[who];
+    t(who + ": the live save has no wide characters, so the new writer gives the very same bytes", () => {
+      assert.ok(!WIDE.test(raw));
+      const { dom, w, errors } = boot({ real: true, store: { "chalk.v1": raw, "chalk.bak.d": "2000-01-01" } });
+      try {
+        assert.strictEqual(w.eval("lsText(S)"), raw);
+        assert.strictEqual(w.localStorage.getItem("chalk.bak"), raw);
+        assert.deepStrictEqual(errors, []);
+      } finally { dom.window.close(); }
+    });
+    t(who + ": a save with ’ — → and an emoji: boot leaves it alone, the backup and the next save escape them, and the live build reads both back the same", () => {
+      const S0 = JSON.parse(raw);
+      const cid = Object.keys(S0.custom)[0];
+      S0.custom[cid].n = "Landmine press — Nick’s → 💪";
+      S0.settings.note = "½ × · stay Latin-1";
+      const old = JSON.stringify(S0);                           /* as an older build wrote it: wide characters raw */
+      assert.ok(WIDE.test(old));
+      const { dom, w, d, errors } = boot({ real: true, store: { "chalk.v1": old, "chalk.bak.d": "2000-01-01" } });
+      try {
+        assert.strictEqual(w.localStorage.getItem("chalk.v1"), old, "boot writes nothing");
+        const bak = w.localStorage.getItem("chalk.bak");
+        assert.ok(!WIDE.test(bak) && bak.includes("\\u2014") && bak.includes("½ × ·"), "backup escaped, Latin-1 kept as is");
+        assert.deepStrictEqual(JSON.parse(bak), JSON.parse(old));
+        w.eval("save()");
+        const now = w.localStorage.getItem("chalk.v1");
+        assert.ok(!WIDE.test(now), "the next save is all 1-byte characters");
+        const back = JSON.parse(now); back.updatedAt = S0.updatedAt;
+        assert.strictEqual(JSON.stringify(back), old, "same data");
+        assert.ok(liveLoad, "checked against the live build");
+        if (liveLoad) {
+          assert.strictEqual(JSON.stringify(liveLoad(now)).replace(/"updatedAt":\d+/, ""), JSON.stringify(JSON.parse(now)).replace(/"updatedAt":\d+/, ""), "v15's load() reads it the same");
+          assert.strictEqual(JSON.stringify(liveLoad(bak)), old, "v15's load() reads the backup the same");
+        }
+        assert.deepStrictEqual(errors, []);
+      } finally { dom.window.close(); }
+      /* and a relaunch on the escaped save writes nothing */
+      const again = boot({ real: true, store: { "chalk.v1": JSON.stringify(Object.assign(JSON.parse(old), { updatedAt: 1 })).replace(/[\u0100-\uffff]/g, c => "\\u" + ("000" + c.charCodeAt(0).toString(16)).slice(-4)), "chalk.bak.d": "2000-01-01" } });
+      try {
+        const before = again.w.localStorage.getItem("chalk.bak");
+        assert.strictEqual(again.w.localStorage.getItem("chalk.v1"), before, "escaped save left byte for byte");
+        assert.strictEqual(again.w.eval("S.custom[" + JSON.stringify(cid) + "].n"), "Landmine press — Nick’s → 💪");
+        assert.deepStrictEqual(again.errors, []);
+      } finally { again.dom.window.close(); }
+    });
+  }
+}
+
+/* ------------------- T3-04: Katerina's "Replace Back Squat" starts with real squat swaps, never Skater Hop "· 0 lb" */
+function runReplacePass() {
+  console.log("T3-04: Replace suggestions for a loaded lift");
+  const LIVE = JSON.parse(read("tests/fixtures/chalk-v1-live.json"));
+  const raw = LIVE.kat;
+  const { dom, w, d, errors } = boot({ real: true, store: { "chalk.v1": raw, "chalk.bak.d": "2000-01-01" } });
+  try {
+    t("kat: Replace Back Squat lists loaded squat swaps first; no cardio or timed moves; bodyweight says so, never \"0 lb\"; nothing saved", () => {
+      const cardio = ["burpee", "jump_squat", "mtn_climber", "high_knees", "skater", "plank_tap", "bicycle", "bear_crawl", "jumping_jack", "jump_rope", "box_jump", "box_burpee", "lat_box_hop"];
+      assert.ok(w.eval("S.ex.skater && S.ex.skater.w === 0"), "her HIIT left a 0 for Skater Hop (the case that ranked it first)");
+      const subs = JSON.parse(w.eval('JSON.stringify(subsFor("squat",[],135))'));
+      assert.ok(subs.length >= 3);
+      subs.forEach(x => assert.ok(!cardio.includes(x.id), x.id + " is not a squat swap"));
+      assert.ok(!w.eval("NOLOAD(getEx(" + JSON.stringify(subs[0].id) + ").t)"), "a loaded move first: " + subs[0].id);
+      const at = JSON.parse(w.eval("JSON.stringify((()=>{ for(const wid of S.program.order){ const it=S.program.workouts[wid].items; for(let i=0;i<it.length;i++) if(it[i].ex==='squat') return {wid,i}; } return null; })())"));
+      assert.ok(at, "Back Squat is in her program");
+      w.openReplace({ where: "prog", wid: at.wid, i: at.i, mi: null });
+      const rows = [...d.querySelectorAll('#sheetB .opt[data-a="rep-do"]')].map(b => b.textContent.replace(/\s+/g, " ").trim());
+      assert.ok(!/Skater Hop|Burpee/.test(rows.slice(0, 6).join(" | ")), rows.slice(0, 6).join(" | "));
+      assert.ok(rows.every(r => !/ 0 lb/.test(r)), "no \"0 lb\" rows: " + rows.filter(r => / 0 lb/.test(r)).join(" | "));
+      assert.ok(rows.some(r => /bodyweight$/.test(r)), "bodyweight moves say so");
+      w.closeSheet();
+      assert.strictEqual(w.localStorage.getItem("chalk.v1"), raw, "looking at swaps writes nothing");
+      /* replacing a bodyweight move still offers the cardio moves, and your own numbers rank them */
+      const bw = JSON.parse(w.eval('JSON.stringify(subsFor("jump_squat",[],null))')).map(x => x.id);
+      assert.ok(bw.includes("skater") && bw.includes("burpee"), bw.join(","));
+      assert.strictEqual(bw[0], "skater", "her own Skater Hop first for a bodyweight swap");
+      assert.deepStrictEqual(errors, []);
+    });
+  } finally { dom.window.close(); }
+}
+
+/* ------------------- T3-02: a weight or reps typed or stepped but not logged yet survives a relaunch */
+async function runDraftPass() {
+  console.log("T3-02: typed and stepped numbers survive a relaunch");
+  const LIVE = JSON.parse(read("tests/fixtures/chalk-v1-live.json"));
+  for (const who of ["nick", "kat"]) {
+    const raw = LIVE[who];
+    const { dom, w, d, errors } = boot({ real: true, hook: swHook, store: { "chalk.v1": raw, "chalk.bak.d": "2000-01-01" } });
+    const stored = () => JSON.parse(w.localStorage.getItem("chalk.v1"));
+    const type = (el, v) => { el.value = v; el.dispatchEvent(new w.Event("input", { bubbles: true })); };
+    try {
+      await ta(who + ": typed weight and reps are saved 400 ms later; steppers too; nothing else changes", async () => {
+        const cur = w.eval("nextOpenSlot(-1)");
+        const wi = q(d, 'input[data-f="w"][data-i="' + cur + '"]'), ri = q(d, 'input[data-f="r"][data-i="' + cur + '"]');
+        assert.ok(wi && ri, "the open lift's boxes");
+        type(wi, "102.5"); type(ri, "9");
+        assert.strictEqual(w.localStorage.getItem("chalk.v1"), raw, "not on every key press");
+        await sleep(480);
+        const now = stored();
+        assert.deepStrictEqual(JSON.parse(JSON.stringify(now.active.items[cur].draft)), { w: 102.5, r: 9 });
+        const S0 = JSON.parse(raw);
+        ["log", "ex", "custom", "program", "cyc", "goal", "mix", "settings", "profile"].forEach(k => assert.deepStrictEqual(now[k], S0[k], k));
+        const nx = w.eval("(()=>{ for(let k=" + cur + "+1;k<S.active.items.length;k++) if(S.active.items[k].t==='lift') return k; return null; })()");
+        if (nx != null) {
+          const before = w.eval("slotDraft(S.active.items[" + nx + "]).w");
+          click(w, q(d, '[data-a="w+"][data-i="' + nx + '"]')); click(w, q(d, '[data-a="r-"][data-i="' + nx + '"]'));
+          await sleep(480);
+          const dr = stored().active.items[nx].draft;
+          assert.ok(dr && dr.w > before, "stepped weight saved");
+        }
+        assert.deepStrictEqual(errors, []);
+      });
+      await ta(who + ": going to the background or closing saves at once; a relaunch shows the same numbers", async () => {
+        const cur = w.eval("nextOpenSlot(-1)");
+        type(q(d, 'input[data-f="w"][data-i="' + cur + '"]'), "77.5");
+        Object.defineProperty(d, "visibilityState", { configurable: true, get: () => "hidden" });
+        d.dispatchEvent(new w.Event("visibilitychange"));
+        assert.strictEqual(stored().active.items[cur].draft.w, 77.5, "saved when hidden");
+        Object.defineProperty(d, "visibilityState", { configurable: true, get: () => "visible" });
+        type(q(d, 'input[data-f="r"][data-i="' + cur + '"]'), "11");
+        w.dispatchEvent(new w.Event("pagehide"));
+        assert.strictEqual(stored().active.items[cur].draft.r, 11, "saved on close");
+        const up = stored().updatedAt;
+        Object.defineProperty(d, "visibilityState", { configurable: true, get: () => "hidden" });
+        d.dispatchEvent(new w.Event("visibilitychange")); w.dispatchEvent(new w.Event("pagehide"));
+        assert.strictEqual(stored().updatedAt, up, "nothing typed since: no extra save");
+        const again = boot({ real: true, hook: swHook, store: { "chalk.v1": w.localStorage.getItem("chalk.v1"), "chalk.bak.d": "2000-01-01" } });
+        try {
+          assert.strictEqual(q(again.d, 'input[data-f="w"][data-i="' + cur + '"]').value, "77.5");
+          assert.strictEqual(q(again.d, 'input[data-f="r"][data-i="' + cur + '"]').value, "11");
+          assert.deepStrictEqual(again.errors, []);
+        } finally { again.dom.window.close(); }
+        assert.deepStrictEqual(errors, []);
+      });
+    } finally { dom.window.close(); }
+  }
+}
+
 /* ------------------- F6: sheets, toast, rest badge, switch person, backup, updates, escaping (real modules) */
 const swHook = win => {
   /* a service-worker stand-in: the page listens to it for "a newer version is ready" */
@@ -773,6 +990,17 @@ async function runF6Pass() {
         w.M.trends.hasDraft = () => { throw new Error("broken"); }; assert.ok(w.quietNow(), "a throwing hasDraft never blocks updates for good");
         w.M.trends.hasDraft = had;
         assert.deepStrictEqual(errors, []);
+      });
+      t("T3-01: while the update button shows, the page gets room at the bottom so nothing sits under it; gone mid-workout", () => {
+        assert.ok(/body\.upd-on #app\.wrap\{padding-bottom:calc\(var\(--upd-h,46px\) \+ 36px\)\}/.test(HTML), "the rule");
+        const u = d.getElementById("upd");
+        assert.ok(!u.hidden && d.body.classList.contains("upd-on"), "room added while it shows");
+        Object.defineProperty(u, "offsetHeight", { configurable: true, get: () => 70 }); w.placeUpd();
+        assert.strictEqual(d.body.style.getPropertyValue("--upd-h"), "70px", "a two-line button gets more room");
+        w.eval("S.active={id:'x',items:[],start:Date.now()}"); w.placeUpd();
+        assert.ok(u.hidden && !d.body.classList.contains("upd-on"), "no button, no extra room");
+        w.eval("S.active=null"); w.placeUpd();
+        assert.ok(!u.hidden && d.body.classList.contains("upd-on"));
       });
       await ta("TN-01: the update button moves up when the bottom bar grows, without a render() (Macros tab switches)", async () => {
         const u = d.getElementById("upd"), cta = d.getElementById("cta");
@@ -834,7 +1062,16 @@ async function runF6Pass() {
         click(w, q(d, '#app [data-a="pick-profile"][data-v="nick"]')); click(w, q(d, '#cta [data-a="start"]'));
         w.eval("S.active.start=Date.now()-527*60000; render()");
         assert.strictEqual(w.trainBadge(), "Train · Finish workout?"); assert.strictEqual(d.getElementById("subtitle").textContent, "Finish workout?");
+        /* C6: the question in the title bar can be tapped; it asks before finishing */
+        const sub = d.getElementById("subtitle");
+        assert.strictEqual(sub.getAttribute("data-a"), "finish-ask"); assert.strictEqual(sub.getAttribute("role"), "button");
+        click(w, sub);
+        assert.strictEqual(d.getElementById("sheetT").textContent, "Finish workout?");
+        assert.ok(/over 3 hours ago/.test(d.getElementById("sheetB").textContent) && q(d, '#sheetB [data-a="finish-do"]') && q(d, '#sheetB [data-a="sheet-close"]'));
+        click(w, q(d, '#sheetB [data-a="sheet-close"]'));
+        assert.ok(w.eval("!!S.active"), "Keep going keeps the workout");
         w.eval("S.active.start=Date.now()-25*60000; render()"); assert.strictEqual(w.trainBadge(), "Train · 25 min");
+        assert.strictEqual(sub.getAttribute("data-a"), null, "under 3 hours: plain text again"); assert.strictEqual(sub.getAttribute("role"), null);
         w.eval("CT={bi:0,mi:0,round:1,phase:'work',end:Date.now()+12000,paused:false,remain:0,warned:true}");
         assert.strictEqual(w.trainBadge(), "Train · Work 0:12");
         w.eval("CT.phase='rest'; CT.end=Date.now()+8000"); assert.strictEqual(w.trainBadge(), "Train · Rest 0:08");
@@ -965,10 +1202,10 @@ async function runF6Pass() {
     });
     t("resting: overlay on, mode bar tappable; in Macros the overlay hides and the clock runs on the Train half (UX2-05/TRN-05)", () => {
       click(w, q(d, '#app [data-a="log"]')); assert.ok(w.eval("!!T"), "rest started");
-      assert.ok(d.getElementById("rest").classList.contains("on")); assert.match(w.trainBadge(), /^Train · rest \d+:\d\d$/);
+      assert.ok(d.getElementById("rest").classList.contains("on")); assert.match(w.trainBadge(), /^Train · Rest \d+:\d\d$/);
       mode("macros");
       assert.ok(!d.getElementById("rest").classList.contains("on"), "overlay hidden in Macros"); assert.ok(w.eval("!!T"), "clock still running");
-      assert.match(q(d, '#modebar [data-v="train"] .mb-l').textContent, /^Train · rest \d+:\d\d$/);
+      assert.match(q(d, '#modebar [data-v="train"] .mb-l').textContent, /^Train · Rest \d+:\d\d$/);
     });
     t("rest ends while in Macros: a toast says so, the badge goes back to the workout time", () => {
       w.eval("T.end=Date.now()-1; tickRest()");
@@ -1077,9 +1314,13 @@ const realFiles = ["m-ui.js", "m-trends.js"].filter(exists);
 if (realFiles.length) runPass("pass 2: real " + realFiles.join(" + ") + (realFiles.length < 2 ? " (stub fills the rest)" : ""), true);
 else console.log("pass 2 skipped: m-ui.js / m-trends.js not present yet");
 runLiveDataPass();
+runPlanStashPass();
+runReplacePass();
+runNarrowPass();
 
 (async () => {
   await runSwPass();
+  await runDraftPass();
   if (realFiles.length === 2) await runF6Pass();
   if (realFiles.length === 2 && exists("m-sync.js")) await runSyncPass();
   else console.log("pass 3 skipped: needs m-ui.js, m-trends.js and m-sync.js");

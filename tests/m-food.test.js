@@ -1293,7 +1293,7 @@ t("BEF-03/UX2-18 describe (no Claude): the thing they ate must be in the name; '
   assert.ok(/turkey/i.test(name("turkey")) && !/ground|bacon/i.test(name("turkey")) && !/bacon/i.test(name("4 oz turkey")), name("turkey"));
   assert.deepStrictEqual(d("two tacos").unmatched, ["two tacos"], "not the taco seasoning");
   assert.deepStrictEqual(d("9 oz chicken veggie bake").unmatched, ["9 oz chicken veggie bake"], "an unknown dish isn't plain chicken");
-  assert.deepStrictEqual(d("a turkey sandwich").unmatched, ["a turkey sandwich"]);
+  assert.deepStrictEqual(d("a turkey sandwich").unmatched, ["turkey sandwich"], "PL-01: said back without the filler word");
   assert.ok(/^Egg/.test(name("2 eggs over easy")) && d("2 eggs over easy").items[0].servings === 2);
   assert.ok(/white rice/i.test(name("rice")) && /chicken breast/i.test(name("chicken")) && /ground beef/i.test(name("beef")));
   const ch = M.foods.list().find(f => /chicken breast/i.test(f.name));
@@ -1608,7 +1608,7 @@ t("Nick's rules, describe (no Claude): turkey slices → Hillshire Farm, jam / j
     assert.strictEqual(it.foodId, fx.hill.id);
     const slice = (fx.hill.alts || []).find(a => /^1 slice/.test(a.label));
     if (slice) { near(it.g, 4 * slice.g, 0.6, "4 slices"); assert.ok(it.servings === 4 && /^1 slice/.test(it.servingLabel), "4 × 1 slice: " + it.servings + " × " + it.servingLabel); }
-    assert.deepStrictEqual(M.food.describeLocal("a turkey sandwich").unmatched, ["a turkey sandwich"], "a sandwich is more than the slices");
+    assert.deepStrictEqual(M.food.describeLocal("a turkey sandwich").unmatched, ["turkey sandwich"], "a sandwich is more than the slices");
     for (const s of ["ground turkey", "turkey bacon"]) assert.notStrictEqual((await d(s)).foodId, fx.hill.id, s + " is its own food");
     for (const s of ["jam", "jelly", "strawberry jam", "strawberry jelly", "1 tbsp jam", "Smucker's jam"]) assert.strictEqual((await d(s)).foodId, fx.jam.id, s);
     it = await d("2 tbsp jelly");
@@ -1889,7 +1889,7 @@ t("SC-04 a word they said that isn't in the food means it's not that food: strin
   assert.ok(/bell pepper/i.test(r4one("1 red bell pepper").name));
   const jam = M.DB.generic.find(f => f.words && /preserves/.test(f.words));
   if (jam) assert.strictEqual(r4one("1 tbsp preserves").foodId, jam.id);
-  assert.deepStrictEqual(M.food.describeLocal("a turkey sandwich").unmatched, ["a turkey sandwich"], "search words don't make a sandwich");
+  assert.deepStrictEqual(M.food.describeLocal("a turkey sandwich").unmatched, ["turkey sandwich"], "search words don't make a sandwich");
 });
 t("SC-05 two foods said together are both logged; a word that makes it another food isn't split off; unknown dishes stay unmatched", () => {
   M.reset();
@@ -2095,6 +2095,172 @@ t("C4R4 K3: a second code linked to one of My foods finds it offline and isn't c
       for (const code of [c.padStart(12, "0"), c.padStart(13, "0"), c]) { const b = await M.food.lookup(code); assert.strictEqual(b.food.id, g.id, code); assert.strictEqual(b.builtIn, true, code); }
     }
   } finally { NAV.onLine = true; delete global.fetch; delete M.MS.codes; M.reset(); }
+});
+
+/* ---- fixer round 5 (F4): describe speed and swarm #3 words findings ---- */
+const f5Seed = () => {
+  M.reset();
+  const P = (cal, p, c, f) => ({ cal, p, c, f, fiber: 0, sugar: 0, sodium: 0 });
+  const food = (name, brand, unit, g, per) => M.foods.add({ name, brand, source: "off", serving: { qty: 1, unit, g }, per, per100g: { cal: per.cal * 100 / g, p: per.p * 100 / g, c: per.c * 100 / g, f: per.f * 100 / g, fiber: 0, sugar: 0, sodium: 0 } });
+  const bites = food("Egg bites, bacon and gruyere", "Store", "piece", 65, P(150, 9, 5, 10));
+  const van = food("Greek yogurt, vanilla", "Store", "container", 150, P(120, 12, 16, 0));
+  const it = (id, servings) => { const f = M.foods.get(id); return { foodId: f.id, name: f.name, brand: f.brand, servings, servingLabel: M.fmtServing(f.serving), g: f.serving.g, per: f.per }; };
+  const meal = (name, ids) => M.meals.add({ name, slot: "Lunch", items: ids.map(x => it(x, 1)) });
+  meal("Cottage cheese and fruit", ["g_cottage_cheese_2", "g_strawberries"]);
+  meal("Salmon and sweet potato", ["g_salmon", "g_sweet_potato_baked"]);
+  meal("Peanut butter toast", ["g_dkb_21_grains", "g_peanut_butter"]);
+  meal("PB&J", ["g_dkb_21_grains", "g_peanut_butter", "g_jam"]);
+  meal("Egg scramble", ["g_egg_large", "g_spinach_raw"]);
+  meal("Greek yogurt bowl", ["g_greek_yogurt_2", "g_blueberries"]);
+  meal("Chicken rice bowl", ["g_kirkland_organic_chicken", "g_white_rice"]);
+  return { bites, van };
+};
+const f5 = s => M.food.describeLocal(s);
+const f5names = s => f5(s).items.map(i => i.name);
+t("F4R5 SD-05/SP-02 describe stays fast with 420 saved foods and 92 meals; one list read per call", () => {
+  M.reset();
+  const words = ["organic", "chicken", "beef", "turkey", "greek", "yogurt", "protein", "chips", "salsa", "bread", "tortilla", "milk", "almond", "rice", "pasta", "sauce", "soup", "salad", "wrap", "vanilla", "chocolate", "strawberry", "peanut", "butter", "honey", "sweet", "spicy", "smoked", "lite", "zero"];
+  let seed = 7; const r = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; const pick = a => a[Math.floor(r() * a.length)];
+  const ids = [];
+  for (let i = 0; i < 420; i++) ids.push(M.foods.add({ name: pick(words) + " " + pick(words) + " " + pick(words), brand: "Brand " + (i % 20), source: "off", serving: { qty: 1, unit: "serving", g: 50 }, per: { cal: 200, p: 10, c: 20, f: 8, fiber: 1, sugar: 5, sodium: 100 }, per100g: { cal: 400, p: 20, c: 40, f: 16, fiber: 2, sugar: 10, sodium: 200 } }).id);
+  for (let i = 0; i < 92; i++) M.meals.add({ name: pick(words) + " " + pick(words) + " " + pick(["bowl", "plate", "wrap"]), slot: "Lunch", items: [0, 1, 2].map(() => { const f = M.foods.get(pick(ids)); return { foodId: f.id, name: f.name, servings: 1, servingLabel: "1 serving", g: 50, per: f.per }; }) });
+  let lists = 0; const fl = M.foods.list, ml = M.meals.list;
+  M.foods.list = function () { lists++; return fl.apply(this, arguments); };
+  M.meals.list = function () { lists++; return ml.apply(this, arguments); };
+  try {
+    const notes = ["chicken rice broccoli salmon asparagus quinoa eggs toast coffee banana almonds yogurt", "turkey slices cucumber cottage cheese strawberries banana almonds", "xyzzy blorp flarn quux wibble wobble frob nitz garply waldo fred plugh"];
+    f5(notes[0]);
+    for (const n of notes) {
+      lists = 0;
+      const t0 = Date.now(); const res = f5(n); const ms = Date.now() - t0;
+      assert.ok(ms < 400, n + " took " + ms + " ms (v17 took seconds)");
+      assert.ok(lists <= 2, "lists read once per call, got " + lists);
+      if (n === notes[0]) assert.ok(res.items.length >= 8, res.items.map(i => i.name).join(" + ") + " ✗" + JSON.stringify(res.unmatched));
+    }
+  } finally { M.foods.list = fl; M.meals.list = ml; M.reset(); }
+});
+t("F4R5 SD-01 a saved meal doesn't take over a plain food; only its full name picks it", () => {
+  f5Seed();
+  assert.ok(/^cottage cheese, 2%/i.test(f5names("cottage cheese")[0]), f5names("cottage cheese").join());
+  assert.ok(/^cottage cheese, 2%/i.test(f5names("1 cup cottage cheese")[0]));
+  assert.ok(/^sweet potato/i.test(f5names("sweet potato")[0]), f5names("sweet potato").join());
+  assert.ok(/^peanut butter,/i.test(f5names("2 tbsp peanut butter")[0]), f5names("2 tbsp peanut butter").join());
+  assert.deepStrictEqual(f5names("cottage cheese and fruit"), ["Cottage cheese and fruit"], "the full name is the meal");
+  assert.deepStrictEqual(f5names("greek yogurt bowl"), ["Greek yogurt bowl"], "a bowl word in the name counts");
+  const cr = f5names("chicken rice broccoli");
+  assert.strictEqual(cr.length, 3, cr.join(" + ")); assert.ok(!cr.some(n => /bowl/i.test(n)), "a piece of a note is never a meal");
+  assert.ok(/^eggs?, whole/i.test(f5names("3 scrambled eggs")[0]), "not the Egg scramble meal: " + f5names("3 scrambled eggs").join());
+});
+t("F4R5 SD-02 PB&J: their PB&J meal first; with no meal it's bread + peanut butter + jam, never a toast meal", () => {
+  f5Seed();
+  for (const s of ["pb&j", "pbj", "pb and j", "peanut butter and jelly sandwich", "pb and jelly"]) assert.deepStrictEqual(f5names(s), ["PB&J"], s);
+  const two = f5("2 pb&js").items; assert.strictEqual(two.length, 1); near(two[0].servings, 2, 0.01, "2 sandwiches");
+  const pbt = f5names("pb toast"); assert.deepStrictEqual(pbt, ["Peanut butter toast"], "pb is peanut butter");
+  M.meals.list().filter(m => /pb&j/i.test(m.name)).forEach(m => M.meals.remove ? M.meals.remove(m.id) : delete M.MS.meals[m.id]);
+  const parts = f5names("pb&j");
+  assert.strictEqual(parts.length, 3, parts.join(" + ")); assert.ok(!parts.some(n => /toast/i.test(n)), parts.join(" + "));
+});
+t("F4R5 SD-03/SD-04/SD-07 amounts start the right food; eggs are never lost; egg whites by the cup are the liquid kind", () => {
+  f5Seed();
+  let it = f5("toast 2 eggs").items; assert.strictEqual(it.length, 2, it.map(i => i.name).join(" + ")); assert.ok(/^eggs?, whole/i.test(it[1].name)); near(it[1].servings, 2, 0.01);
+  it = f5("spinach 2 eggs").items; assert.strictEqual(it.length, 2); near(it[1].servings, 2, 0.01);
+  it = f5("2 eggs 2 whites").items; assert.strictEqual(it.length, 2, it.map(i => i.name).join(" + ")); assert.ok(/whole/i.test(it[0].name) && /white/i.test(it[1].name));
+  it = f5("x2 eggs").items; near(it[0].servings, 2, 0.01);
+  it = f5("1 cup rice broccoli 6oz salmon").items; assert.strictEqual(it.length, 3); assert.ok(/salmon/i.test(it[2].name)); near(it[2].g, 170, 1, "6 oz is the salmon's");
+  it = f5("chicken 200g rice 1 cup").items; assert.strictEqual(it.length, 2); near(it[0].g, 200, 0.5, "200 g chicken"); assert.ok(/rice/i.test(it[1].name) && /^1 cup/.test(it[1].servingLabel), it[1].servingLabel);
+  it = f5("salmon 6oz asparagus 6 spears").items; near(it[0].g, 170, 1); assert.ok(/6 spears/.test(it[1].servingLabel), it[1].servingLabel);
+  it = f5("1 cup egg whites").items; assert.ok(/liquid/i.test(it[0].name), it[0].name); assert.ok(it[0].g > 200, "a cup is about 243 g");
+});
+t("F4R5 SD-06/SD-19/SD-17 a glass is one drink, a shot is a shot, 'half cup' after the food counts", () => {
+  M.reset();
+  let it = f5("2 glasses of wine").items; assert.strictEqual(it.length, 1); assert.ok(!/bottle/i.test(it[0].servingLabel), it[0].servingLabel); near(it[0].per.cal * it[0].servings, 250, 10);
+  it = f5("2 wines").items; assert.ok(!/bottle/i.test(it[0].servingLabel), "no package unless said");
+  it = f5("2 shots tequila").items; near(it[0].servings, 2, 0.01); assert.ok(/shot/.test(it[0].servingLabel));
+  it = f5("tequila shot").items; near(it[0].servings, 1, 0.01);
+  it = f5("rice half cup").items; assert.strictEqual(f5("rice half cup").unmatched.length, 0); near(it[0].servings * (/^1 cup/.test(it[0].servingLabel) ? 1 : 2), 0.5, 0.01);
+  it = f5("blueberries half cup").items; near(it[0].servings, 0.5, 0.01);
+});
+t("F4R5 SD-16/SD-12/SD-15 a flavor after the comma isn't the food; two foods side by side both count; plain cheese isn't cottage cheese", () => {
+  const { bites } = f5Seed();
+  assert.ok(!f5names("eggs bacon toast").some(n => n === bites.name), f5names("eggs bacon toast").join(" + "));
+  assert.ok(!f5names("2 slices bacon 2 eggs").some(n => n === bites.name));
+  assert.deepStrictEqual(f5names("egg bites"), [bites.name], "its own name still finds it");
+  assert.strictEqual(f5names("almonds banana").length, 2, "almonds + banana");
+  const ob = f5("oats banana"); assert.ok(ob.items.some(x => /banana/i.test(x.name)), "the banana isn't lost: " + JSON.stringify(ob));
+  assert.deepStrictEqual(f5("cheese").unmatched, ["cheese"]);
+  assert.deepStrictEqual(f5("1 slice cheese").items, []);
+  assert.ok(/cottage/i.test(f5names("cottage cheese")[0]));
+});
+t("F4R5 SP-01 meal and time words aren't foods (lunch meat, breakfast sausage stay)", () => {
+  f5Seed();
+  for (const s of ["lunch: chicken breast", "for lunch chicken breast", "lunch was a chicken breast", "I had a chicken breast for dinner today"]) { const r = f5(s); assert.deepStrictEqual(r.unmatched, [], s); assert.ok(/chicken breast/i.test(r.items[0].name), s); }
+  let r = f5("for breakfast 2 eggs"); assert.ok(/^eggs?, whole/i.test(r.items[0].name)); near(r.items[0].servings, 2, 0.01);
+  r = f5("breakfast 2 eggs"); assert.ok(/^eggs?, whole/i.test(r.items[0].name), r.items.map(i => i.name).join());
+  r = f5("dinner: salmon and rice"); assert.strictEqual(r.items.length, 2); assert.deepStrictEqual(r.unmatched, []);
+  assert.ok(/turkey/i.test(f5names("lunch meat")[0]));
+  const bs = f5("breakfast sausage"); assert.ok(bs.items.length ? /sausage/i.test(bs.items[0].name) : bs.unmatched[0] === "breakfast sausage");
+});
+t("F4R5 MF-02 pasta by weight is dry; ¼–⅓ cup or 40–60 g of rice / quinoa is dry; more is cooked", () => {
+  M.reset();
+  const st = s => { const it = r4one(s); return it.state; };
+  assert.strictEqual(st("2 oz pasta"), "raw"); near(r4one("2 oz pasta").per.cal * r4one("2 oz pasta").servings, 210, 12, "the box: about 200 cal");
+  assert.strictEqual(st("1/4 cup rice"), "raw"); assert.strictEqual(st("50g quinoa"), "raw");
+  assert.strictEqual(st("1 cup rice"), "cooked"); assert.strictEqual(st("1/2 cup quinoa"), "cooked"); assert.strictEqual(st("2 oz cooked pasta"), "cooked");
+});
+t("F4R5 decision 2 / PL-01 a word no food fits is said back plainly; the rest still counts", () => {
+  M.reset();
+  let r = f5("greek yogurt blueberries granola");
+  assert.strictEqual(r.items.length, 2, r.items.map(i => i.name).join(" + ")); assert.deepStrictEqual(r.unmatched, ["granola"]);
+  r = f5("a large mocha frappuccino"); assert.deepStrictEqual(r.unmatched, ["mocha frappuccino"]);
+  for (const s of ["french toast", "mashed potatoes", "white claw", "diet coke", "chicken strips"]) assert.strictEqual(f5(s).items.length, 0, s + " → " + f5names(s).join(" + "));
+  r = f5("shrimp stir fry"); assert.deepStrictEqual(r.unmatched, []); assert.ok(/shrimp/i.test(r.items[0].name) && r.items.length === 1, r.items.map(i => i.name).join(" + "));
+  const lp = f5("lemon pepper chicken"); assert.ok(!lp.items.some(i => /pepper|lemon/i.test(i.name)), lp.items.map(i => i.name).join(" + "));
+});
+
+t("F4R5 SD-14/SD-18/sizes: mayo, ranch, a brand name, 'whole avocado', '10 jumbo shrimp'", () => {
+  M.reset();
+  assert.ok(/mayonnaise/i.test(r4one("mayo 1 tbsp").name));
+  if (M.DB.generic.some(f => /^ranch/i.test(f.name))) assert.ok(/ranch/i.test(r4one("2 tbsp ranch").name));
+  if (M.DB.generic.some(f => /^marinara/i.test(f.name))) assert.ok(/marinara/i.test(r4one("marinara").name));
+  assert.deepStrictEqual(f5("two tacos").unmatched, ["two tacos"], "not the taco seasoning");
+  assert.ok(!/oil/i.test(r4one("avocado").name), "avocado isn't avocado oil");
+  const fl = M.foods.add({ name: "Ultra-filtered milk, 2%", brand: "Fairlife", source: "off", serving: { qty: 1, unit: "cup", g: 240 }, per: { cal: 120, p: 13, c: 6, f: 4.5, fiber: 0, sugar: 6, sodium: 125 } });
+  assert.strictEqual(r4one("fairlife 1 cup").foodId, fl.id, "their milk by its brand");
+  const av = r4one("whole avocado"), half = r4one("avocado");
+  near(av.g, 2 * half.g, 2, "a whole avocado is twice the usual half");
+  assert.ok(/whole/i.test(r4one("whole milk").name));
+  const sh = M.DB.generic.find(f => /^shrimp$/i.test(f.name));
+  if (sh && (sh.alts || []).some(a => /jumbo/i.test(a.label))) {
+    assert.ok(/jumbo/i.test(r4one("10 jumbo shrimp").servingLabel), r4one("10 jumbo shrimp").servingLabel);
+    assert.ok(!/jumbo/i.test(r4one("10 shrimp").servingLabel), "plain count is the large size");
+  }
+});
+t("F4R5 KJ-04 Meal ideas: the person's own meals first; the other person's say whose they are; snacks rank snack ideas first", () => {
+  M.reset();
+  const P = { cal: 300, p: 25, c: 20, f: 10, fiber: 0, sugar: 0, sodium: 0 };
+  const item = { name: "Food", servings: 1, servingLabel: "1 serving", per: P };
+  const prev = S.profile;
+  try {
+    S.profile = "nick"; const nm = M.meals.add({ name: "Tuna bowl", slot: "Lunch", items: [item] }); M.meals.update ? M.meals.update(nm.id, { uses: 9 }) : (M.MS.meals[nm.id].uses = 9);
+    S.profile = "kat"; const km = M.meals.add({ name: "Salad plate", slot: "Lunch", items: [item] });
+    if (M.MS.meals[nm.id].pid !== "nick" || M.MS.meals[km.id].pid !== "kat") return;   /* meals without owners: nothing to sort */
+    const list = M.food.suggestMine({ slot: "Lunch", remaining: { cal: 1500, p: 100, c: 150, f: 50 } });
+    assert.strictEqual(list[0].id, km.id, "Katerina's own meal first: " + list.map(x => x.name).join(", "));
+    const other = list.find(x => x.id === nm.id);
+    assert.ok(other && other.own === false && other.whoLabel === "Nick's meal", JSON.stringify(other && { own: other.own, who: other.whoLabel }));
+    assert.strictEqual(list[0].own, true); assert.ok(!list[0].whoLabel);
+  } finally { S.profile = prev; M.reset(); }
+  const ideas = M.food.suggestBuiltin({ slot: "Snacks", remaining: { cal: 1500, p: 100, c: 150, f: 50 }, n: 4, jitter: 0 });
+  if (M.DB.suggest.some(x => x.slot === "Snacks")) assert.ok(ideas.slice(0, 2).every(x => x.slot === "Snacks"), ideas.map(x => x.slot + ":" + x.name).join(", "));
+});
+
+t("F4R5 SD-13 small typos still find the food ('chiken breast', 'brocoli', 'bannana', 'salmom 6oz'); nonsense stays not found", () => {
+  M.reset();
+  assert.ok(/chicken breast/i.test(r4one("chiken breast").name));
+  near(r4one("chicken brest 200g").g, 200, 0.5, "the amount stays with it");
+  assert.ok(/^broccoli/i.test(r4one("brocoli").name)); assert.ok(/^banana/i.test(r4one("bannana").name));
+  near(r4one("salmom 6oz").g, 170, 1);
+  assert.deepStrictEqual(f5("xyzzy blorp").unmatched, ["xyzzy blorp"]);
 });
 
 /* ---- run ---- */

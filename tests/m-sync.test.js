@@ -1519,7 +1519,7 @@ t("records lost on this phone (damaged save, backup copy) are brought back, neve
   N.M.cloud.leave();   /* the old page is gone */
   const bak = JSON.parse(store["chalk.macros.v1.bak"] || "null");
   const small = { v: 1, ui: {}, profiles: J(N.M.MS.profiles), foods: {}, meals: {}, days: {}, body: {} };
-  const oldZ = Object.assign(J(N.M.MS.foods[lastFood.id]), { name: "Zucchini", updatedAt: Date.now() - DAY });
+  const oldZ = Object.assign(J(N.M.MS.foods[lastFood.id]), { name: "Zucchini", updatedAt: Date.now() - DAY, u: Date.now() - DAY });   /* a day-old copy: day-old edit stamps */
   small.foods[lastFood.id] = oldZ;
   store["chalk.macros.v1.bak"] = JSON.stringify({ bak: 1, day: (bak && bak.day) || N.M.today(), at: Date.now() - DAY, data: small });
   store["chalk.macros.v1"] = "{broken";
@@ -1731,20 +1731,26 @@ t("SY-02 days merge entry by entry: both phones' entries stay, deletes stick, th
 
 t("SY-02 no base (new day on both phones): nothing counts as deleted; water and note fill from the side that has them", async () => {
   const M1 = phone("sy02b").M;
-  const md = M1.cloud._.mergeDay;
+  const md = M1.cloud._.mergeDay;   /* (base, sent, mine, theirs, theirDeletes, ourDeletes) */
   const e = (id, name, at, extra) => Object.assign({ id, name, at, slot: "Lunch", servings: 1, per: { cal: 100, p: 1, c: 1, f: 1 } }, extra || {});
-  const mine = { id: "nick|2026-09-29", pid: "nick", date: "2026-09-29", entries: [e("a", "A", 1), e("b", "B", 3)], water: 0, note: "", updatedAt: 10 };
-  const theirs = { id: "nick|2026-09-29", pid: "nick", date: "2026-09-29", entries: [e("c", "C", 2), e("b", "B2", 3)], water: 24, note: "hi", updatedAt: 5 };
-  const out = J(md(null, mine, theirs, false));
-  assert.deepStrictEqual(out.entries.map(x => x.name), ["A", "C", "B"], "union by id, time order, mine newer wins B");
+  const mine = { id: "nick|2026-09-29", pid: "nick", date: "2026-09-29", entries: [e("a", "A", 1), e("b", "B", 3, { u: 20 })], water: 0, note: "", updatedAt: 10 };
+  const theirs = { id: "nick|2026-09-29", pid: "nick", date: "2026-09-29", entries: [e("c", "C", 2), e("b", "B2", 3, { u: 10 })], water: 24, note: "hi", updatedAt: 5 };
+  const out = J(md(null, null, mine, theirs));
+  assert.deepStrictEqual(out.entries.map(x => x.name), ["A", "C", "B"], "union by id, time order, the newer edit stamp wins B");
   assert.strictEqual(out.water, 24); assert.strictEqual(out.note, "hi");
   assert.strictEqual(out.updatedAt, 10);
-  /* with a base: a delete on one side sticks unless the other side edited it and is newer */
+  /* the other phone settles it the same way */
+  assert.deepStrictEqual(J(md(null, null, theirs, mine)).entries.find(x => x.id === "b").name, "B", "same winner on both phones");
+  /* no stamps, or an exact tie: the larger copy wins, on both phones */
+  const m0 = { entries: [e("b", "B", 3)], water: 0, note: "", updatedAt: 10 }, t0 = { entries: [e("b", "B2", 3)], water: 0, note: "", updatedAt: 99 };
+  assert.strictEqual(J(md(null, null, m0, t0)).entries[0].name, J(md(null, null, t0, m0)).entries[0].name, "a tie settles the same way on both phones");
+  /* with a base: a delete on one side sticks, on both phones, even against an edit */
   const base = M1.cloud._.dayBase({ entries: [e("a", "A", 1), e("b", "B", 3)], water: 0, note: "" });
   const t2 = { entries: [e("a", "A", 1)], water: 0, note: "", updatedAt: 20 };
-  assert.deepStrictEqual(J(md(base, { entries: [e("a", "A", 1), e("b", "B", 3)], water: 0, note: "", updatedAt: 10 }, t2, true)).entries.map(x => x.name), ["A"], "delete sticks");
-  assert.deepStrictEqual(J(md(base, { entries: [e("a", "A", 1), e("b", "B edited", 3)], water: 0, note: "", updatedAt: 30 }, t2, false)).entries.map(x => x.name), ["A", "B edited"], "a newer edit beats an older delete");
-  assert.deepStrictEqual(J(md(base, { entries: [e("a", "A", 1), e("b", "B edited", 3)], water: 0, note: "", updatedAt: 10 }, t2, true)).entries.map(x => x.name), ["A"], "a newer delete beats an older edit");
+  assert.deepStrictEqual(J(md(base, null, { entries: [e("a", "A", 1), e("b", "B", 3)], water: 0, note: "", updatedAt: 10 }, t2)).entries.map(x => x.name), ["A"], "delete sticks");
+  const ed = { entries: [e("a", "A", 1), e("b", "B edited", 3, { u: 30 })], water: 0, note: "", updatedAt: 30 };
+  assert.deepStrictEqual(J(md(base, null, ed, t2)).entries.map(x => x.name), ["A"], "a delete beats an edit made at the same time");
+  assert.deepStrictEqual(J(md(base, null, t2, ed)).entries.map(x => x.name), ["A"], "on the other phone too");
 });
 
 t("SY-03 a saved meal edited on both phones: items by id, per and batch raw weight worked out again, cooked weight kept", async () => {
@@ -2005,6 +2011,226 @@ t("C5 an Undo copy made by the live build (its restore replaced every workout) k
   assert.strictEqual(P3.M.cloud.undoInfo(), null); assert.ok(!P3.store.has("chalk.sync.undo"), "this build's copy: one day");
 });
 
+/* ------------------------------------------ S3-01 / S3-02: both phones settle the same way */
+const noUse = o => { const x = Object.assign({}, o); delete x.uses; delete x.lastUsed; return x; };
+/* after a conflict: a few rounds to settle, then one more round moves nothing, and the phones
+   and the cloud hold the same copy */
+async function settleIdle(Ps, label, kind, id, code) {
+  for (let i = 0; i < 5; i++) for (const P of Ps) await P.sync();
+  for (const P of Ps) { const r = await P.sync(); assert.ok(r.ok && !r.pushed && !r.applied, label + ": still moving after 5 rounds " + JSON.stringify(r)); }
+  const coll = { food: "foods", meal: "meals", day: "days" }[kind];
+  const cloud = Ps[0].M.cloud._.clean(kind, id, JSON.parse(SERVER.get(code, kind, id).data));
+  const want = Ps[0].M.cloud._.hash(noUse(cloud));
+  Ps.forEach((P, i) => assert.strictEqual(P.M.cloud._.hash(noUse(P.M.MS[coll][id])), want, label + ": phone " + i + " differs from the cloud"));
+}
+
+t("S3-01 a food both phones changed, then one more edit: both settle on one copy, nothing ping-pongs", async () => {
+  const { P: N, code } = await household("s301f-n");
+  const K = katPhone("s301f-k");
+  [N, K].forEach(P => P.M.cloud.configure({ delay: 1e9 }));
+  assert.ok((await K.M.cloud.join(code)).ok); await K.sync(); await N.sync(); await K.sync(); await N.sync();
+  const fid = Object.values(N.M.MS.foods).find(f => /Kirkland/.test(f.name)).id;
+  N.offline(true); K.offline(true);
+  N.M.foods.update(fid, { per: { cal: 130, p: 28, c: 0, f: 2 } }); await sleep(5);
+  K.M.foods.update(fid, { per: { cal: 110, p: 24, c: 0, f: 1 } }); await sleep(5);
+  N.M.foods.update(fid, { brand: "Kirkland Signature" }); await sleep(5);
+  K.M.foods.update(fid, { name: "Kirkland chicken (raw)" }); await sleep(5);
+  N.offline(false); K.offline(false);
+  await N.sync(); await K.sync();
+  N.M.foods.update(fid, { barcode: "0096619000000" }); await sleep(5);
+  await settleIdle([N, K], "food", "food", fid, code);
+  const f = K.M.MS.foods[fid];
+  assert.strictEqual(f.brand, "Kirkland Signature"); assert.strictEqual(f.name, "Kirkland chicken (raw)"); assert.strictEqual(f.barcode, "0096619000000");
+  assert.ok(f.per.cal === 110 || f.per.cal === 130, "one side's numbers, whole: " + JSON.stringify(f.per));
+  [N, K].forEach(P => P.M.cloud.leave());
+});
+
+t("S3-01 a saved meal both phones changed, then one more edit: both settle on one copy", async () => {
+  const { P: N, code } = await household("s301m-n");
+  const K = katPhone("s301m-k");
+  [N, K].forEach(P => P.M.cloud.configure({ delay: 1e9 }));
+  assert.ok((await K.M.cloud.join(code)).ok); await K.sync(); await N.sync(); await K.sync(); await N.sync();
+  const mid = Object.values(N.M.MS.meals).find(m => m.name === "Chicken toast").id;
+  const edit = (P, f) => { const m = P.M.MS[ "meals"][mid]; const items = m.items.map(i => Object.assign({}, i)); f(items); P.M.meals.update(mid, { items }); };
+  N.offline(true); K.offline(true);
+  edit(N, items => { items[1].servings = 3; }); await sleep(5);
+  edit(K, items => { items[1].servings = 1; }); await sleep(5);
+  N.M.meals.update(mid, { desc: "Nick's note" }); await sleep(5);
+  K.M.meals.update(mid, { name: "Chicken toast (Kat)" }); await sleep(5);
+  N.offline(false); K.offline(false);
+  await N.sync(); await K.sync();
+  N.M.meals.update(mid, { slot: "Dinner" }); await sleep(5);
+  await settleIdle([N, K], "meal", "meal", mid, code);
+  const m = N.M.MS.meals[mid];
+  assert.strictEqual(m.desc, "Nick's note"); assert.strictEqual(m.name, "Chicken toast (Kat)"); assert.strictEqual(m.slot, "Dinner");
+  assert.strictEqual(m.items.length, 2);
+  assert.strictEqual(N.M.cloud._.canon(m.per), N.M.cloud._.canon(N.M.meals.computePer(m)), "per matches the merged items: " + JSON.stringify(m.per) + " vs " + JSON.stringify(N.M.meals.computePer(m)));
+  [N, K].forEach(P => P.M.cloud.leave());
+});
+
+t("S3-01 one diary entry changed on two phones, then one more add: both settle, every add kept", async () => {
+  const { P: N, code } = await household("s301d-n");
+  const N2 = phone("s301d-n2", { S: { profile: "nick", active: null } });
+  [N, N2].forEach(P => P.M.cloud.configure({ delay: 1e9 }));
+  assert.ok((await N2.M.cloud.join(code)).ok); await N2.sync(); await N.sync(); await N2.sync(); await N.sync();
+  const today = N.M.today(), id = "nick|" + today;
+  const x = N.M.log.add(today, { slot: "Dinner", name: "Chicken breast", per: { cal: 200, p: 30, c: 0, f: 8 } });
+  await N.sync(); await N2.sync(); await N.sync(); await N2.sync();
+  N.offline(true); N2.offline(true);
+  N.M.log.update(today, x.id, { servings: 2 }); await sleep(5);
+  N2.M.log.update(today, x.id, { servings: 1.5 }); await sleep(5);
+  N.M.log.add(today, { slot: "Snacks", name: "Apple", per: { cal: 95, p: 0, c: 25, f: 0 } }); await sleep(5);
+  N2.M.log.add(today, { slot: "Snacks", name: "Pear", per: { cal: 100, p: 1, c: 27, f: 0 } }); await sleep(5);
+  N.offline(false); N2.offline(false);
+  await N.sync(); await N2.sync();
+  N.M.log.add(today, { slot: "Snacks", name: "Almonds", per: { cal: 160, p: 6, c: 6, f: 14 } }); await sleep(5);
+  await settleIdle([N, N2], "day", "day", id, code);
+  const names = N2.M.MS.days[id].entries.map(e => e.name);
+  ["Chicken breast", "Apple", "Pear", "Almonds"].forEach(n => assert.ok(names.includes(n), n + " kept: " + names));
+  const s = N2.M.MS.days[id].entries.find(e => e.id === x.id).servings;
+  assert.ok(s === 2 || s === 1.5, "one of the two edits: " + s);
+  [N, N2].forEach(P => P.M.cloud.leave());
+});
+
+t("S3-02 a delete or edit made right after this phone's own push sticks when the other phone's copy comes first", async () => {
+  for (const variant of ["delete", "edit"]) {
+    const { P: N, code } = await household("s302n-" + variant);
+    const K = katPhone("s302k-" + variant);
+    [N, K].forEach(P => P.M.cloud.configure({ delay: 1e9 }));
+    assert.ok((await K.M.cloud.join(code)).ok); await N.sync(); await K.sync();
+    const today = K.M.today(), id = "kat|" + today;
+    const y = K.M.log.add(today, { slot: "Breakfast", name: "Greek yogurt", per: { cal: 150, p: 12, c: 10, f: 6 } });
+    assert.ok((await K.sync()).ok);
+    K.offline(true);
+    if (variant === "delete") K.M.log.remove(today, y.id); else K.M.log.update(today, y.id, { servings: 2 });
+    await sleep(20);
+    /* Nick logs her lunch on his phone (Switch person) */
+    N.ctx.S.profile = "kat"; await N.M.cloud.personChanged();
+    N.M.log.add(today, { slot: "Lunch", name: "Salad", per: { cal: 150, p: 12, c: 10, f: 6 } });
+    assert.ok((await N.sync()).ok);
+    N.ctx.S.profile = "nick"; await N.M.cloud.personChanged();
+    K.offline(false);
+    await K.sync(); await N.sync(); await K.sync();
+    const mine = K.M.MS.days[id].entries, cloud = JSON.parse(SERVER.get(code, "day", id).data).entries;
+    [mine, cloud].forEach((L, i) => {
+      const w = i ? "cloud" : "her phone";
+      assert.ok(L.some(e => e.name === "Salad"), variant + ": Nick's add kept on " + w);
+      const yy = L.find(e => e.id === y.id);
+      if (variant === "delete") assert.ok(!yy, "the delete sticks on " + w);
+      else assert.ok(yy && yy.servings === 2, "the edit sticks on " + w + ": " + J(yy));
+    });
+    [N, K].forEach(P => P.M.cloud.leave());
+  }
+});
+
+t("S3-04 a sync while the person picker is open still brings down the phone's own person's new rows", async () => {
+  const { P: N, code } = await household("s304-n", { train: trainState("nick", ["n1"]) });
+  const K = katPhone("s304-k", { train: trainState("kat", ["k1"]) });
+  [N, K].forEach(P => P.M.cloud.configure({ delay: 1e9 }));
+  assert.ok((await K.M.cloud.join(code)).ok); await K.sync(); await N.sync(); await K.sync();
+  const d5 = K.M.addDays(K.M.today(), -5);
+  N.ctx.S.profile = "kat"; N.setTrain(Object.assign(N.train(), { profile: "kat" })); await N.M.cloud.personChanged();
+  N.M.log.add(d5, { slot: "Dinner", name: "Salmon", per: { cal: 400, p: 40, c: 0, f: 25 } });
+  N.M.body.add({ date: d5, w: 134, pid: "kat" });
+  assert.ok((await N.sync()).ok);
+  N.ctx.S.profile = "nick"; N.setTrain(Object.assign(N.train(), { profile: "nick" })); await N.M.cloud.personChanged();
+  K.ctx.S.profile = null;                       /* the picker is open */
+  assert.ok((await K.sync()).ok);
+  K.ctx.S.profile = "kat";                      /* Cancel */
+  await K.sync();
+  assert.ok(K.M.MS.days["kat|" + d5] && K.M.MS.days["kat|" + d5].entries.some(e => e.name === "Salmon"), "her day came down");
+  assert.ok(K.M.MS.body["kat|" + d5], "her weigh-in came down");
+  assert.ok(!Object.keys(K.M.MS.days).some(k => k.startsWith("nick|")), "Nick's diary stays off her phone");
+  [N, K].forEach(P => P.M.cloud.leave());
+});
+
+t("S3-03 once the cursor has settled, an idle sync reads nothing again", async () => {
+  const { P: A, code } = await household("s303-a");
+  const B = phone("s303-b", { S: { profile: "nick", active: null } });
+  [A, B].forEach(P => P.M.cloud.configure({ delay: 1e9 }));
+  assert.ok((await B.M.cloud.join(code)).ok); await B.sync();
+  for (let i = 0; i < 20; i++) A.M.foods.add({ name: "Burst food " + i, per: { cal: 10 + i } });
+  assert.ok((await A.sync()).ok);
+  /* rows a pull reads (the household check reads its own row: not counted) */
+  let rows = 0, seen = []; SERVER.mutate = r => { const p = r.filter(x => x && x.kind !== "meta"); rows += p.length; seen = seen.concat(p.map(x => x.kind + ":" + x.id)); return r; };
+  try {
+    assert.ok((await B.sync()).ok); assert.ok(rows >= 20, "the burst came down: " + rows);
+    rows = 0; assert.ok((await B.sync()).ok);
+    assert.ok(rows >= 1, "right after, the last 10 s are read again (a late row may still commit): " + rows);
+    let skew = 120000; B.M.now = () => Date.now() + skew;
+    rows = 0; assert.ok((await B.sync()).ok); assert.ok(rows >= 1, "one more read a minute later");
+    rows = 0; seen = []; const r = await B.sync(); assert.ok(r.ok && !r.applied && !r.pushed, JSON.stringify(r) + " " + B.M.cloud._.state().cursor + " ov " + B.M.cloud._.state().ov);
+    assert.strictEqual(rows, 0, "then idle syncs read nothing again: " + JSON.stringify(seen));
+    /* a new row moves the cursor: the next pull reads it */
+    A.M.foods.add({ name: "After the burst" }); assert.ok((await A.sync()).ok);
+    await B.sync();
+    assert.ok(Object.values(B.M.MS.foods).some(f => f.name === "After the burst"));
+  } finally { SERVER.mutate = null; }
+  [A, B].forEach(P => P.M.cloud.leave());
+});
+
+t("S3-02 a phone that never saw its own push come back still takes the other phone's delete (the row says what was deleted)", async () => {
+  const { P: N, code } = await household("s302g-n");
+  const N2 = phone("s302g-n2", { S: { profile: "nick", active: null } });
+  [N, N2].forEach(P => P.M.cloud.configure({ delay: 1e9 }));
+  assert.ok((await N2.M.cloud.join(code)).ok); await N2.sync(); await N.sync(); await N2.sync();
+  const day = N.M.addDays(N.M.today(), -9), id = "nick|" + day;
+  const e = N2.M.log.add(day, { slot: "Lunch", name: "Tuna", per: { cal: 120, p: 26, c: 0, f: 1 } });
+  assert.ok((await N2.sync()).ok);
+  N2.offline(true);                              /* its own row never comes back to it */
+  await N.sync();
+  assert.ok(N.M.MS.days[id].entries.some(x => x.id === e.id));
+  N.M.log.remove(day, e.id);
+  assert.ok((await N.sync()).ok);
+  const row = JSON.parse(SERVER.get(code, "day", id).data);
+  assert.ok(row.gone && row.gone["i" + e.id], "the row lists the deleted entry: " + JSON.stringify(row.gone));
+  N2.offline(false);
+  for (let i = 0; i < 3; i++) { await N2.sync(); await N.sync(); }
+  assert.ok(!N2.M.MS.days[id].entries.some(x => x.id === e.id), "the delete sticks on the phone that added it");
+  assert.ok(!JSON.parse(SERVER.get(code, "day", id).data).entries.some(x => x.id === e.id), "and in the cloud");
+  assert.ok(!("gone" in N2.M.MS.days[id]) && !("gone" in N.M.MS.days[id]), "the list never lands in a phone's diary");
+  for (const P of [N, N2]) { const r = await P.sync(); assert.ok(r.ok && !r.pushed && !r.applied, "idle: " + JSON.stringify(r)); }
+  [N, N2].forEach(P => P.M.cloud.leave());
+});
+
+t("S3-02 an old day (no merge base kept): two phones add at once and their pushes race: both adds kept", async () => {
+  const { P: N, code } = await household("s302old-n");
+  const N2 = phone("s302old-n2", { S: { profile: "nick", active: null } });
+  [N, N2].forEach(P => P.M.cloud.configure({ delay: 1e9 }));
+  const day = N.M.addDays(N.M.today(), -75), id = "nick|" + day;
+  N.M.log.add(day, { slot: "Lunch", name: "Old lunch", per: { cal: 300, p: 20, c: 30, f: 10 } });
+  assert.ok((await N.sync()).ok);
+  assert.ok((await N2.M.cloud.join(code)).ok); await N2.sync(); await N.sync(); await N2.sync();
+  assert.ok(!N.M.cloud._.state().base["day|" + id], "no base for a day this old");
+  N.M.log.add(day, { slot: "Dinner", name: "Phone 1 dinner", per: { cal: 500, p: 40, c: 40, f: 20 } });
+  N2.M.log.add(day, { slot: "Snacks", name: "Phone 2 snack", per: { cal: 100, p: 2, c: 20, f: 1 } });
+  /* both push before either pulls the other's */
+  assert.ok((await N.M.cloud._.cycle({ reason: "manual", manual: true, pull: false })).ok);
+  assert.ok((await N2.M.cloud._.cycle({ reason: "manual", manual: true, pull: false })).ok);
+  for (let i = 0; i < 3; i++) { await N.sync(); await N2.sync(); }
+  for (const L of [N.M.MS.days[id].entries, N2.M.MS.days[id].entries, JSON.parse(SERVER.get(code, "day", id).data).entries])
+    assert.deepStrictEqual(J(L.map(e => e.name).sort()), ["Old lunch", "Phone 1 dinner", "Phone 2 snack"]);
+  [N, N2].forEach(P => P.M.cloud.leave());
+});
+
+t("S3-02 a day an older build stored with a row's delete list is not sent again and again", async () => {
+  const { P: N, code } = await household("s302stale-n");
+  N.M.cloud.configure({ delay: 1e9 });
+  const id = "nick|" + N.M.today();
+  assert.ok((await N.sync()).ok); await N.sync();
+  N.M.MS.days[id].gone = { ixyz: "abc" };   /* what a build before this one kept from a newer phone's row */
+  N.M.save();
+  N.M.cloud.configure({ delay: 1e9 });
+  const R = phone("s302stale-r", { store: Object.fromEntries(N.store), S: N.ctx.S });   /* the app opens again */
+  N.offline(true);
+  R.M.cloud.configure({ delay: 1e9 });
+  const rs = [];
+  for (let i = 0; i < 3; i++) rs.push(await R.sync());
+  assert.ok(rs.every(r => r.ok && !r.pushed), "nothing to send: " + JSON.stringify(rs));
+  assert.ok(!("gone" in JSON.parse(SERVER.get(code, "day", id).data)), "the cloud copy has no stale list");
+  R.M.cloud.leave();
+});
+
 /* =================================================================== run */
 (async () => {
   SERVER = mockServer();
@@ -2012,6 +2238,7 @@ t("C5 an Undo copy made by the live build (its restore replaced every workout) k
   URLBASE = "http://127.0.0.1:" + SERVER.server.address().port;
   let passed = 0;
   for (const { name, fn } of tests) {
+    if (process.env.ONLY && !name.includes(process.env.ONLY)) continue;   /* ONLY=S3- node tests/m-sync.test.js */
     try { await fn(); passed++; console.log("  ok  " + name); }
     catch (e) { console.log("  FAIL " + name + "\n" + (e && e.stack || e)); process.exitCode = 1; break; }
   }

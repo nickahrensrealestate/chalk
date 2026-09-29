@@ -419,7 +419,7 @@ t("bannerHTML: body14 at 15 days, refresh60 at 61 days, snooze hides, save-body1
   NOW += 15 * DAY;
   show(M.ui.bannerHTML()); toasts.length = 0;
   click('[data-m="t-save-body14"]');
-  assert.ok(/Type a weight or a heart rate, or tap Skip/.test($("#mt-b14-msg").textContent) && !$("#mt-b14-msg").hidden, "message in the card");
+  assert.ok(/Type a weight or a heart rate, or tap Skip for now\./.test($("#mt-b14-msg").textContent) && !$("#mt-b14-msg").hidden, "message in the card");
   assert.ok(/Time to weigh in/.test(M.ui.bannerHTML()));
   $("#mt-b14-rhr").value = "57"; click('[data-m="t-save-body14"]');
   assert.strictEqual(M.MS.body["nick|" + M.today()].rhr, 57);
@@ -429,7 +429,7 @@ t("bannerHTML: body14 at 15 days, refresh60 at 61 days, snooze hides, save-body1
   assert.strictEqual(M.checkins.due("nick"), "refresh60");
   h = M.ui.bannerHTML();
   assert.ok(/You set your numbers over 60 days ago/.test(h));
-  assert.ok(/<button class="btn primary" data-m="mode" data-v="macros" data-tab="you">Update<\/button>/.test(h), "Update switches to Macros → You (works from Train too)");
+  assert.ok(/<button class="btn( primary)?" data-m="mode" data-v="macros" data-tab="you">Update<\/button>/.test(h), "Update switches to Macros → You (works from Train too)");
   assert.ok(!/data-m="tab"/.test(h));
   assert.ok(/data-m="t-reviewed"/.test(h) && /data-m="t-snooze" data-kind="refresh60" data-days="7"/.test(h));
   show(h);
@@ -935,8 +935,13 @@ t("UIT-02/UIT-22/UX1-06/UIT-11: setup reads every box on Save, never keeps a sta
   M.ui.tab = "diary"; M.reset(); M.trends.resetDraft(); toasts.length = 0;
   show(M.ui.setupCardHTML());
   click('[data-m="t-setup-seg"][data-f="sex"][data-v="m"]'); show(M.ui.setupCardHTML());
+  /* an age typo says so under the box, stays as typed, and is never saved as 120 */
   change('[data-f="age"]', 150);
-  assert.strictEqual($('#mt-setup [data-f="age"]').value, "120", "cleaned age shown");
+  assert.strictEqual($('#mt-setup [data-f="age"]').value, "150", "the typo stays in the box");
+  assert.ok(!$("#mt-amsg-setup").hidden && /Age should be 5 to 120\./.test($("#mt-amsg-setup").textContent), "the same message You shows");
+  assert.strictEqual(M.trends.draft().age, null, "not kept as 120");
+  change('[data-f="age"]', 120);
+  assert.ok($("#mt-amsg-setup").hidden, "a good age hides the message");
   change('[data-f="hft"]', 5);
   assert.strictEqual($('#mt-setup [data-f="hin"]').value, "", "an empty inches box stays empty (no '0' to type in front of)");
   change('[data-f="hin"]', 11);
@@ -1359,10 +1364,12 @@ t("C3: a weigh-in under 2 lb away never nudges the targets (high-protein carbs r
   assert.ok(/1 weigh-in/.test(text), "says 1 weigh-in: " + text.slice(0, 200));
   assert.ok(!/latest 0\.0|latest [+−]0\.0/.test(text), "no latest 0.0");
   assert.ok(/—Vs average/.test(text), "vs average is a dash with one reading");
-  /* a second weigh-in in the week brings the "latest" line back */
+  /* PL-03: a second weigh-in in the week: the tile counts them ("2 weigh-ins"), no "latest −0.4" */
   M.body.add({ date: M.addDays(M.today(), -2), w: 185.4, pid: "nick" });
   show(M.ui.views.trends());
-  assert.ok(/latest −0\.4/.test(app().textContent), "latest vs the 7-day average");
+  const text2 = app().textContent.replace(/\s+/g, " ");
+  assert.ok(/7-day average\s*2 weigh-ins/i.test(text2), "2 weigh-ins under the 7-day average: " + text2.slice(0, 240));
+  assert.ok(!/latest [+−]/.test(text2), "no latest +/− line");
 });
 
 t("the weekly rate reads the same in the tile and the goal line (halves round the same way)", () => {
@@ -1810,6 +1817,170 @@ t("C3: a heart-rate chart never gets 7 crowded y lines (52, 54 … 64); at most 
   /* one reading still gets its 3 lines (55, 60, 65) */
   const one = M.charts.line([{ date: today, v: 58 }], { avg: [], minSpan: 12, from: M.addDays(today, -90), to: today, unit: "bpm", whole: true });
   assert.ok(yl(one) >= 3 && yl(one) <= 6); assert.ok(!/NaN/.test(one));
+});
+
+t("R5 LK-01: no m-trends.css rule loses a tie to index.html's inline <style> (it loads later) on Trends, You, check-ins, setup, log body", () => {
+  const css = fs.readFileSync(path.join(root, "m-trends.css"), "utf8");
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const inline = (html.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || "";
+  assert.ok(inline.length > 1000, "found Chalk's inline style");
+  /* specificity [ids, classes/attrs/pseudo-classes, types/pseudo-elements] */
+  const PE = /::?(before|after|placeholder|marker|-webkit-[a-z-]+)(\([^)]*\))?/g;
+  const spec = sel => {
+    let a = 0, b = 0, c = 0;
+    let x = sel.replace(/:not\(([^)]*)\)/g, (m, y) => { const r = spec(y); a += r[0]; b += r[1]; c += r[2]; return ""; });
+    x = x.replace(/\[[^\]]*\]/g, () => { b++; return ""; }).replace(PE, () => { c++; return ""; }).replace(/#[\w-]+/g, () => { a++; return ""; }).replace(/\.[\w-]+/g, () => { b++; return ""; }).replace(/:[\w-]+(\([^)]*\))?/g, () => { b++; return ""; });
+    c += (x.match(/(^|[\s>+~])[a-zA-Z][\w-]*/g) || []).length;
+    return [a, b, c];
+  };
+  const ge = (x, y) => (x[0] - y[0] || x[1] - y[1] || x[2] - y[2]) >= 0;
+  const pe = sel => ((sel.match(/::?(before|after|placeholder|marker|-webkit-[a-z-]+)\s*$/) || [""])[0]).replace(/^:+/, "");
+  const strip = sel => sel.replace(/::?(before|after|placeholder|marker|-webkit-[a-z-]+)\s*$/, "") || "*";
+  /* rules as [selector, {prop: value}], media blocks flattened (every width counts) */
+  const rules = text => {
+    const out = [];
+    text = text.replace(/\/\*[\s\S]*?\*\//g, "");
+    const re = /([^{}]+)\{([^{}]*)\}/g; let m;
+    while ((m = re.exec(text))) {
+      const sel = m[1].replace(/^[\s\S]*@media[^{]*$/, "").replace(/^\s*@media[^{]*\{/, "").trim();
+      if (!sel || /^@/.test(sel) || /^(from|to|\d+%)$/.test(sel)) continue;
+      const decl = {};
+      m[2].split(";").forEach(d => { const i = d.indexOf(":"); if (i > 0 && !/!important/.test(d)) decl[d.slice(0, i).trim()] = d.slice(i + 1).trim(); });
+      sel.split(",").map(z => z.trim()).filter(Boolean).forEach(z => out.push([z, decl]));
+    }
+    return out;
+  };
+  const mine = rules(css.replace(/@media[^{]*\{/g, "")), theirs = rules(inline.replace(/@media[^{]*\{/g, ""));
+  /* the same property through a shorthand counts (padding vs padding-top …) */
+  const fam = p => p.replace(/-(top|right|bottom|left)$/, "").replace(/^(margin|padding|border|background|font)-.*$/, "$1");
+  const views = [];
+  const was = M.mode();
+  M.reset(); M.trends.resetDraft(); views.push(M.ui.setupCardHTML());
+  M.setMode("train"); views.push(M.ui.bannerHTML());
+  const p = setupNick();
+  for (let i = 0; i < 9; i++) M.body.add({ date: M.addDays(M.today(), -i), w: 185 - i * 0.2, rhr: 58 + (i % 3), pid: "nick" });
+  views.push(M.ui.views.trends(), M.ui.views.you());
+  p.targetsManual = true; views.push(M.ui.views.you()); p.targetsManual = false;
+  p.lastBody = NOW - 20 * DAY; M.setMode("train"); views.push(M.ui.bannerHTML()); M.setMode("macros"); views.push(M.ui.bannerHTML());
+  M.ui.actions["t-log-body"](); views.push(document.getElementById("sheetB").innerHTML);
+  /* food yesterday and today: "Today isn't in the average yet." under the 7-day tiles */
+  [M.addDays(M.today(), -1), M.today()].forEach(d => M.log.add(d, { slot: "Lunch", name: "Test", servings: 1, per: { cal: 500, p: 40, c: 50, f: 10 } }));
+  views.push(M.ui.views.trends());
+  /* the sync card while sync is on (code label, status row, More options) */
+  const hadC = M.cloud;
+  try {
+    M.cloud = { configured: () => true, status: () => ({ on: true, code: "ABCDEFGHJKLMNPQRSTUV", lastSync: NOW - 60e3 }), syncNow: () => Promise.resolve({ ok: true }), fmtCode: c => c, codeMasked: () => "", training: () => null, hasTrainingBackup: () => Promise.resolve(false) };
+    views.push(M.ui.views.you());
+  } finally { if (hadC) M.cloud = hadC; else delete M.cloud; }
+  M.setMode(was);
+  const box = document.createElement("div"); box.innerHTML = views.join(""); box.id = "app-r5";
+  /* #app rules: the test box stands in for #app */
+  const q = sel => { try { return box.querySelectorAll(strip(sel).replace(/#app\b/g, "#app-r5")); } catch (e) { return []; } };
+  const lost = [];
+  mine.forEach(([sel, decl]) => {
+    const els = q(sel); if (!els.length) return;
+    const sp = spec(sel);
+    theirs.forEach(([ts, td]) => {
+      if (pe(ts) !== pe(sel) || !ge(spec(ts), sp)) return;
+      const props = Object.keys(decl).filter(k => Object.keys(td).some(t2 => fam(t2) === fam(k) && td[t2] !== decl[k]));
+      if (!props.length) return;
+      if (Array.prototype.some.call(els, el => { try { return el.matches(strip(ts)); } catch (e) { return false; } })) lost.push(sel + " {" + props.join(",") + "} loses to " + ts);
+    });
+  });
+  assert.ok(box.querySelector(".mt-sofarnote") && box.querySelector(".mt-codelbl") && box.querySelector(".mt-thd") && box.querySelector(".mt-b14") && box.querySelector(".mt-date"), "every part was drawn");
+  assert.deepStrictEqual(lost, [], "dead rules:\n" + lost.join("\n"));
+  /* the header rule the finder named, by selector */
+  assert.ok(/\.card\.mt-card \.hd\{align-items:center\}/.test(css));
+  assert.ok(!/(^|\n)\.mt-card \.hd\{/.test(css), "the old tie is gone");
+});
+
+t("R5 PL-02/LK-04: Trends tiles never cut words at 320-360 px; one-line labels only at 361-380 px", () => {
+  const css = fs.readFileSync(path.join(root, "m-trends.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  /* every block with this exact query, joined */
+  const media = q => { let out = "", i = -1; while ((i = css.indexOf("@media " + q + "{", i + 1)) >= 0) { let d = 0; const j = css.indexOf("{", i); for (let k = j; k < css.length; k++) { if (css[k] === "{") d++; else if (css[k] === "}" && --d === 0) { out += css.slice(j + 1, k); break; } } } return out; };
+  const mid = media("(min-width:361px) and (max-width:380px)"), small = media("(max-width:360px)");
+  assert.ok(/\.k\{[^}]*white-space:nowrap/.test(mid), "361-380: labels stay on one line");
+  assert.ok(small && !/nowrap/.test(small), "≤360: nothing is held on one line");
+  assert.ok(/\.mt-sub\{[^}]*white-space:normal/.test(small), "≤360: the small line under a label wraps too");
+  assert.ok(/\.v\{[^}]*font-size:22px/.test(small) && /\.stat\{[^}]*padding:9px 7px/.test(small), "≤360: smaller numbers, tighter tiles");
+  assert.ok(!/@media \(max-width:380px\)\{[^}]*nowrap/.test(css), "no nowrap rule reaches 320-360 any more");
+  /* the line under the label sits at the bottom, so tiles in a row line up when one label wraps */
+  assert.ok(/\.mt-card \.stat\{display:flex;flex-direction:column\}/.test(css) && /\.mt-card \.stat \.mt-sub\{margin-top:auto/.test(css));
+  /* PL-08 (the Trends part): "so far" over today's bar is 12 px, not 10 */
+  assert.ok(/\.mt-chart \.sofar-t\{[^}]*font-size:12px/.test(css));
+});
+
+t("R5 P3: macro colors, targets heading, one gold button in Train, left labels, wording, age typo in setup", async () => {
+  M.ui.tab = "you"; M.reset(); M.trends.resetDraft(); toasts.length = 0;
+  const p = setupNick();
+  const css = fs.readFileSync(path.join(root, "m-trends.css"), "utf8");
+  /* LK-07: protein / carbs / fat tiles carry the Diary's macro color classes */
+  show(M.ui.views.you());
+  const cls = f => $('#mt-tbox .stat:nth-child(' + f + ')').className;
+  assert.strictEqual(cls(2), "stat pro"); assert.strictEqual(cls(3), "stat carb"); assert.strictEqual(cls(4), "stat fat");
+  assert.strictEqual(cls(1), "stat", "calories stay plain");
+  M.log.add(M.today(), { slot: "Lunch", name: "Test", servings: 1, per: { cal: 500, p: 40, c: 50, f: 10 } });
+  show(M.ui.views.trends());
+  const pro = Array.prototype.find.call(document.querySelectorAll(".mt-card .stat"), s => /Protein a day/.test(s.textContent));
+  assert.ok(pro && pro.classList.contains("pro"), "Trends: Protein a day in the protein color");
+  /* LK-09: a heading over the targets grid; the chosen split's ✓ in the accent color */
+  show(M.ui.views.you());
+  const hd = $(".mt-thd");
+  assert.ok(hd && hd.textContent === "Your daily targets" && hd.nextElementSibling.id === "mt-tbox", "heading right above the grid");
+  assert.ok(/\.opt\.mt-opt\.cur \.m\{color:var\(--acc\)\}/.test(css) && /\.mt-card \.mt-thd\{[^}]*border-top:1px solid var\(--line\)/.test(css));
+  /* LK-14: typed targets say "Protein (g)"; check-in labels sit at the left */
+  p.targetsManual = true; show(M.ui.views.you());
+  assert.ok(/Protein \(g\)/.test($("#mt-tbox").textContent) && /Water \(oz\)/.test($("#mt-tbox").textContent) && !/Protein g/.test($("#mt-tbox").textContent));
+  /* PL-14: a 0 calorie target */
+  p.targets.cal = 0; show(M.ui.views.you());
+  assert.ok(/Your calorie target is 0\. Type how many calories you want each day\./.test($("#mt-tnote").textContent));
+  p.targetsManual = false; M.calc.applyTargets(p);
+  assert.ok(/\.mt-b14 \.lbl,\.mt-form \.lbl\{text-align:left\}/.test(css));
+  /* LK-13 + PL-14: in Train the check-in's Save is not a second gold button; Skip reads "Skip for now" */
+  p.lastBody = NOW - 20 * DAY;
+  M.setMode("train");
+  let h = M.ui.bannerHTML();
+  assert.ok(/Time to weigh in/.test(h));
+  assert.ok(/<button class="btn" data-m="t-save-body14">Save<\/button>/.test(h), "Train: Save is a plain button");
+  assert.ok(/<button class="btn ghost" data-m="t-snooze" data-kind="body14" data-days="14">Skip for now<\/button>/.test(h));
+  M.setMode("macros");
+  h = M.ui.bannerHTML();
+  assert.ok(/<button class="btn primary" data-m="t-save-body14">Save<\/button>/.test(h), "Macros: Save is the main button");
+  p.lastBody = NOW; p.setupAt = NOW - 61 * DAY;
+  M.setMode("train"); h = M.ui.bannerHTML();
+  assert.ok(/<button class="btn" data-m="mode" data-v="macros" data-tab="you">Update<\/button>/.test(h), "Train: Update is a plain button");
+  assert.ok(/class="btn ghost"[^>]*>Skip for now</.test(h));
+  M.setMode("macros"); p.setupAt = NOW;
+  /* PL-09: the switch is 44 px tall itself (the track still draws 52 x 32) */
+  assert.ok(/#app \.mt-manrow \.toggle\{width:64px;height:44px;border:6px solid transparent;[^}]*background-clip:padding-box/.test(css));
+  /* PL-14: Sync now that fails says what to do */
+  const had = M.cloud;
+  try {
+    M.cloud = { configured: () => true, status: () => ({ on: true, code: "ABCDEFGHJKLMNPQRSTUV", lastSync: 0 }), syncNow: () => Promise.resolve({ ok: false }), fmtCode: c => c, codeMasked: () => "", training: () => null, hasTrainingBackup: () => Promise.resolve(false) };
+    toasts.length = 0;
+    await M.ui.actions["t-sync-now"]({ dataset: {}, disabled: false, textContent: "" });
+    assert.strictEqual(toasts[toasts.length - 1], "Couldn't sync. Check your internet, then tap Sync now again.");
+    M.cloud.syncNow = () => Promise.reject(new Error("offline"));
+    await M.ui.actions["t-sync-now"]({ dataset: {}, disabled: false, textContent: "" });
+    assert.strictEqual(toasts[toasts.length - 1], "Couldn't sync. Check your internet, then tap Sync now again.");
+  } finally { if (had) M.cloud = had; else delete M.cloud; }
+  /* setup: an age typo is named on Save, outlined, and nothing is saved */
+  M.reset(); M.trends.resetDraft(); M.ui.tab = "diary"; show(M.ui.setupCardHTML());
+  click('[data-m="t-setup-seg"][data-f="sex"][data-v="m"]'); show(M.ui.setupCardHTML());
+  change('[data-f="age"]', 4);
+  assert.strictEqual($('#mt-setup [data-f="age"]').value, "4", "4 stays 4 (not 5)");
+  assert.ok(/Age should be 5 to 120\./.test($("#mt-amsg-setup").textContent) && !$("#mt-amsg-setup").hidden);
+  change('[data-f="hft"]', 5); change('[data-f="hin"]', 10); change('[data-f="weight"]', 170);
+  toasts.length = 0;
+  click('[data-m="t-save-setup"]');
+  assert.strictEqual(M.person("nick").setupAt, null, "nothing saved");
+  assert.ok($('#mt-setup [data-row="age"]').classList.contains("mt-need"), "the age row is outlined");
+  assert.ok(/Age should be 5 to 120\./.test($("#mt-preview").textContent) && /Age should be 5 to 120\./.test(toasts[toasts.length - 1]));
+  assert.ok(!/Still need: age/.test($("#mt-preview").textContent), "a typo, not a missing age");
+  change('[data-f="age"]', 44);
+  click('[data-m="t-save-setup"]');
+  assert.ok(M.person("nick").setupAt, "saved"); assert.strictEqual(M.person("nick").age, 44);
+  M.trends.resetDraft();
 });
 
 /* ======================================================================= */

@@ -14,8 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=17">
-<link rel="stylesheet" href="m-trends.css?v=17">
+<link rel="stylesheet" href="m.css?v=18">
+<link rel="stylesheet" href="m-trends.css?v=18">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
@@ -71,6 +71,7 @@ input,select,textarea{font:inherit;color:inherit}
 .top{flex:none;z-index:5;background:var(--bg);padding:calc(10px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left));display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .top h1{margin:0;font-family:"Barlow Condensed","Barlow",sans-serif;font-weight:700;font-size:30px;line-height:1;letter-spacing:.01em}
 .top .sub{color:var(--mut);font-size:14px}
+.top .sub[data-a]{color:var(--acc);font-weight:600;cursor:pointer;padding:12px 0;margin:-12px 0}
 /* mode bar fallback (m.css owns the real styles) */
 .modebar{flex:none;display:grid;grid-template-columns:1fr 1fr;background:var(--sur);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .modebar button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;font-family:"Barlow Condensed","Barlow",sans-serif;font-weight:700;font-size:17px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
@@ -161,7 +162,7 @@ a.btn.primary{color:var(--acc-ink)}
 /* exercise visual (animated figure from the side and the front + muscles) */
 .vis{display:grid;grid-template-columns:1.1fr 1.1fr 0.8fr;gap:8px;padding:2px 14px 6px;align-items:center}
 .vis .rig svg{width:100%;height:auto;display:block;background:var(--sur2);border-radius:12px}
-.vis .cap{text-align:center;font-size:10px;margin-top:3px}
+.vis .cap{text-align:center;font-size:12px;margin-top:3px}
 .vis .mini{position:relative;aspect-ratio:8/11}   /* as tall as the rigs beside it: column widths are 1.1fr : 0.8fr */
 .vis .mini svg{position:absolute;left:0;top:0;width:100%;height:49%;display:block}
 .vis .mini svg+svg{top:51%}
@@ -198,7 +199,7 @@ a.btn.primary{color:var(--acc-ink)}
 
 /* tabs */
 .tabs{flex:none;z-index:7;background:var(--sur);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);padding:6px env(safe-area-inset-right) calc(6px + env(safe-area-inset-bottom)) env(safe-area-inset-left)}
-.tabs button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;color:var(--mut);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.tabs button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;color:var(--mut);font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
 .tabs button.on{color:var(--acc)}
 .tabs svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 
@@ -228,7 +229,7 @@ a.btn.primary{color:var(--acc-ink)}
 .chart .dot{fill:var(--sur);stroke:var(--acc);stroke-width:2}
 .chart .pr{fill:var(--acc);stroke:var(--acc)}
 .chart .last{fill:var(--acc);stroke:var(--sur)}
-.chart text{fill:var(--mut);font-size:11px;font-family:"Barlow",sans-serif}
+.chart text{fill:var(--mut);font-size:12px;font-family:"Barlow",sans-serif}
 select.sel{width:100%;min-height:48px;padding:0 40px 0 14px;border-radius:12px;border:1px solid var(--line);background:var(--sur2);-webkit-appearance:none;appearance:none;font-weight:600;font-size:17px;
  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center}
 
@@ -302,6 +303,10 @@ button.tag[data-a="checkin"]::after{content:"";position:absolute;left:0;right:0;
 .toggle i{position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:var(--sur);transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 .toggle.on{background:var(--acc)}
 .toggle.on i{left:23px}
+/* LK-03: in dark mode an OFF switch stood out from the card by only 1.3:1 */
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .toggle:not(.on){background:#4A525B} :root:not([data-theme="light"]) .toggle i{background:#F2EFE8} }
+:root[data-theme="dark"] .toggle:not(.on){background:#4A525B}
+:root[data-theme="dark"] .toggle i{background:#F2EFE8}
 textarea{width:100%;min-height:120px;border-radius:12px;border:1px solid var(--line);background:var(--sur2);color:var(--ink);padding:10px;font-size:16px;line-height:1.4}
 .prog-slot{display:grid;grid-template-columns:1fr auto auto auto auto;align-items:center;gap:4px;padding:8px 14px;border-top:1px solid var(--line)}
 .prog-slot.sub{padding-left:26px;grid-template-columns:1fr auto auto}
@@ -340,6 +345,7 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
 .toast.top{top:calc(12px + env(safe-area-inset-top));bottom:auto !important}
 .upd{position:absolute;left:16px;right:16px;width:max-content;max-width:calc(100% - 32px);margin:0 auto;bottom:calc(96px + env(safe-area-inset-bottom));z-index:29;background:var(--acc);color:var(--acc-ink);padding:12px 18px;min-height:44px;border-radius:12px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.28)}
 .upd[hidden],#sheet.on~.upd{display:none}
+body.upd-on #app.wrap{padding-bottom:calc(var(--upd-h,46px) + 36px)}
 .empty{padding:28px 14px;text-align:center;color:var(--mut)}
 @media (prefers-reduced-motion: reduce){*{transition:none !important}}
 </style>
@@ -374,12 +380,12 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=17"></script>
-<script src="m-data.js?v=17"></script>
-<script src="m-food.js?v=17"></script>
-<script src="m-ui.js?v=17"></script>
-<script src="m-trends.js?v=17"></script>
-<script src="m-sync.js?v=17"></script>
+<script src="m-core.js?v=18"></script>
+<script src="m-data.js?v=18"></script>
+<script src="m-food.js?v=18"></script>
+<script src="m-ui.js?v=18"></script>
+<script src="m-trends.js?v=18"></script>
+<script src="m-sync.js?v=18"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -633,6 +639,23 @@ function pickMoves(b,c,used){
   if(!b.pool||!b.pool.length) return b.moves||[]; const n=Math.min(b.n||4,b.pool.length), o=(c*2)%b.pool.length; const out=[]; for(let k=0;k<b.pool.length&&out.length<n;k++){ const ex=pick(b.pool,o+k); if(used.has(ex)) continue; used.add(ex); out.push({ex}); } return out.length?out:b.pool.slice(0,n).map(ex=>({ex})); }
 function rotateAll(){ Object.keys(S.program.workouts).forEach(rotateDay); }
 function regen(){ S.mix=S.mix||cp(PRESETS.nick.mix); S.goal=S.goal||{mode:"weights",setAt:null}; S.cyc=S.cyc||{}; const oldOrder=(S.program&&S.program.gen&&S.program.order)||[]; S.program=buildProgram(S.goal.mode,S.mix,S.block||0); rotateAll(); const ord=S.program.order; S.next=ord.includes(S.next)?S.next:(ord[oldOrder.indexOf(S.next)]||ord[0]); S.plan=null; S.pick=null; if(S.absNext==null) S.absNext=true; }
+/* KJ-02: a borrowed phone keeps each person's training plan. Leaving a person puts their plan (never their workouts,
+   weights or history) under their name in its own key; picking them again puts it back exactly. It stays out of
+   chalk.v1 on purpose: chalk.v1 is sent as-is as the current person's cloud training backup, so one person's plan
+   never rides along in the other person's backup. */
+const PEOPLE_KEY="chalk.people", PLAN_KEYS=["program","mix","goal","block","cyc","next","plan","pick","absNext","lastSummary"];
+function peopleGet(){ try{ const o=JSON.parse(localStorage.getItem(PEOPLE_KEY)||"null"); return o&&typeof o==="object"&&!Array.isArray(o)?o:{}; }catch(e){ return {}; } }
+function stashPlan(pid){ if(!PRESETS[pid]) return true; const all=peopleGet(), st={}; PLAN_KEYS.forEach(k=>{ if(S[k]!==undefined) st[k]=S[k]; });
+  Object.keys(all).forEach(id=>{ if(!PRESETS[id]) delete all[id]; }); all[pid]=st;
+  try{ localStorage.setItem(PEOPLE_KEY,JSON.stringify(all)); return true; }catch(e){ return false; } }
+function restorePlan(pid){ const pr=PRESETS[pid], st=pr&&peopleGet()[pid], P=st&&st.program;
+  if(!P||typeof P!=="object"||!P.workouts||typeof P.workouts!=="object"||!Array.isArray(P.order)||!P.order.length||!P.order.every(id=>P.workouts[id]&&Array.isArray(P.workouts[id].items))) return false;
+  PLAN_KEYS.forEach(k=>{ if(k in st) S[k]=st[k]; else if(k in S) S[k]=null; });
+  /* only fills what a damaged copy lacks: a plan saved by this app passes through unchanged */
+  if(!S.mix||typeof S.mix!=="object") S.mix=cp(pr.mix); if(!S.goal||typeof S.goal!=="object") S.goal={mode:pr.goal,setAt:Date.now()};
+  if(!S.cyc||typeof S.cyc!=="object") S.cyc={}; if(S.block==null) S.block=0; if(S.absNext==null) S.absNext=true;
+  if(!S.program.order.includes(S.next)) S.next=S.program.order[0];
+  return true; }
 function goalDaysLeft(){ if(!S.goal||!S.goal.setAt) return 0; return Math.min(45,45-Math.floor((Date.now()-S.goal.setAt)/86400000)); }
 function checkinDue(){ return !S.goal||!S.goal.setAt||goalDaysLeft()<=0; }
 function withIds(P){ Object.values(P.workouts).forEach(W=>W.items.forEach(it=>{ if(!it.id) it.id=uid(); })); return P; }
@@ -715,18 +738,25 @@ function fresh(){ return {v:1,updatedAt:0,settings:{restC:60,restA:45,sound:true
 /* the save is read once per launch (it can be megabytes) */
 let bootRaw=null; try{ bootRaw=localStorage.getItem(KEY); }catch(e){}
 function load(t){ if(t===undefined){ try{ t=localStorage.getItem(KEY); }catch(e){ t=null; } } try{ const s=JSON.parse(t); if(s&&s.v===1) return s; }catch(e){ try{ if(t) localStorage.setItem("chalk.bad",t); }catch(e2){} } return null; }
-/* daily backup of the save exactly as it was before this launch touched it; skipped (and any old twin removed) when the save is huge so the backup can't fill the quota */
-try{ const d=new Date().toISOString().slice(0,10); if(localStorage.getItem("chalk.bak.d")!==d){ const cur=bootRaw||""; if(cur.length>600000) localStorage.removeItem("chalk.bak"); else localStorage.setItem("chalk.bak",cur); localStorage.setItem("chalk.bak.d",d);} }catch(e){}
+/* SP-04: saves are written with every character past U+00FF as \uXXXX (’ — →). Safari keeps a text of only Latin-1
+   characters at 1 byte a character and any other at 2, so one "’" doubled the room the save took. JSON.parse reads
+   the escapes back as the same characters, so every build (v15 on) reads the save the same way. */
+const WIDE_RE=/[\u0100-\uffff]/g;
+const narrowRaw=t=>(typeof t==="string"&&/[\u0100-\uffff]/.test(t))?t.replace(WIDE_RE,c=>"\\u"+("000"+c.charCodeAt(0).toString(16)).slice(-4)):t;
+const lsText=v=>{ try{ if(window.M&&typeof M.lsJSON==="function") return M.lsJSON(v); }catch(e){} return narrowRaw(JSON.stringify(v)); };
+/* daily backup of the save as it was before this launch touched it (same data, wide characters escaped); skipped (and any old twin removed) when the save is huge so the backup can't fill the quota */
+try{ const d=new Date().toISOString().slice(0,10); if(localStorage.getItem("chalk.bak.d")!==d){ const cur=narrowRaw(bootRaw||""); if(cur.length>600000) localStorage.removeItem("chalk.bak"); else localStorage.setItem("chalk.bak",cur); localStorage.setItem("chalk.bak.d",d);} }catch(e){}
 const booted=load(bootRaw);
 let S = booted || fresh();
 /* a save this version can't read is left in place at launch (as the live app did); only a real change writes over it */
 const boot0=booted?bootRaw:JSON.stringify(S);
 upgrade(S);
-/* write back only when the key was missing or upgrade() actually changed something */
-try{ const now=JSON.stringify(S); if(bootRaw==null||now!==boot0) localStorage.setItem(KEY,now); }catch(e){}
+/* write back only when the key was missing or upgrade() actually changed something (a save from an older build with
+   wide characters is not rewritten just to escape them: the next real save does that) */
+try{ const now=lsText(S); if(bootRaw==null||(now!==boot0&&JSON.stringify(S)!==boot0)) localStorage.setItem(KEY,now); }catch(e){}
 let saveT=null;
 let saveWarned=false;
-function save(){ S.updatedAt=Date.now(); try{ localStorage.setItem(KEY,JSON.stringify(S)); saveWarned=false; }catch(e){ if(!saveWarned){ saveWarned=true; if(typeof toast==="function") toast("Couldn't save. Phone storage is full. Save a backup in Settings."); } } clearTimeout(saveT); saveT=setTimeout(dbPush,600); }
+function save(){ S.updatedAt=Date.now(); try{ localStorage.setItem(KEY,lsText(S)); saveWarned=false; }catch(e){ if(!saveWarned){ saveWarned=true; if(typeof toast==="function") toast("Couldn't save. Phone storage is full. Save a backup in Settings."); } } clearTimeout(saveT); saveT=setTimeout(dbPush,600); }
 
 /* own keys only: an exercise id like "__proto__" from a hostile backup must never reach Object.prototype (SE-01) */
 const ownV=(o,k)=>o&&Object.prototype.hasOwnProperty.call(o,k)?o[k]:undefined;
@@ -1275,7 +1305,7 @@ function tickRest(){
 function stopRest(){ T=null; clearInterval(tick); const el=document.getElementById("rest"); el.classList.remove("on"); el.classList.remove("go"); paintBadge(); }
 /* Label on the Train half of the mode bar: the rest clock while resting, the workout time while a workout runs. */
 function trainBadge(){
-  if(T&&!T.fired){ const s=Math.ceil(Math.max(0,T.end-Date.now())/1000); return "Train · rest "+Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
+  if(T&&!T.fired){ const s=Math.ceil(Math.max(0,T.end-Date.now())/1000); return "Train · Rest "+Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); }
   /* HIIT clock: which part of the round and how long is left (TN-06) */
   if(CT&&S&&S.active&&!CT.paused) return "Train · "+(CT.phase==="rest"?"Rest ":"Work ")+fmtClock(Math.max(0,CT.end-Date.now()));
   if(S&&S.active) return "Train · "+elapsed(S.active.start);
@@ -1404,7 +1434,7 @@ let CI=null; /* check-in draft: {mode,mix}; committed by ci-build / ci-apply, di
 function ciDraft(){ return CI=CI||{mode:(S.goal||{}).mode||"weights",mix:cp(S.mix||PRESETS.nick.mix)}; }
 function ciCommit(){ const D=ciDraft(); S.goal=S.goal||{mode:"weights",setAt:null}; S.goal.mode=D.mode; S.mix=D.mix; CI=null; }
 function render(){
-  if(window.M&&M.ui){ if(M.ui.chrome) M.ui.chrome(); if(M.mode()==="macros"){ showRest(); paintBadge(); M.ui.render(); placeUpd(); return; } }
+  if(window.M&&M.ui){ if(M.ui.chrome) M.ui.chrome(); if(M.mode()==="macros"){ showRest(); paintBadge(); M.ui.render(); placeUpd(); markFinishAsk(); return; } }
   document.querySelectorAll("#tabs button").forEach(b=>{ const on=b.dataset.tab===tab; b.classList.toggle("on",on); if(on) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current"); });
   const app=document.getElementById("app");
   const title=document.getElementById("title"), sub=document.getElementById("subtitle");
@@ -1416,7 +1446,7 @@ function render(){
   cta.classList.toggle("on",showCta);
   if(showCta){ const wid=nextWorkoutId(); const P=planFor(wid); cta.innerHTML=`<button class="btn primary block" data-a="start" data-wid="${esc(wid)}">Start ${esc(P.name||S.program.workouts[wid].name)}</button>`; } else cta.innerHTML="";
   if(lastTab!==tab){ const sc=document.getElementById("scroll"); if(sc) sc.scrollTop=0; lastTab=tab; }
-  showRest(); paintBadge(); placeUpd();
+  showRest(); paintBadge(); placeUpd(); markFinishAsk();
   mountAnims();
   showFlash();
 }
@@ -1426,7 +1456,11 @@ function elapsed(start){ const m=Math.floor((Date.now()-start)/60000); if(!(m>=1
 /* a Train "Program updated" note waits for the first Train screen instead of popping up over Macros */
 let flashT=null;
 function showFlash(){ if(!S.flash||flashT) return; flashT=setTimeout(()=>{ flashT=null; if(!S.flash||inMacros()||sheetOn()) return; const f=S.flash; delete S.flash; save(); openSheet("Program updated",`<p class="hint" style="font-size:15px">${esc(f)}</p><button class="btn primary block" data-a="sheet-close" style="margin-top:12px">Got it</button>`); },400); }
-setInterval(()=>{ if(!S.active) return; if(tab==="today"&&!inMacros()) document.getElementById("subtitle").textContent=elapsed(S.active.start); paintBadge(); },30000);
+setInterval(()=>{ if(!S.active) return; if(tab==="today"&&!inMacros()){ document.getElementById("subtitle").textContent=elapsed(S.active.start); markFinishAsk(); } paintBadge(); },30000);
+/* past 3 hours the title bar asks "Finish workout?": a tap on it asks for real (never finishes on its own) */
+function markFinishAsk(){ const sub=document.getElementById("subtitle"); if(!sub) return; const ask=!!S.active&&tab==="today"&&!inMacros()&&sub.textContent==="Finish workout?";
+  if(ask===(sub.dataset.a==="finish-ask")) return;
+  if(ask){ sub.dataset.a="finish-ask"; sub.setAttribute("role","button"); sub.tabIndex=0; } else { delete sub.dataset.a; sub.removeAttribute("role"); sub.removeAttribute("tabindex"); } }
 
 function wText(id){ const L=getEx(id), E=S.ex[id]; if(L.t==="band") return "band"; if(E&&E.w!=null) return NOLOAD(L.t)&&E.w===0?"BW":`${fmtW(E.w)} lb${L.t==="db"?" ea":""}`; return NOLOAD(L.t)?"BW":"set weight"; }
 function planRow(it,i,items){
@@ -1466,7 +1500,7 @@ function viewToday(){
     ${gaps.length?`<p class="hint" style="padding:0 14px">Usually on this day but not covered: <b>${esc(gaps.join(", "))}</b>. Tap to add ${gaps.length>1?"them":"it"} back.</p>`:""}
     <div class="hd" style="padding-top:10px;align-items:baseline"><h3 style="font-size:18px">${[nL?nL+" exercise"+(nL===1?"":"s"):"",nB?nB+" block"+(nB===1?"":"s"):""].filter(Boolean).join(" · ")}</h3><span class="small mut">~${estMin(items)} min</span></div>
     <div class="ex-list">${items.map((it,i)=>planRow(it,i,items)).join("")}</div>
-    <div class="bd" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost" style="flex:1" data-a="plan-add">+ Add exercise</button><button class="btn ghost" style="flex:1" data-a="plan-add-block">+ HIIT block</button>${absOn()&&wid!==absId()&&!P.kind?`<button class="btn ghost" style="flex:1" data-a="plan-abs">${P.abs?"Skip abs today":"Add abs today"}</button>`:""}
+    <div class="bd" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost" style="flex:1;white-space:nowrap" data-a="plan-add">+ Exercise</button><button class="btn ghost" style="flex:1;white-space:nowrap" data-a="plan-add-block">+ HIIT block</button>${absOn()&&wid!==absId()&&!P.kind?`<button class="btn ghost" style="flex:1;white-space:nowrap" data-a="plan-abs">${P.abs?"Skip abs":"Add abs"}</button>`:""}
     <button class="btn block" style="flex-basis:100%" data-a="plan-kind">${P.kind?"↩ Back to "+esc(W.name):(isHiitDay?"Make today weights":"Make today HIIT")}</button></div>
     <p class="hint" style="padding:0 14px 12px">${last?`Last workout: ${esc(last.name)} · ${fmtDate(last.start)}. `:""}Tap ⋯ on an exercise to replace it, change sets, or drop it for today. On a block, ⋯ reorders or drops it; edit its moves once you start.</p></div>`;
   h+=weekCard();
@@ -1507,15 +1541,18 @@ function convertWeight(fromId,w,toId){
   if(A.k==null||B.k==null||!A.k||w==null) return {w:null,how:"unknown"};
   return {w:roundTo(w/A.k*B.k,B.inc),how:"est"};
 }
+/* T3-04: cardio and timed moves (a burpee, a plank) never stand in for a loaded lift like a squat */
+const CARDIO=new Set(["burpee","jump_squat","mtn_climber","high_knees","skater","plank_tap","bicycle","bear_crawl","jumping_jack","jump_rope","box_jump","box_burpee","lat_box_hop"]);
 function subsFor(exId, excludeIds, curW){
-  const L=getEx(exId);
-  const ids=Object.keys(LIB).concat(Object.keys(S.custom)).filter(id=>id!==exId && !excludeIds.includes(id) && getEx(id).m===L.m);
+  const L=getEx(exId), loaded=!NOLOAD(L.t)&&L.u!=="s";
+  const ids=Object.keys(LIB).concat(Object.keys(S.custom)).filter(id=>id!==exId && !excludeIds.includes(id) && getEx(id).m===L.m && !(loaded&&(CARDIO.has(id)||getEx(id).u==="s")));
   return ids.map(id=>{
     const B=getEx(id), E=S.ex[id]; let w=null, how="unknown";
     if(E&&E.w!=null){ w=E.w; how=E.est?"est":"yours"; }
     else if(curW!=null){ const c=convertWeight(exId,curW,id); w=c.w; how=c.how; }
     else if(NOLOAD(B.t)){ w=0; how="bw"; }
-    const score=(how==="yours"?100:0)+(B.t!==L.t?10:0)+(how==="unknown"?-50:0)+(isCompound(id)===isCompound(exId)?20:0);
+    /* your own number only lifts a move of the same kind: a bodyweight 0 never outranks a loaded swap */
+    const score=(how==="yours"&&NOLOAD(B.t)===NOLOAD(L.t)?100:0)+(B.t!==L.t?10:0)+(how==="unknown"?-50:0)+(isCompound(id)===isCompound(exId)?20:0);
     return {id,w,how,score};
   }).sort((a,b)=>b.score-a.score);
 }
@@ -1533,7 +1570,7 @@ function openReplace(c){
   let curW=E&&E.w!=null?E.w:null;
   if(c.where==="active"&&it.done&&it.done.length) curW=it.done[it.done.length-1].w;
   const inDay=ctxList(c).flatMap(x=>x.t==="block"?(x.moves||[]).map(v=>v.ex):[x.ex]).filter(x=>x&&x!==exId);
-  const rowFor=(id,w,how)=>{ const B=getEx(id); const wl= how==="bw"?"bodyweight":(w==null?TYPE_LABEL[B.t]:`${fmtW(w)} lb${B.t==="db"?" each":""}`); const tag= how==="yours"?`<span class="tag ok">your number</span>`:(how==="est"?`<span class="tag">est.</span>`:""); return `<button class="opt" data-a="rep-do" ${ctxAttr(c)} data-ex="${esc(id)}" data-w="${w==null?"":esc(w)}"><span>${esc(B.n)} ${tag}</span><span class="m">${wl}</span></button>`; };
+  const rowFor=(id,w,how)=>{ const B=getEx(id); if(NOLOAD(B.t)&&w===0) how="bw"; const wl= how==="bw"?"bodyweight":(w==null?TYPE_LABEL[B.t]:`${fmtW(w)} lb${B.t==="db"?" each":""}`); const tag= how==="yours"?`<span class="tag ok">your number</span>`:(how==="est"?`<span class="tag">est.</span>`:""); return `<button class="opt" data-a="rep-do" ${ctxAttr(c)} data-ex="${esc(id)}" data-w="${w==null?"":esc(w)}"><span>${esc(B.n)} ${tag}</span><span class="m">${wl}</span></button>`; };
   const subs=subsFor(exId,inDay,curW);
   let h=scopeSeg(c.where)+`<p class="hint">Same muscle first, weight converted${curW!=null?` from ${fmtW(curW)} lb`:""}.${c.where==="active"&&it.done&&it.done.length?" Sets you already logged stay.":""}</p>`;
   h+=`<div class="opt-grp foc">${esc(L.m)} · same muscle</div>`+(subs.length?subs.map(x=>rowFor(x.id,x.w,x.how)).join(""):`<p class="hint">Nothing else for ${esc(L.m)} yet — add a custom one below.</p>`);
@@ -1701,7 +1738,7 @@ function viewProgress(){
   return `<select class="sel" data-f="progEx" aria-label="Exercise">${opts}</select>
     <div class="stats"><div class="stat"><div class="v num">${E.w==null?"—":(NOLOAD(L.t)&&E.w===0?"BW":fmtW(E.w)+"<small>lb</small>")}</div><div class="k">Next</div></div>
     <div class="stat"><div class="v num">${E.best?Math.round(E.best)+"<small>lb</small>":"—"}</div><div class="k">Est. 1RM</div></div>
-    <div class="stat"><div class="v num">${delta>=0?"+":""}${fmtW(delta)}<small>lb</small></div><div class="k">${H.length} sessions</div></div></div>
+    <div class="stat"><div class="v num">${delta>=0?"+":""}${fmtW(delta)}<small>lb</small></div><div class="k">${H.length} session${H.length===1?"":"s"}</div></div></div>
     <div class="card"><div class="hd"><h3>Top-set weight</h3><span class="small mut">${TYPE_LABEL[L.t]}</span></div><div class="bd">${chart(H)}</div></div>
     <div class="card"><div class="hist">${H.slice().reverse().slice(0,12).map(x=>`<div class="hrow" style="min-height:44px"><span class="small">${fmtDate(x.d)}</span><span class="num" style="font-weight:600">${NOLOAD(L.t)&&x.w===0?"BW":fmtW(x.w)+" lb"} × ${x.r.join("/")}${x.sec?"s":""}</span></div>`).join("")}</div></div>`;
 }
@@ -1843,13 +1880,20 @@ document.getElementById("sheetBg").addEventListener("click",closeSheet);
 /* iOS leaves the body offset after the keyboard closes; the only scroller is #scroll, so snap the page back */
 document.addEventListener("focusout",()=>setTimeout(()=>{ document.body.scrollTop=0; window.scrollTo(0,0); },60));
 document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&(sheetOn()||document.getElementById("sheet").classList.contains("on"))) closeSheet(); });
+/* T3-02: a weight or reps typed or stepped but not logged yet is saved 400 ms later, and at once when Chalk goes to the
+   background or closes, so a relaunch (iOS closing Chalk, an update) brings back the same numbers */
+let draftT=null;
+function saveSoon(){ clearTimeout(draftT); draftT=setTimeout(()=>{ draftT=null; save(); },400); }
+function saveNowIfDue(){ if(draftT){ clearTimeout(draftT); draftT=null; save(); } }
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") saveNowIfDue(); });
+window.addEventListener("pagehide",saveNowIfDue);
 document.addEventListener("input",e=>{
   const el=e.target; if(!el.dataset) return;
-  if(el.dataset.f==="w"||el.dataset.f==="r"){ const sl=S.active.items[+el.dataset.i]; const d=slotDraft(sl); d[el.dataset.f]=Number(el.value); }
+  if(el.dataset.f==="w"||el.dataset.f==="r"){ if(!S.active||!S.active.items) return; const sl=S.active.items[+el.dataset.i]; if(!sl||sl.t==="block") return; const d=slotDraft(sl); d[el.dataset.f]=Number(el.value); saveSoon(); }
   else if(el.dataset.bi!=null && S.active && S.active.items){ const blk=S.active.items[+el.dataset.bi]; const f=el.dataset.f, v=Number(el.value);
     if(f==="mw") blk.moves[+el.dataset.mi].w=Math.max(0,v||0); else if(f==="mr") blk.moves[+el.dataset.mi].reps=Math.max(0,Math.round(v||0));
     else if(f==="bw"||f==="br"||f==="bn"){ const key={bw:"work",br:"rest",bn:"rounds"}[f], lim={bw:[10,120,40],br:[0,120,0],bn:[1,10,1]}[f]; const c=Math.max(lim[0],Math.min(lim[1],Math.round(v||lim[2]))); blk[key]=c; if(v>lim[1]) el.value=c; }
-    clearTimeout(saveT); saveT=setTimeout(save,400); }
+    saveSoon(); }
 });
 document.addEventListener("change",e=>{ const el=e.target; if(!el.dataset) return; if(el.dataset.f==="progEx"){ progEx=el.value; render(); }
   else if(el.dataset.f==="imp-file"){ const f=el.files&&el.files[0], st=document.getElementById("impF"); if(!f) return; impText=null;
@@ -1885,8 +1929,8 @@ document.addEventListener("click",e=>{
       if(id==="__create"){ id=createCustom(); if(!id) break; }
       addDo(c,id); break; }
     /* active workout */
-    case "w-": case "w+": { const sl=A.items[i], d=slotDraft(sl), inc=getEx(sl.ex).inc; const st=inc===10?5:inc; d.w=Math.max(0,roundTo(Number(d.w)||0,st)+(a==="w+"?inc:-inc)); const inp=b.parentElement&&b.parentElement.querySelector("input"); if(inp) inp.value=fmtW(d.w); else render(); break; }
-    case "r-": case "r+": { const sl=A.items[i], d=slotDraft(sl); d.r=Math.max(0,(Number(d.r)||0)+(a==="r+"?1:-1)); const inp=b.parentElement&&b.parentElement.querySelector("input"); if(inp) inp.value=d.r; else render(); break; }
+    case "w-": case "w+": { const sl=A.items[i], d=slotDraft(sl), inc=getEx(sl.ex).inc; const st=inc===10?5:inc; d.w=Math.max(0,roundTo(Number(d.w)||0,st)+(a==="w+"?inc:-inc)); const inp=b.parentElement&&b.parentElement.querySelector("input"); if(inp) inp.value=fmtW(d.w); else render(); saveSoon(); break; }
+    case "r-": case "r+": { const sl=A.items[i], d=slotDraft(sl); d.r=Math.max(0,(Number(d.r)||0)+(a==="r+"?1:-1)); const inp=b.parentElement&&b.parentElement.querySelector("input"); if(inp) inp.value=d.r; else render(); saveSoon(); break; }
     case "log": logSet(i); break;
     case "rm-set": removeSet(i,+b.dataset.j); break;
     case "slot-menu": openSlotMenu(i); break;
@@ -1901,6 +1945,9 @@ document.addEventListener("click",e=>{
       const open=A.items.filter(x=>!x.skipped && (x.t==="block" ? x.status!=="done" : x.done.length<x.sets)).length;
       if(open){ openSheet("Finish workout?",`<p class="hint">${open} item${open>1?"s":""} ${open>1?"aren't":"isn't"} done. Finishing saves what you logged and skips the rest.</p><button class="btn primary block" data-a="finish-do" style="margin-top:8px">Finish anyway</button><button class="btn block ghost" data-a="sheet-close" style="margin-top:8px">Keep going</button>`); }
       else finishWorkout(); break; }
+    case "finish-ask": { if(!A||inMacros()){ markFinishAsk(); break; }
+      const open=A.items.filter(x=>!x.skipped && (x.t==="block" ? x.status!=="done" : x.done.length<x.sets)).length;
+      openSheet("Finish workout?",`<p class="hint">You started ${esc(elapsed(A.start)==="Finish workout?"?"over 3 hours ago":"a while ago")}. ${open?`${open} item${open>1?"s":""} ${open>1?"aren't":"isn't"} done. `:""}Finishing saves what you logged${open?" and skips the rest":""}.</p><button class="btn primary block" data-a="finish-do" style="margin-top:8px">Finish</button><button class="btn block ghost" data-a="sheet-close" style="margin-top:8px">Keep going</button>`); break; }
     case "finish-do": closeSheet(); finishWorkout(); break;
     case "discard": openSheet("Discard this workout?",`<p class="hint">Nothing from today gets saved.</p><button class="btn block danger" data-a="discard-do" style="margin-top:8px">Discard</button><button class="btn block ghost" data-a="sheet-close" style="margin-top:8px">Keep going</button>`); break;
     case "discard-do": closeSheet(); discardWorkout(); break;
@@ -1945,8 +1992,9 @@ document.addEventListener("click",e=>{
     case "switch-profile": if(S.active){ toast("Finish your workout first"); break; } if(S.profile) S.switchFrom=S.profile; S.profile=null; tab="today"; if(inMacros()&&typeof M.setMode==="function") M.setMode("train"); save(); render(); break;
     case "switch-cancel": if(!S.profile&&S.switchFrom&&PRESETS[S.switchFrom]) S.profile=S.switchFrom; delete S.switchFrom; save(); render(); break;
     /* the same person picked again keeps their goal, mix, 45-day clock and program; someone else gets their own start */
-    case "pick-profile": { const k=b.dataset.v, pr=PRESETS[k]; if(!pr) break; const same=!!S.switchFrom&&S.switchFrom===k; delete S.switchFrom; S.profile=k;
-      if(!same){ S.lastSummary=null; S.mix=cp(pr.mix); S.goal={mode:pr.goal,setAt:Date.now()}; S.block=0; S.cyc={}; regen(); } save(); render();
+    case "pick-profile": { const k=b.dataset.v, pr=PRESETS[k]; if(!pr) break; const from=S.switchFrom, same=!!from&&from===k; delete S.switchFrom; S.profile=k;
+      /* KJ-02: the person leaving keeps their plan for next time; someone picked before gets theirs back exactly */
+      if(!same){ const kept=from?stashPlan(from):true; if(!restorePlan(k)){ S.lastSummary=null; S.mix=cp(pr.mix); S.goal={mode:pr.goal,setAt:Date.now()}; S.block=0; S.cyc={}; regen(); } if(!kept) toast("Phone storage is full. "+PRESETS[from].name+"'s plan wasn't kept."); } save(); render();
       /* K6: sync catches up for this person right away (their diary, meals and trends) */
       try{ if(window.M&&M.cloud&&typeof M.cloud.personChanged==="function") M.cloud.personChanged(); }catch(e){} break; }
     case "checkin": CI=null; openCheckin(); break;
@@ -1991,7 +2039,7 @@ document.addEventListener("click",e=>{
     case "wipe": openSheet("Erase everything?",`<p class="hint">This deletes everything on this phone: workouts, weights, program, food logs, saved meals, your foods, weigh-ins and your Claude key. Save a backup first.</p><button class="btn block danger" data-a="wipe-do" style="margin-top:8px">Erase</button>`); break;
     case "wipe-do": (S.log||[]).forEach(r=>dbDelete(r.id)); clearInterval(ctTick); CT=null; wakeOff(); S=fresh(); stopRest(); tab="today"; save(); if(window.M&&M.reset) M.reset(); try{ localStorage.removeItem("chalk.ai.key"); }catch(e){}
       /* TN-05: the backup copies and half-typed drafts go too, so nothing of the old data is left behind */
-      try{ ["chalk.bak","chalk.bak.d","chalk.bad"].forEach(k=>localStorage.removeItem(k)); const ks=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&(k.startsWith("chalk.macros.setupDraft.")||k.startsWith("chalk.macros.draft."))) ks.push(k); } ks.forEach(k=>localStorage.removeItem(k)); }catch(e){}
+      try{ ["chalk.bak","chalk.bak.d","chalk.bad",PEOPLE_KEY].forEach(k=>localStorage.removeItem(k)); const ks=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&(k.startsWith("chalk.macros.setupDraft.")||k.startsWith("chalk.macros.draft."))) ks.push(k); } ks.forEach(k=>localStorage.removeItem(k)); }catch(e){}
       applyTheme(); closeSheet(); render(); break;
   }
 });
@@ -2036,7 +2084,7 @@ function dbDelete(id){ if(!db) return; try{ db.doc("workouts/"+id).delete().catc
     q.docs.forEach(d=>{ if(gone.has(d.id)){ dbDelete(d.id); return; } const r=d.data(); if(r&&r.id&&!have.has(r.id)&&!gone.has(r.id)){ S.log.push(r); added++; } });
     if(added) S.log.sort((a,b)=>b.start-a.start);
     const cloud=new Set(q.docs.map(d=>d.id)); S.log.filter(r=>!cloud.has(r.id)&&!gone.has(r.id)).slice(0,50).forEach(r=>db.doc("workouts/"+r.id).set(r).catch(()=>{}));
-    try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){}
+    try{ localStorage.setItem(KEY,lsText(S)); }catch(e){}
     dbPush(); applyTheme(); render();
   }catch(e){}
 })();
@@ -2050,14 +2098,18 @@ if(S.active) wakeOn();
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=17, BOOT_AT=Date.now();
+const APP_VERSION=18, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
   /* K5: Macros setup or You has typed numbers that aren't saved yet */
   try{ if(window.M&&M.trends&&typeof M.trends.hasDraft==="function"&&M.trends.hasDraft()) return false; }catch(e){} return true; }
 function reloadApp(){ try{ location.reload(); }catch(e){} }
 /* the button waits while a workout runs (a stray tap mid-set would drop the rest clock) and shows once it's done */
-function placeUpd(){ const u=document.getElementById("upd"); if(!u) return; const show=updReady&&!S.active&&!T&&!CT; if(u.hidden===show) u.hidden=!show; if(!show) return;
+/* T3-01: while it shows, the page gets extra room at the bottom (the button's height + 36 px), so the last card (Meal ideas)
+   can scroll clear of it and a tap meant for the page never lands on the button */
+function placeUpd(){ const u=document.getElementById("upd"); if(!u) return; const show=updReady&&!S.active&&!T&&!CT; if(u.hidden===show) u.hidden=!show;
+  const bd=document.body; if(bd&&bd.classList.contains("upd-on")!==show) bd.classList.toggle("upd-on",show); if(!show) return;
+  const h=(u.offsetHeight||46)+"px"; if(bd&&bd.style.getPropertyValue("--upd-h")!==h) bd.style.setProperty("--upd-h",h);
   const tabs=document.getElementById("tabs"), cta=document.getElementById("cta"); const b=((tabs?tabs.offsetHeight:0)+(cta&&cta.classList.contains("on")?cta.offsetHeight:0)+12)+"px"; if(u.style.bottom!==b) u.style.bottom=b; }
 /* TN-01: Macros tabs redraw the bottom bar without going through render(), so the button follows the bar's size */
 (function(){ const again=()=>{ if(updReady) placeUpd(); };
