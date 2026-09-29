@@ -50,14 +50,25 @@ window.M = window.M || {};
     });
   },
   bannerHTML() { return "<div class='card' id='m-banner'>banner</div>"; },
+  trainSummaryHTML() { return "<div class='card' id='m-sum'>macros today</div>"; },
   tabsHTML() { return "<button data-mtab='diary' class='on'>Diary</button><button data-mtab='foods'>Foods</button>"; }
 };
 ${fill ? "M.ui = M.ui || {}; Object.keys(stub).forEach(k => { if (!(k in M.ui)) M.ui[k] = stub[k]; });" : "M.ui = stub;"}
 })();`;
 
+/* m-sync.js as shipped (SB_URL / SB_KEY empty), or pointed at a fake Supabase for pass 3.
+   The orchestrator fills in exactly this line, so the test insists it is there. */
+const SB_LINE = 'const SB_URL = ""; const SB_KEY = "";';
+function syncSource(cfg) {
+  const src = read("m-sync.js");
+  assert.ok(src.includes(SB_LINE), "m-sync.js carries the empty config line");
+  return cfg ? src.replace(SB_LINE, "const SB_URL = " + JSON.stringify(cfg.url) + "; const SB_KEY = " + JSON.stringify(cfg.key) + ";") : src;
+}
+
 /* mode: "stub"  → m-core/m-data/m-food + a full stub M.ui (deterministic wiring test)
-         "real"  → every m-*.js that exists; the stub only fills members m-ui.js would add */
-function buildPage({ real }) {
+         "real"  → every m-*.js that exists; the stub only fills members m-ui.js would add
+   m-sync.js always loads last, like in index.html. */
+function buildPage({ real, sync }) {
   let html = HTML;
   // Strip every external stylesheet / font link and every <script src>.
   html = html.replace(/<link[^>]*rel="stylesheet"[^>]*>\s*/g, "");
@@ -66,26 +77,36 @@ function buildPage({ real }) {
   let inject = scripts.filter(exists).map(f => "<script>/* " + f + " */\n" + safeJS(read(f)) + "\n</script>").join("\n");
   if (!real) inject += "\n<script>" + stubUI(false) + "</script>";
   else if (!exists("m-ui.js")) inject += "\n<script>" + stubUI(true) + "</script>";
+  if (exists("m-sync.js")) inject += "\n<script>/* m-sync.js */\n" + safeJS(syncSource(sync)) + "\n</script>";
   let n = 0;
   html = html.replace(/<script src="[^"]+"><\/script>\s*/g, () => (n++ === 0 ? inject + "\n" : ""));
-  assert.ok(n >= 5, "found the 5 <script src> tags (got " + n + ")");
+  assert.ok(n >= 6, "found the 6 <script src> tags (got " + n + ")");
   return html;
 }
 
-function boot({ real }) {
-  const errors = [];
+/* Every page gets a fetch spy: pass 1 and 2 must never touch the network. */
+function boot({ real, sync, store }) {
+  const errors = [], fetches = [];
   const vc = new VirtualConsole();
   vc.on("jsdomError", e => errors.push(e && e.detail ? e.detail : e));
   vc.on("error", (...a) => errors.push(a.map(String).join(" ")));
-  const dom = new JSDOM(buildPage({ real }), {
+  const dom = new JSDOM(buildPage({ real, sync }), {
     url: "http://localhost/",
     runScripts: "dangerously",
     pretendToBeVisual: true,
-    virtualConsole: vc
+    virtualConsole: vc,
+    beforeParse(win) {
+      Object.keys(store || {}).forEach(k => win.localStorage.setItem(k, store[k]));
+      win.fetch = (url, opt) => {
+        fetches.push({ url: String(url), method: (opt && opt.method) || "GET", headers: Object.assign({}, opt && opt.headers), body: opt && opt.body });
+        const get = !opt || !opt.method || opt.method === "GET";
+        return Promise.resolve({ ok: true, status: get ? 200 : 201, json: () => Promise.resolve([]), text: () => Promise.resolve("") });
+      };
+    }
   });
   const w = dom.window;
   w.addEventListener("error", e => errors.push(e.error || e.message));
-  return { dom, w, d: w.document, errors };
+  return { dom, w, d: w.document, errors, fetches };
 }
 
 const click = (w, el) => { assert.ok(el, "element to click exists"); el.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true })); };
@@ -109,10 +130,23 @@ t("head links m.css and m-trends.css after Google Fonts", () => {
   assert.ok(i > 0 && a > i && b > a, "order: fonts < m.css < m-trends.css");
   assert.ok(a < HTML.indexOf("<style>"), "links before <style>");
 });
-t("five module scripts in order, before the inline script", () => {
-  const order = ["m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js"].map(f => HTML.indexOf('<script src="' + f + '"></script>'));
+t("six module scripts in order (m-sync.js right after m-trends.js), before the inline script", () => {
+  const order = ["m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js", "m-sync.js"].map(f => HTML.indexOf('<script src="' + f + '"></script>'));
   order.forEach((p, i) => assert.ok(p > 0 && (i === 0 || p > order[i - 1]), "script " + i + " position"));
-  assert.ok(order[4] < HTML.indexOf("<script>\n/* ================= EXERCISE LIBRARY"), "before Chalk's inline script");
+  assert.ok(/<script src="m-trends\.js"><\/script>\s*<script src="m-sync\.js"><\/script>/.test(HTML), "m-sync.js directly after m-trends.js");
+  assert.ok(order[5] < HTML.indexOf("<script>\n/* ================= EXERCISE LIBRARY"), "before Chalk's inline script");
+});
+t("boot starts cloud sync right after M.sync.init(), before the first render", () => {
+  const js = inlineScript(HTML);
+  const init = js.indexOf("M.sync.init();"), start = js.indexOf("M.cloud.start();"), first = js.indexOf("applyTheme(); render();", init);
+  assert.ok(init > 0 && start > init && first > start, "order: M.sync.init → M.cloud.start → render");
+  assert.ok(/if\(window\.M&&M\.cloud&&M\.cloud\.start\) M\.cloud\.start\(\);/.test(js), "guarded call");
+});
+t("Train Today adds the Macros summary row right after the check-in banner, only when it exists", () => {
+  const js = inlineScript(HTML);
+  const i = js.indexOf("let h=(window.M&&M.ui&&M.ui.bannerHTML?M.ui.bannerHTML():\"\");");
+  const j = js.indexOf('if(window.M&&M.ui&&typeof M.ui.trainSummaryHTML==="function"){ try{ h+=M.ui.trainSummaryHTML()||""; }catch(e){} }');
+  assert.ok(i > 0 && j > i && j - i < 120, "summary line follows the banner line");
 });
 t("modebar sits between .top and #scroll", () => {
   const top = HTML.indexOf('<div class="top">'), mb = HTML.indexOf('<div class="modebar" id="modebar">'), sc = HTML.indexOf('<div id="scroll">');
@@ -127,8 +161,8 @@ t("modebar fallback CSS present inside <style>", () => {
 t("sw.js: cache bumped, CORE lists the macro files, other origins not intercepted", () => {
   const sw = read("sw.js");
   const ver = +((sw.match(/const CACHE = "chalk-v(\d+)"/) || [])[1] || 0);
-  assert.ok(ver >= 14, "cache bumped past the pre-macros chalk-v13 (got v" + ver + ")");
-  ["m.css", "m-trends.css", "m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js"].forEach(f => assert.ok(sw.includes('"' + f + '"'), "CORE has " + f));
+  assert.ok(ver >= 15, "cache bumped for m-sync.js (got v" + ver + ")");
+  ["m.css", "m-trends.css", "m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js", "m-sync.js"].forEach(f => assert.ok(sw.includes('"' + f + '"'), "CORE has " + f));
   new vm.Script(sw, { filename: "sw.js" });
   /* behavior: run the worker with a fake `self` and check which requests it takes over */
   const listeners = {};
@@ -138,7 +172,9 @@ t("sw.js: cache bumped, CORE lists the macro files, other origins not intercepte
   const takes = (u, method) => { let took = false; listeners.fetch({ request: { url: u, method: method || "GET", mode: "cors" }, respondWith: p => { took = true; if (p && p.catch) p.catch(() => {}); } }); return took; };
   assert.ok(takes("https://nickahrensrealestate.github.io/chalk/m-core.js"), "same-origin app files are served by the worker");
   assert.ok(takes("https://fonts.gstatic.com/s/barlow/v1/x.woff2"), "fonts are cached");
-  ["https://world.openfoodfacts.org/api/v2/product/1.json", "https://api.anthropic.com/v1/messages"].forEach(u => assert.ok(!takes(u), "not intercepted: " + u));
+  ["https://world.openfoodfacts.org/api/v2/product/1.json", "https://api.anthropic.com/v1/messages",
+    "https://abcdefgh.supabase.co/rest/v1/chalk_sync?select=kind,id&household=eq.X"].forEach(u => assert.ok(!takes(u), "not intercepted: " + u));
+  assert.ok(!takes("https://abcdefgh.supabase.co/rest/v1/chalk_sync?on_conflict=household,kind,id", "POST"), "sync uploads pass through");
   assert.ok(!takes("https://nickahrensrealestate.github.io/chalk/index.html", "POST"), "non-GET passes through");
 });
 t("manifest.json description", () => {
@@ -150,9 +186,15 @@ t("manifest.json description", () => {
 /* ------------------------------------------------------ pass 1: stub M.ui */
 function runPass(label, real) {
   console.log(label);
-  const { dom, w, d, errors } = boot({ real });
+  const { dom, w, d, errors, fetches } = boot({ real });
   try {
     t("page boots without throwing", () => { assert.deepStrictEqual(errors, []); assert.ok(w.M && w.M.MS, "M loaded"); assert.strictEqual(typeof w.render, "function"); });
+    t("M.cloud loaded after the rest, not set up, so it stays off", () => {
+      assert.ok(w.M.cloud && typeof w.M.cloud.start === "function", "M.cloud present");
+      assert.strictEqual(w.M.cloud.configured(), false);
+      assert.strictEqual(w.M.cloud.status().on, false);
+      assert.strictEqual(w.M.save.__cloud, true, "M.save wrapped by m-sync.js");
+    });
     t("#modebar has two mode buttons, Train on by default", () => {
       const bs = d.querySelectorAll('#modebar button[data-m="mode"]');
       assert.strictEqual(bs.length, 2);
@@ -220,6 +262,27 @@ function runPass(label, real) {
       }
       assert.ok(q(d, '#cta button[data-a="start"]'), "Today CTA still works");
     });
+    t("Train Today: Macros summary row sits right after the check-in banner", () => {
+      const ui = w.M.ui, real0 = ui.trainSummaryHTML;
+      if (real0) assert.doesNotThrow(() => real0.call(ui), "the real trainSummaryHTML runs");
+      ui.trainSummaryHTML = () => "<div class='card' id='m-sum-probe'>probe</div>";
+      w.render();
+      const probe = q(d, "#m-sum-probe");
+      assert.ok(probe, "row rendered");
+      assert.ok(probe.previousElementSibling && probe.previousElementSibling === q(d, "#app").firstElementChild, "directly after the banner card");
+      assert.ok(/banner|card/.test(probe.previousElementSibling.className + probe.previousElementSibling.id));
+      /* a broken summary never breaks Today */
+      ui.trainSummaryHTML = () => { throw new Error("boom"); };
+      w.render();
+      assert.ok(!q(d, "#m-sum-probe") && q(d, '#cta button[data-a="start"]'), "Today still renders");
+      /* no summary function → nothing, no error */
+      delete ui.trainSummaryHTML;
+      w.render();
+      assert.ok(q(d, '#cta button[data-a="start"]'));
+      if (real0) ui.trainSummaryHTML = real0; else if (!real) ui.trainSummaryHTML = () => "<div class='card' id='m-sum'>macros today</div>";
+      w.render();
+      if (!real) assert.strictEqual(q(d, "#m-banner").nextElementSibling.id, "m-sum", "stub summary follows the stub banner");
+    });
     t("export text contains __macros", () => {
       click(w, q(d, '#tabs [data-tab="settings"]'));
       click(w, q(d, '#app [data-a="export"]'));
@@ -271,6 +334,73 @@ function runPass(label, real) {
       assert.strictEqual(w.M.mode(), "train");
     });
     t("no errors were logged during the whole pass", () => assert.deepStrictEqual(errors, []));
+    t("cloud sync not set up → not one network request during the whole pass", () => assert.deepStrictEqual(fetches.map(f => f.url), []));
+  } finally { dom.window.close(); }
+}
+
+/* ------------------------------------------- pass 3: m-sync.js configured */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function ta(name, fn) {
+  try { await fn(); pass++; console.log("  ok   " + name); }
+  catch (e) { fail++; console.log("  FAIL " + name + "\n       " + (e && e.stack ? e.stack.split("\n").slice(0, 3).join("\n       ") : e)); }
+}
+async function runSyncPass() {
+  console.log("pass 3: m-sync.js pointed at a fake Supabase, this phone already in a household");
+  const CODE = "ABCDEFGHJKLMNPQRSTUV", URL0 = "https://fake-project.supabase.co", KEY0 = "sb_publishable_test";
+  const store = { "chalk.sync.v1": JSON.stringify({ v: 1, code: CODE, device: "dtest", cursor: "", lastSync: 0, lastError: "", hashes: {}, gone: {}, bad: {}, train: {}, trainAt: 0, meta: null }) };
+  const { dom, w, d, errors, fetches } = boot({ real: true, sync: { url: URL0, key: KEY0 }, store });
+  try {
+    t("boots without errors; sync is on", () => {
+      assert.deepStrictEqual(errors, []);
+      assert.strictEqual(w.M.cloud.configured(), true);
+      assert.strictEqual(w.M.cloud.status().on, true);
+    });
+    for (let i = 0; i < 50 && !fetches.length; i++) await sleep(10);
+    t("boot pulls: GET chalk_sync for this household with apikey + x-household", () => {
+      const g = fetches[0];
+      assert.ok(g && g.method === "GET", "a pull happened at boot");
+      assert.ok(g.url.startsWith(URL0 + "/rest/v1/chalk_sync?select=kind,id,data,deleted,client_updated,updated_at&household=eq." + CODE + "&updated_at=gt."), g.url);
+      assert.ok(/&order=updated_at\.asc&limit=500$/.test(g.url));
+      assert.strictEqual(g.headers.apikey, KEY0);
+      assert.strictEqual(g.headers["x-household"], CODE);
+      assert.ok(!("Authorization" in g.headers), "no Bearer for a publishable key");
+    });
+    await sleep(20);
+    t("You tab: Sync & backup card shows the code in groups of 4", () => {
+      click(w, q(d, '#app [data-a="pick-profile"][data-v="nick"]'));
+      w.M.setMode("macros"); w.M.ui.tab = "you"; w.render();
+      assert.ok(q(d, "#mt-sync"), "card rendered");
+      assert.strictEqual(q(d, "#mt-code").textContent, "ABCD-EFGH-JKLM-NPQR-STUV");
+      assert.ok(q(d, '#mt-sync [data-m="t-sync-now"]') && q(d, '#mt-sync [data-m="t-sync-off"]'));
+      assert.ok(/Synced just now|Syncing/.test(q(d, "#mt-sync-status").textContent), q(d, "#mt-sync-status").textContent);
+    });
+    await ta("a macro change is uploaded about 1.5 s later", async () => {
+      const n = fetches.length;
+      w.M.foods.add({ name: "Integration zucchini" });
+      await sleep(600);
+      assert.ok(!fetches.slice(n).some(f => f.method === "POST"), "not right away");
+      await sleep(1400);
+      const posts = fetches.slice(n).filter(f => f.method === "POST");
+      assert.ok(posts.some(p => /Integration zucchini/.test(p.body)), "food row sent");
+      posts.forEach(p => {
+        assert.strictEqual(p.url, URL0 + "/rest/v1/chalk_sync?on_conflict=household,kind,id");
+        assert.strictEqual(p.headers.Prefer, "resolution=merge-duplicates,return=minimal");
+        JSON.parse(p.body).forEach(row => assert.strictEqual(row.household, CODE));
+      });
+      assert.ok(posts.some(p => JSON.parse(p.body).some(row => row.kind === "train" && row.id === "nick")), "Chalk training backed up too");
+    });
+    await ta("Turn off sync (two taps) stops the network", async () => {
+      w.M.ui.tab = "you"; w.render();
+      const off = q(d, '#mt-sync [data-m="t-sync-off"]');
+      click(w, off); click(w, off);
+      assert.strictEqual(w.M.cloud.status().on, false);
+      assert.ok(/Share foods and meals/.test(q(d, "#mt-sync").textContent), "card back to off");
+      const n = fetches.length;
+      w.M.foods.add({ name: "After turning off" });
+      await sleep(1800);
+      assert.strictEqual(fetches.length, n);
+    });
+    t("no errors were logged during pass 3", () => assert.deepStrictEqual(errors, []));
   } finally { dom.window.close(); }
 }
 
@@ -279,5 +409,9 @@ const realFiles = ["m-ui.js", "m-trends.js"].filter(exists);
 if (realFiles.length) runPass("pass 2: real " + realFiles.join(" + ") + (realFiles.length < 2 ? " (stub fills the rest)" : ""), true);
 else console.log("pass 2 skipped: m-ui.js / m-trends.js not present yet");
 
-console.log("\n" + pass + " passed, " + fail + " failed");
-process.exit(fail ? 1 : 0);
+(async () => {
+  if (realFiles.length === 2 && exists("m-sync.js")) await runSyncPass();
+  else console.log("pass 3 skipped: needs m-ui.js, m-trends.js and m-sync.js");
+  console.log("\n" + pass + " passed, " + fail + " failed");
+  process.exit(fail ? 1 : 0);
+})();

@@ -344,6 +344,7 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
 <script src="m-food.js"></script>
 <script src="m-ui.js"></script>
 <script src="m-trends.js"></script>
+<script src="m-sync.js"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -1313,6 +1314,7 @@ function viewToday(){
   const last=S.log[0];
   const sum=S.lastSummary && (Date.now()-S.lastSummary.at<6*3600e3) ? S.lastSummary : null;
   let h=(window.M&&M.ui&&M.ui.bannerHTML?M.ui.bannerHTML():"");
+  if(window.M&&M.ui&&typeof M.ui.trainSummaryHTML==="function"){ try{ h+=M.ui.trainSummaryHTML()||""; }catch(e){} }
   if(sum){
     const r=sum.rec; const ups=sum.results.filter(x=>x.kind==="up").length, prs=sum.results.filter(x=>x.pr).length;
     h+=`<div class="card"><div class="hd"><h3>${esc(r.name)} done</h3><span class="tag ok">Saved</span></div><div class="bd"><div class="stats">
@@ -1833,7 +1835,7 @@ function dbDelete(id){ if(!db) return; try{ db.doc("workouts/"+id).delete().catc
 })();
 
 /* ================= BOOT ================= */
-window.TRAIN_TABS=document.getElementById("tabs").innerHTML; if(window.M&&M.ui&&M.ui.bind) M.ui.bind(); if(window.M&&M.sync&&M.sync.init) M.sync.init();
+window.TRAIN_TABS=document.getElementById("tabs").innerHTML; if(window.M&&M.ui&&M.ui.bind) M.ui.bind(); if(window.M&&M.sync&&M.sync.init) M.sync.init(); if(window.M&&M.cloud&&M.cloud.start) M.cloud.start();
 applyTheme(); render();
 if(S.active) wakeOn();
 if(S.flash){ const f=S.flash; delete S.flash; save(); setTimeout(()=>openSheet("Program updated",`<p class="hint" style="font-size:15px">${esc(f)}</p><button class="btn primary block" data-a="sheet-close" style="margin-top:12px">Got it</button>`),400); }

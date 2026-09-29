@@ -56,6 +56,10 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   const fmtTs = ts => { const d = new Date(num(ts)); return isNum(d.getTime()) && ts ? MON[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear() : "—"; };
   const dow = key => { const d = keyDate(key); return d ? DOW[d.getDay()] : ""; };
 
+  /* Stamp a person's numbers as edited now (the cloud sync keeps the newer edit). */
+  const touchP = p => { if (p) p.updatedAt = now(); return p; };
+  /* 71.6 in → 6 ft 0 in, never "5 ft 12 in" */
+  const ftIn = h => { if (!isNum(h)) return { ft: "", inch: "" }; let ft = Math.floor(h / 12), inch = r0(h - ft * 12); if (inch >= 12) { ft++; inch = 0; } return { ft, inch }; };
   const units = p => (p && p.units === "metric" ? "metric" : "us");
   const wUnit = u => (u === "metric" ? "kg" : "lb");
   const toDispW = (lb, u) => (isNum(lb) ? (u === "metric" ? r1(M.units.lb2kg(lb)) : r1(lb)) : "");
@@ -330,7 +334,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const u = units(p);
     const IN = mode === "setup" ? "t-setup" : "t-num";
     const segAttr = f => (mode === "setup" ? `data-m="t-setup-seg" data-f="${f}"` : `data-m="t-${f}"`);
-    const ft = isNum(p.heightIn) ? Math.floor(p.heightIn / 12) : "", inch = isNum(p.heightIn) ? r0(p.heightIn - Math.floor(p.heightIn / 12) * 12) : "";
+    const { ft, inch } = ftIn(p.heightIn);
     const cm = isNum(p.heightIn) ? r0(M.units.in2cm(p.heightIn)) : "";
     const height = u === "metric"
       ? `<input class="mini" type="number" inputmode="numeric" min="50" max="260" data-m="${IN}" data-f="hcm" value="${cm}" placeholder="178"><span class="mt-u">cm</span>`
@@ -388,6 +392,14 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       </div>
       <div class="mt-sumrow"><span class="small ${sum === 100 ? "mut" : "mt-warn"}" id="mt-csum">${sum === 100 ? "Adds up to 100%" : "Adds up to " + sum + "% — must be 100%"}</span><button class="btn" id="mt-capply" data-m="t-custom-apply" ${sum === 100 ? "" : "disabled"}>Apply</button></div>`;
     }
+    return `<div class="card mt-card"><div class="hd"><h3>Macro targets</h3></div>
+      <div class="mt-opts">${opts}</div>${custom}
+      <div class="mt-tbox" id="mt-tbox">${targetsBoxHTML(p)}</div>
+      <div class="srow"><div><div class="l">Edit targets manually</div><div class="s">Type your own numbers. Turn off to go back to the calculator.</div></div><button class="toggle ${p.targetsManual ? "on" : ""}" data-m="t-manual" role="switch" aria-checked="${!!p.targetsManual}"><i></i></button></div>
+    </div>`;
+  }
+  /* The targets grid + the line under it: everything a change in "Your numbers" can move. */
+  function targetsBoxHTML(p) {
     const t = p.targets || {};
     const complete = M.calc.complete(p);
     const manual = !!p.targetsManual;
@@ -398,17 +410,16 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     if (manual) note = `<p class="hint">You're setting these by hand. Water is in oz${u === "metric" ? " (" + fmtN(t.water) + " oz ≈ " + fmtN(M.units.oz2ml(num(t.water))) + " ml)" : ""}.</p>`;
     else if (!complete) note = `<p class="hint">Fill in sex, age, height and weight above and these update on their own.</p>`;
     else { const c = M.calc.calories(p); note = `<p class="hint">Worked out from your numbers${c.floored ? " and held at the " + fmtN(c.cal) + " kcal minimum" : ""}. Changes above update these.</p>`; }
-    return `<div class="card mt-card"><div class="hd"><h3>Macro targets</h3></div>
-      <div class="mt-opts">${opts}</div>${custom}
-      ${grid}${note}
-      <div class="srow"><div><div class="l">Edit targets manually</div><div class="s">Type your own numbers. Turn off to go back to the calculator.</div></div><button class="toggle ${manual ? "on" : ""}" data-m="t-manual" role="switch" aria-checked="${manual}"><i></i></button></div>
-    </div>`;
+    return grid + note;
   }
 
-  function checkinsCard(id, p) {
-    const t = now();
-    const setupAge = p.setupAt ? Math.floor((t - num(p.setupAt)) / DAY) : null;
+  function ciNumHTML(p) {
+    const setupAge = p.setupAt ? Math.floor((now() - num(p.setupAt)) / DAY) : null;
     const setupS = p.setupAt ? `Set ${esc(fmtTs(p.setupAt))} (${setupAge} day${setupAge === 1 ? "" : "s"} ago)${setupAge >= 60 ? ' <span class="tag warn">60+ days</span>' : ""}` : "Not set yet";
+    return setupS + ". We ask again after 60 days.";
+  }
+  function ciBodyHTML(id, p) {
+    const t = now();
     const lastBody = Math.max(num(p.lastBody), num(p.setupAt));
     const lw = M.body.latest(id, "w");
     let bodyS;
@@ -417,9 +428,12 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       const due = lastBody + 14 * DAY;
       bodyS = (lw ? "Last weigh-in " + esc(fmtShort(lw.date)) : "Last check-in " + esc(fmtTs(lastBody))) + " · " + (due <= t ? '<span class="tag warn">due now</span>' : "next " + esc(fmtTs(due)));
     }
+    return bodyS + ". Every 2 weeks.";
+  }
+  function checkinsCard(id, p) {
     return `<div class="card mt-card"><div class="hd"><h3>Check-ins</h3></div>
-      <div class="srow"><div><div class="l">Your numbers</div><div class="s">${setupS}. We ask again after 60 days.</div></div><button class="btn" data-m="t-reviewed">Reviewed</button></div>
-      <div class="srow"><div><div class="l">Weight &amp; heart rate</div><div class="s">${bodyS}. Every 2 weeks.</div></div><button class="btn" data-m="t-log-body">Log now</button></div>
+      <div class="srow"><div><div class="l">Your numbers</div><div class="s" id="mt-ci-num">${ciNumHTML(p)}</div></div><button class="btn" data-m="t-reviewed">Reviewed</button></div>
+      <div class="srow"><div><div class="l">Weight &amp; heart rate</div><div class="s" id="mt-ci-body">${ciBodyHTML(id, p)}</div></div><button class="btn" data-m="t-log-body">Log now</button></div>
     </div>`;
   }
 
@@ -442,6 +456,95 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     </div></div>`;
   }
 
+  /* ------------------------------------------------------ sync & backup */
+  /* M.cloud comes from m-sync.js (loaded after this file), so always look it up lazily. */
+  const cloud = () => (M.cloud && typeof M.cloud.status === "function" && typeof M.cloud.configured === "function" ? M.cloud : null);
+  function agoText(ts) {
+    const d = now() - num(ts);
+    if (d < 45e3) return "just now";
+    if (d < 90e3) return "1 min ago";
+    if (d < 3600e3) return Math.round(d / 60e3) + " min ago";
+    if (d < 86400e3) return Math.round(d / 3600e3) + " hr ago";
+    return "on " + fmtTs(ts);
+  }
+  function syncLine(s) {
+    if (s.busy) return { cls: "", text: "Syncing…" };
+    if (s.lastError) return { cls: "warn", text: s.lastError + (s.pending > 0 ? " " + s.pending + " change" + (s.pending === 1 ? "" : "s") + " waiting." : "") };
+    if (s.lastSync > 0) return { cls: "ok", text: "Synced " + agoText(s.lastSync) };
+    return { cls: "", text: "Not synced yet" };
+  }
+  /* Only when there is something to get back: a copy from another phone, with workouts in it.
+     This phone's own backup (or one identical to it) needs no button. */
+  function restoreHTML() {
+    const C = cloud();
+    const tr = C && typeof C.training === "function" ? C.training() : null;
+    if (!tr || tr.mine || tr.same || !(tr.n > 0)) return "";
+    const n = tr.n + " workout" + (tr.n === 1 ? "" : "s");
+    const lead = tr.missing > 0
+      ? `<b>${tr.missing} workout${tr.missing === 1 ? "" : "s"}</b> in the cloud ${tr.missing === 1 ? "isn't" : "aren't"} on this phone.`
+      : `Training backup: ${esc(n)}${tr.t ? ", saved " + esc(fmtTs(tr.t)) : ""}.`;
+    return `<div class="mt-restore" id="mt-restore">
+      <p class="mt-text">${lead}</p>
+      <button class="btn block" data-m="t-sync-restore"${tr.busy ? " disabled" : ""}>Restore training backup</button>
+      <p class="hint">${tr.busy ? "Finish today's workout first. " : ""}This replaces the training history on this phone with the backup (${esc(n)}).</p>
+    </div>`;
+  }
+  let trainCheckAt = 0;
+  function syncCardHTML() {
+    const head = `<div class="hd"><h3>Sync &amp; backup</h3></div>`;
+    const C = cloud();
+    if (!C || !C.configured()) return `<div class="card mt-card mt-sync" id="mt-sync">${head}<div class="bd"><p class="mt-text mt-quiet">Cloud sync isn't set up yet.</p></div></div>`;
+    const s = C.status();
+    if (!s.on) {
+      return `<div class="card mt-card mt-sync" id="mt-sync">${head}<div class="bd">
+        <p class="mt-text">Share foods and meals between your phones and keep a backup.</p>
+        <div class="mt-row mt-wrap"><button class="btn primary" data-m="t-sync-on">Turn on</button><button class="btn" data-m="t-sync-joinshow">Join with a code</button></div>
+        <div class="mt-join" id="mt-join" hidden>
+          <p class="hint">Type the code shown on the other phone.</p>
+          <div class="mt-joinrow"><input id="mt-join-code" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" maxlength="32" placeholder="ABCD-EFGH-JKLM-NPQR-STUV" aria-label="Code from the other phone"><button class="btn primary" data-m="t-sync-join">Join</button></div>
+          <p class="small mt-warn" id="mt-join-msg" hidden></p>
+        </div>
+      </div></div>`;
+    }
+    /* now and then, ask the cloud whether this person has a training backup */
+    if (now() - trainCheckAt > 60e3 && typeof C.hasTrainingBackup === "function") {
+      trainCheckAt = now();
+      setTimeout(() => { try { Promise.resolve(C.hasTrainingBackup()).then(patchSync, () => {}); } catch (e) {} }, 0);
+    }
+    const line = syncLine(s);
+    return `<div class="card mt-card mt-sync" id="mt-sync">${head}<div class="bd">
+      <div class="mt-code" id="mt-code">${esc(C.fmtCode(s.code))}</div>
+      <div class="mt-coderow"><p class="hint">Type this code on the other phone. Keep a copy in Notes: a new phone needs it to get your data back.</p><button class="btn" data-m="t-sync-copy">Copy</button></div>
+      <div class="mt-syncrow"><div class="mt-status ${line.cls}" id="mt-sync-status"><i></i><span>${esc(line.text)}</span></div><button class="btn" data-m="t-sync-now">Sync now</button></div>
+      <p class="hint">Foods and saved meals are shared. Diaries, weight and training are backed up.</p>
+      ${restoreHTML()}
+      <button class="btn block ghost danger mt-off" data-m="t-sync-off">Turn off sync</button>
+    </div></div>`;
+  }
+  /* Refresh the status line and the restore part in place (no full re-render: nobody loses their keyboard). */
+  function patchSync() {
+    const C = cloud(), box = $("mt-sync");
+    if (!C || !box) return;
+    const s = C.status();
+    const st = $("mt-sync-status");
+    if (st) {
+      const line = syncLine(s);
+      st.className = "mt-status " + line.cls;
+      const span = st.querySelector("span"); if (span) span.textContent = line.text;
+    }
+    if (!s.on) return;
+    const cur = $("mt-restore");
+    const btn = cur ? cur.querySelector('[data-m="t-sync-restore"]') : null;
+    if (btn && (btn.dataset.arm === "1" || btn.dataset.busy === "1")) return;   /* mid two-tap / restoring */
+    const html = restoreHTML();
+    if (cur && !html) cur.remove();
+    else if (cur) cur.outerHTML = html;
+    else if (html) { const off = box.querySelector(".mt-off"); if (off) off.insertAdjacentHTML("beforebegin", html); }
+  }
+  M.trends.syncCardHTML = syncCardHTML;
+  M.trends.patchSync = patchSync;
+  try { if (typeof window !== "undefined" && window && typeof window.addEventListener === "function") window.addEventListener("chalk-sync", () => { try { patchSync(); } catch (e) {} }); } catch (e) {}
+
   M.ui.views.you = function () {
     const id = pid();
     if (!id) return `<div class="card"><div class="empty">Pick a person first.</div></div>`;
@@ -449,7 +552,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const numbers = `<div class="card mt-card"><div class="hd"><h3>Your numbers</h3></div>${numbersFieldsHTML(p, "you")}</div>`;
     const who = `<div class="card mt-card"><div class="hd"><h3>Person</h3></div><div class="srow"><div><div class="l">Now: ${esc(p.name || id)}</div><div class="s">Macros and workouts follow the same person.</div></div><button class="btn" data-a="switch-profile">Switch</button></div></div>`;
     const data = `<div class="card mt-card"><div class="hd"><h3>Data</h3></div><div class="bd"><p class="hint">Backup lives in Train → Settings and now includes Macros.</p></div></div>`;
-    return numbers + targetsCard(p) + checkinsCard(id, p) + aiCard(p) + who + data;
+    return numbers + targetsCard(p) + checkinsCard(id, p) + aiCard(p) + syncCardHTML() + who + data;
   };
 
   /* ============================================================== check-ins */
@@ -551,15 +654,38 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   };
 
   /* --- you: numbers --- */
+  /* Text / number / select changes never re-render the view: on iPhone that would throw away
+     the field the person just tapped (and the keyboard with it). Update the profile, put the
+     cleaned-up values back in the boxes, and patch only what depends on them. */
+  function showNumbers(el, p) {
+    const card = el && el.closest ? el.closest(".card") : null;
+    if (!card) return;
+    const d = doc(), u = units(p), h = ftIn(p.heightIn);
+    const set = (f, v) => {
+      const i = card.querySelector('input[data-m="t-num"][data-f="' + f + '"]');
+      if (i && (!d || i !== d.activeElement) && String(i.value) !== String(v)) i.value = v;
+    };
+    set("age", isNum(p.age) ? p.age : "");
+    if (u === "metric") set("hcm", isNum(p.heightIn) ? r0(M.units.in2cm(p.heightIn)) : "");
+    else { set("hft", h.ft); set("hin", h.inch); }
+    set("weight", toDispW(p.weightLb, u));
+    set("goal", toDispW(p.goalWeightLb, u));
+  }
+  function patchYou(id, p) {
+    const box = $("mt-tbox");
+    if (box && !p.targetsManual) box.innerHTML = targetsBoxHTML(p);   /* manual mode: the grid holds inputs, and numbers don't move it */
+    const a = $("mt-ci-num"); if (a) a.innerHTML = ciNumHTML(p);
+    const b = $("mt-ci-body"); if (b) b.innerHTML = ciBodyHTML(id, p);
+  }
   C["t-num"] = el => {
     const id = pid(); if (!id || !el) return;
     const p = person(id);
-    if (!applyField(p, el.dataset.f, el, false)) { rerender(); return; }
-    M.calc.applyTargets(p);
-    rerender();
+    if (applyField(p, el.dataset.f, el, false)) { touchP(p); M.calc.applyTargets(p); }
+    showNumbers(el, p);
+    patchYou(id, p);
   };
-  A["t-sex"] = el => { const id = pid(); if (!id) return; const p = person(id); const v = el.dataset.v; if (v !== "m" && v !== "f") return; p.sex = v; M.calc.applyTargets(p); rerender(); };
-  A["t-units"] = el => { const id = pid(); if (!id) return; const p = person(id); p.units = el.dataset.v === "metric" ? "metric" : "us"; M.save(); rerender(); };
+  A["t-sex"] = el => { const id = pid(); if (!id) return; const p = person(id); const v = el.dataset.v; if (v !== "m" && v !== "f") return; p.sex = v; touchP(p); M.calc.applyTargets(p); rerender(); };
+  A["t-units"] = el => { const id = pid(); if (!id) return; const p = person(id); p.units = el.dataset.v === "metric" ? "metric" : "us"; touchP(p); M.save(); rerender(); };
 
   /* --- you: split + targets --- */
   A["t-split"] = el => {
@@ -567,6 +693,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const p = person(id), v = el.dataset.v;
     if (!M.calc.SPLITS[v]) return;
     p.split = v; p.targetsManual = false;
+    touchP(p);
     M.calc.applyTargets(p);
     rerender();
   };
@@ -589,6 +716,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     if (r.sum !== 100) { toast("Percentages must add up to 100"); return; }
     const p = person(id);
     p.custom = r.c; p.split = "custom"; p.targetsManual = false;
+    touchP(p);
     M.calc.applyTargets(p);
     toast("Targets updated");
     rerender();
@@ -597,6 +725,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const id = pid(); if (!id) return;
     const p = person(id);
     p.targetsManual = !p.targetsManual;
+    touchP(p);
     if (!p.targetsManual) M.calc.applyTargets(p); else M.save();
     rerender();
   };
@@ -606,6 +735,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     if (["cal", "p", "c", "f", "fiber", "water"].indexOf(f) < 0) return;
     p.targets[f] = Math.max(0, r0(num(el.value)));
     p.targetsManual = true;
+    touchP(p);
     M.save();
   };
 
@@ -614,6 +744,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const id = pid(); if (!id) return;
     const p = person(id);
     if (!M.calc.complete(p)) { toast("Fill in your numbers first"); return; }
+    touchP(p);
     M.checkins.done(id, "refresh60");
     toast("Thanks — see you in 60 days");
     rerender();
@@ -621,6 +752,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   A["t-snooze"] = el => {
     const id = pid(); if (!id) return;
     const kind = el.dataset.kind === "body14" ? "body14" : "refresh60";
+    touchP(person(id));
     M.checkins.snooze(id, kind, num(el.dataset.days, kind === "body14" ? 14 : 7));
     toast("OK, later");
     rerender();
@@ -649,7 +781,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     rerender();
   };
   A["t-ai-remove"] = () => { if (!M.ai) return; M.ai.setKey(""); toast("Key removed"); rerender(); };
-  C["t-ai-model"] = el => { const id = pid(); if (!id || !el) return; const p = person(id); p.aiModel = el.value || "claude-sonnet-5-5"; M.save(); };
+  C["t-ai-model"] = el => { const id = pid(); if (!id || !el) return; const p = person(id); p.aiModel = el.value || "claude-sonnet-5-5"; touchP(p); M.save(); };
   A["t-ai-test"] = el => {
     if (!M.ai || typeof M.ai.json !== "function") { toast("AI isn't loaded"); return; }
     const msg = $("mt-ai-msg");
@@ -668,6 +800,90 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       toast("Claude test failed");
       done();
     });
+  };
+
+  /* --- you: sync & backup --- */
+  /* Two taps for anything that can't be undone: the first tap only arms the button. */
+  function armTap(el, label) {
+    if (!el || !el.dataset) return true;
+    if (el.dataset.arm === "1") { clearTimeout(el._mtArm); delete el.dataset.arm; el.classList.remove("mt-armed"); return true; }
+    const old = el.textContent;
+    el.dataset.arm = "1"; el.textContent = label; el.classList.add("mt-armed");
+    el._mtArm = setTimeout(() => { try { if (el.dataset.arm === "1") { delete el.dataset.arm; el.textContent = old; el.classList.remove("mt-armed"); } } catch (e) {} }, 4000);
+    return false;
+  }
+  function joinMsg(text) { const m = $("mt-join-msg"); if (!m) return; m.textContent = text || ""; m.hidden = !text; }
+  A["t-sync-on"] = () => {
+    const Cl = cloud();
+    if (!Cl || !Cl.configured()) { toast("Cloud sync isn't set up yet"); return; }
+    if (!Cl.create()) { toast("Couldn't turn on sync. Try again."); return; }
+    toast("Sync is on");
+    rerender();
+  };
+  A["t-sync-joinshow"] = el => {
+    const box = $("mt-join"); if (!box) return;
+    box.hidden = false;
+    if (el && el.dataset) el.hidden = true;
+    const inp = $("mt-join-code"); if (inp) { try { inp.focus(); } catch (e) {} }
+  };
+  A["t-sync-join"] = el => {
+    const Cl = cloud(); if (!Cl) return;
+    const inp = $("mt-join-code"), v = inp ? String(inp.value || "") : "";
+    if (!v.trim()) { joinMsg("Type the code from the other phone."); return; }
+    joinMsg("");
+    try { if (inp) inp.blur(); } catch (e) {}   /* keyboard away; the card re-renders when the join lands */
+    const reset = () => { if (el && el.dataset) { el.disabled = false; el.textContent = "Join"; } };
+    if (el && el.dataset) { el.disabled = true; el.textContent = "Joining…"; }
+    let pr;
+    try { pr = Cl.join(v); } catch (e) { pr = null; }
+    return Promise.resolve(pr).then(r => {
+      if (r && r.ok) { toast("Joined. Your data is syncing."); rerender(); return; }
+      reset(); joinMsg((r && r.error) || "That didn't work. Try again.");
+    }, () => { reset(); joinMsg("That didn't work. Try again."); });
+  };
+  A["t-sync-copy"] = () => {
+    const Cl = cloud(); if (!Cl) return;
+    const code = Cl.fmtCode(Cl.status().code); if (!code) return;
+    const fallback = () => {
+      try {
+        const d = doc(), n = $("mt-code");
+        if (d && n && d.createRange && typeof window.getSelection === "function") { const r = d.createRange(); r.selectNodeContents(n); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+      } catch (e) {}
+      toast("Press and hold the code to copy it");
+    };
+    try {
+      const nav = typeof navigator !== "undefined" ? navigator : null;
+      if (nav && nav.clipboard && typeof nav.clipboard.writeText === "function") return Promise.resolve(nav.clipboard.writeText(code)).then(() => toast("Code copied"), fallback);
+    } catch (e) {}
+    fallback();
+  };
+  A["t-sync-now"] = el => {
+    const Cl = cloud(); if (!Cl || !Cl.status().on) return;
+    const reset = () => { if (el && el.dataset) { el.disabled = false; el.textContent = "Sync now"; } };
+    if (el && el.dataset) { el.disabled = true; el.textContent = "Syncing…"; }
+    let pr;
+    try { pr = Cl.syncNow(); } catch (e) { pr = null; }
+    return Promise.resolve(pr).then(r => { reset(); patchSync(); toast(r && r.ok ? "Synced" : "Couldn't sync"); }, () => { reset(); patchSync(); toast("Couldn't sync"); });
+  };
+  A["t-sync-restore"] = el => {
+    const Cl = cloud(); if (!Cl || !Cl.status().on || typeof Cl.restoreTraining !== "function") return;
+    if (!armTap(el, "Tap again to replace")) return;
+    const fail = () => {
+      if (el && el.dataset) { delete el.dataset.busy; el.disabled = false; el.textContent = "Restore training backup"; }
+      toast("Couldn't restore. Try again.");
+      patchSync();
+    };
+    if (el && el.dataset) { el.dataset.busy = "1"; el.disabled = true; el.textContent = "Restoring…"; }
+    let pr;
+    try { pr = Cl.restoreTraining(); } catch (e) { pr = null; }
+    return Promise.resolve(pr).then(ok => { if (ok) toast("Training restored"); else fail(); }, fail);   /* on success the page reloads */
+  };
+  A["t-sync-off"] = el => {
+    const Cl = cloud(); if (!Cl || !Cl.status().on) return;
+    if (!armTap(el, "Tap again to turn off")) return;
+    Cl.leave();
+    toast("Sync is off. Your data stays on this phone.");
+    rerender();
   };
 
   /* --- setup card --- */
@@ -708,6 +924,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     p.units = d.units === "metric" ? "metric" : "us";
     p.split = M.calc.SPLITS[d.split] ? d.split : "highprotein";
     p.targetsManual = false;
+    touchP(p);
     M.calc.applyTargets(p);
     M.body.add({ date: M.today(), w: p.weightLb, pid: id });
     M.checkins.done(id, "setup");

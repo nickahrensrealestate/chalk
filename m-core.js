@@ -6,6 +6,22 @@ window.M = window.M || {};
    summary. Plain ES2020, no DOM, never throws at load.
    Chalk globals (S, PRESETS, uid, esc, render) are only read lazily inside
    functions, guarded with typeof, so this file can load before Chalk boots.
+
+   New OPTIONAL fields (old data stays valid; nothing else in M.MS changed):
+   · Food.cook = { y, word:"raw"|"dry", per100gCooked, alts? } — the food
+     changes weight when cooked. serving / per / per100g / alts stay the raw
+     (or dry) state. y = cooked grams per raw gram. per100gCooked = the cooked
+     profile (custom foods: per100g ÷ y). cook.alts = cooked-state portions.
+   · Entry.state = "raw"|"cooked", Entry.cook = { y, word } — which weight was
+     logged. servingLabel / g / per describe ONE unit in that state, e.g.
+     "1 oz raw" (g 28.35). Meal items may carry the same two fields.
+   · Meal.batch = { cookedG, rawG } — cooked as one batch, logged by cooked
+     weight. servingsMade is 1, so per = the whole batch; rawG = raw grams of
+     the items. A logged portion keeps its own per, so editing the meal later
+     never changes days already logged.
+   · M.storage (never saved) = { ok, lastError, bytes, bakDay, restoredFrom };
+     M.onStorageError(fn). localStorage also keeps a daily copy under
+     M.KEY + ".bak"; M.load() falls back to it when the main copy is damaged.
    ========================================================================== */
 (function (M) {
   "use strict";
@@ -24,6 +40,7 @@ window.M = window.M || {};
   /* Round with a float-noise nudge so 3.3*1.5 (=4.949999…) rounds to 5, not 4.9. */
   const r1 = v => Math.round(v * 10 + (v >= 0 ? 1e-9 : -1e-9)) / 10;
   const r2 = v => Math.round(v * 100 + (v >= 0 ? 1e-9 : -1e-9)) / 100;
+  const r4 = v => Math.round(v * 1e4) / 1e4;
   const r0 = v => Math.round(v);
   const pad = n => (n < 10 ? "0" : "") + n;
   const lc = s => String(s == null ? "" : s).toLowerCase();
@@ -97,20 +114,86 @@ window.M = window.M || {};
     return o;
   }
   function lsGet(k) { try { if (typeof localStorage === "undefined") return null; return localStorage.getItem(k); } catch (e) { return null; } }
-  function lsSet(k, v) { try { if (typeof localStorage === "undefined") return false; localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+  function lsSet(k, v) { return !lsWrite(k, v); }
+  /* null on success, else the error (quota full, storage blocked…). */
+  function lsWrite(k, v) {
+    try {
+      if (typeof localStorage === "undefined") return new Error("This browser has no storage");
+      localStorage.setItem(k, v);
+      return null;
+    } catch (e) { return e || new Error("Save failed"); }
+  }
   function lsDel(k) { try { if (typeof localStorage !== "undefined") localStorage.removeItem(k); } catch (e) {} }
 
+  /* ---------------------------------------------------------- storage safety */
+  /* A failed save never loses data silently: M.MS stays in memory, every later
+     M.save() tries again, M.storage says what happened and M.onStorageError
+     listeners hear about it once per failure streak. A daily copy of the last
+     good save lives under M.KEY + ".bak" for M.load() to fall back on. */
+  const BAK_KEY = () => M.KEY + ".bak";
+  const STATE_KEYS = ["profiles", "foods", "meals", "days", "body"];
+  function parseJSON(s) { if (s == null) return undefined; try { return JSON.parse(s); } catch (e) { return undefined; } }
+  function validState(s) { return isObj(s) && s.v === 1 && (s.ui === undefined || isObj(s.ui)) && STATE_KEYS.every(k => s[k] === undefined || isObj(s[k])); }
+  /* bakMax: like Chalk's own "chalk.bak", no copy above 600,000 characters, so a
+     backup never crowds the training log out of the phone's storage. */
+  M.storage = { ok: true, lastError: null, bytes: 0, bakDay: null, restoredFrom: null, bakMax: 600000 };
+  const storeFns = [];
+  let storeStreak = false;
+  M.onStorageError = function (fn) {
+    if (typeof fn !== "function") return;
+    storeFns.push(fn);
+    if (storeStreak) { try { fn(M.storage); } catch (e) {} }   /* joined mid-streak: tell it now */
+  };
+  function storeFail(err) {
+    const name = err && err.name && err.name !== "Error" ? err.name + ": " : "";
+    M.storage.ok = false;
+    M.storage.lastError = name + String((err && err.message) || err || "Save failed");
+    if (storeStreak) return;
+    storeStreak = true;
+    storeFns.slice().forEach(fn => { try { fn(M.storage); } catch (e) {} });
+  }
+  /* First save of each day: copy the stored main copy (the last good save) to .bak. */
+  function dailyBak() {
+    const day = M.today();
+    if (M.storage.bakDay === day) return;
+    const prev = lsGet(M.KEY);
+    if (prev == null) return;
+    if (prev.length > num(M.storage.bakMax, 600000)) { lsDel(BAK_KEY()); M.storage.bakDay = day; return; }
+    if (!validState(parseJSON(prev))) return;
+    lsWrite(BAK_KEY(), '{"bak":1,"day":"' + day + '","at":' + M.now() + ',"data":' + prev + "}");
+    M.storage.bakDay = day;   /* one try a day, even when the phone is full */
+  }
+  function persist() {
+    let str;
+    try { str = JSON.stringify(M.MS); } catch (e) { storeFail(e); return false; }
+    try { dailyBak(); } catch (e) {}
+    let err = lsWrite(M.KEY, str);
+    /* out of room: the main copy matters more than yesterday's backup */
+    if (err && lsGet(BAK_KEY()) != null) { lsDel(BAK_KEY()); err = lsWrite(M.KEY, str); }
+    if (err) { storeFail(err); return false; }
+    M.storage.ok = true; M.storage.lastError = null; M.storage.bytes = str.length;
+    storeStreak = false;
+    return true;
+  }
+
   M.load = function () {
-    let s = null;
-    try { s = JSON.parse(lsGet(M.KEY)); } catch (e) { s = null; }
-    if (!(isObj(s) && s.v === 1)) s = null;
+    const raw = lsGet(M.KEY), bak = lsGet(BAK_KEY());
+    const bm = bak ? /^\{"bak":1,"day":"(\d{4}-\d{2}-\d{2})"/.exec(bak) : null;
+    M.storage.bakDay = bm ? bm[1] : null;
+    M.storage.restoredFrom = null;
+    let s = parseJSON(raw);
+    if (!validState(s)) {
+      s = null;
+      const b = parseJSON(bak);
+      if (isObj(b) && validState(b.data)) { s = b.data; M.storage.restoredFrom = String(b.day || "backup"); }
+    }
     M.MS = shape(s);
     return M.MS;
   };
   M.save = function () {
     const s = M.MS;
     s.updatedAt = M.now();
-    lsSet(M.KEY, JSON.stringify(s));
+    persist();
     try { M.sync.push(); } catch (e) {}
     return s;
   };
@@ -121,7 +204,8 @@ window.M = window.M || {};
       Object.keys(M.MS.body).forEach(id => M.sync.deleted.body.add(id));
     } catch (e) {}
     M.MS = freshState();
-    lsDel(M.KEY);
+    lsDel(M.KEY); lsDel(BAK_KEY());
+    M.storage.bakDay = null; M.storage.restoredFrom = null;
     M.save();
     return M.MS;
   };
@@ -298,6 +382,225 @@ window.M = window.M || {};
     }
   };
 
+  /* ---------------------------------------------------------- cooked weight */
+  /* Meat, fish, rice and pasta weigh differently raw (or dry) and cooked. Every
+     amount of such a food reads raw first, cooked in parentheses:
+     "6 oz raw (4.4 oz cooked)", "170 g raw (123 g cooked)", "2 oz dry (1 cup cooked)".
+     Nutrition always comes from the profile of the state that was weighed. */
+  const OZ_G = 28.349523125, LB_G = 453.59237;
+  const WEIGHT_G = { oz: OZ_G, g: 1, lb: LB_G };
+  const VOLUME = { cup: 1, tbsp: 1, tsp: 1 };
+  const STEP = { oz: 0.5, g: 5, lb: 0.25 };
+  function unitWord(u) {
+    const w = lc(u).trim().split(/[\s,(]+/)[0];
+    if (/^(oz|ounces?)$/.test(w)) return "oz";
+    if (/^(g|grams?)$/.test(w)) return "g";
+    if (/^(lb|lbs|pounds?)$/.test(w)) return "lb";
+    if (/^cups?$/.test(w)) return "cup";
+    if (/^(tbsp|tablespoons?)$/.test(w)) return "tbsp";
+    if (/^(tsp|teaspoons?)$/.test(w)) return "tsp";
+    return null;
+  }
+  function cookLite(c) {
+    if (!isObj(c)) return null;
+    const y = num(c.y);
+    if (!(y > 0.05 && y < 20)) return null;
+    return { y, word: c.word === "dry" ? "dry" : "raw" };
+  }
+  /* derive=true (custom foods): the one label profile is raw; cooked = raw ÷ y. */
+  function normCook(c, per100, derive) {
+    const o = cookLite(c); if (!o) return null;
+    if (!derive && isObj(c.per100gCooked)) o.per100gCooked = normPer(c.per100gCooked);
+    else if (isObj(per100)) { o.per100gCooked = {}; M.NUT.forEach(k => { o.per100gCooked[k] = r2(num(per100[k]) / o.y); }); }
+    const alts = normAlts(c.alts); if (alts.length) o.alts = alts;
+    return o;
+  }
+  function rawPer100(food) {
+    if (!isObj(food)) return null;
+    if (isObj(food.per100g)) return normPer(food.per100g);
+    const g = num(food.serving && food.serving.g);
+    if (g > 0 && isObj(food.per)) { const o = {}; M.NUT.forEach(k => { o[k] = num(food.per[k]) * 100 / g; }); return o; }
+    return null;
+  }
+  const perAt = (p100, g) => { const o = {}; M.NUT.forEach(k => { o[k] = r4(num(p100 && p100[k]) * g / 100); }); return o; };
+  function fracTxt(q) {
+    const w = Math.floor(q + 1e-9), rem = q - w;
+    const F = [[0, ""], [0.25, "1/4"], [1 / 3, "1/3"], [0.5, "1/2"], [2 / 3, "2/3"], [0.75, "3/4"], [1, ""]];
+    for (const x of F) {
+      if (Math.abs(rem - x[0]) <= 0.02) { const whole = x[0] === 1 ? w + 1 : w; return x[1] ? (whole ? whole + " " : "") + x[1] : String(whole); }
+    }
+    return String(r1(q));
+  }
+  function famOf(units) { return units === "metric" || units === "g" ? "g" : units === "lb" ? "lb" : "oz"; }
+  function fmtWeight(g, fam) {
+    if (fam === "g") return String(r0(g)) + " g";
+    if (fam === "lb") return String(r2(g / LB_G)) + " lb";
+    return String(r1(g / OZ_G)) + " oz";
+  }
+  const fmtVolume = (q, unit) => fracTxt(q) + " " + (unit === "cup" && q > 1.02 ? "cups" : unit);
+  function personUnits() { try { const p = M.person(); return p && p.units === "metric" ? "metric" : "us"; } catch (e) { return "us"; } }
+  function isWeightLabel(label) { const u = unitWord(M.parseServing(label).unit); return !!(u && WEIGHT_G[u]); }
+  /* Grams of ONE servingLabel. The label wins ("4 oz (113 g)", "6 oz raw", "1 g"):
+     describe items store g as the whole portion, entries store it per label. */
+  function unitGrams(e) {
+    if (!isObj(e)) return 0;
+    const sv = M.parseServing(e.servingLabel || ""), u = unitWord(sv.unit);
+    if (num(sv.g) > 0) return num(sv.g);
+    if (u && WEIGHT_G[u]) return (sv.qty || 1) * WEIGHT_G[u];
+    return num(e.g) > 0 ? num(e.g) : 0;
+  }
+
+  M.cook = {
+    OZ: OZ_G, LB: LB_G, UNIT_G: WEIGHT_G,
+    unitWord, fmtWeight, fmtVolume,
+    stepFor: unit => STEP[unit] || 0.25,
+    /* The food's cook info ({y, word, per100gCooked, alts}) or null. */
+    of(food) { return isObj(food) && cookLite(food.cook) ? food.cook : null; },
+    /* Old raw/cooked generic id → { id, state } (M.DB.alias from m-data.js). */
+    alias(id) {
+      try { const a = M.DB && M.DB.alias && M.DB.alias[id]; return isObj(a) && a.id ? { id: a.id, state: a.state === "cooked" ? "cooked" : "raw" } : null; }
+      catch (e) { return null; }
+    },
+    /* Nutrition per 100 g in a state ("raw" also means dry). */
+    per100(food, state) {
+      const raw = rawPer100(food), c = M.cook.of(food);
+      if (state !== "cooked" || !c) return raw;
+      if (isObj(c.per100gCooked)) return normPer(c.per100gCooked);
+      if (!raw) return null;
+      const o = {}; M.NUT.forEach(k => { o[k] = raw[k] / num(c.y); }); return o;
+    },
+    perFor(food, state, grams) { const p = M.cook.per100(food, state); return p ? M.foodMath.fromPer100(p, grams) : null; },
+    toRaw(grams, state, cook) { const c = cookLite(cook); return state === "cooked" ? (c ? grams / c.y : null) : grams; },
+    toCooked(grams, state, cook) { const c = cookLite(cook); return state === "cooked" ? grams : (c ? grams * c.y : null); },
+    /* label(170, "raw", {y:.7258}, "us") → "6 oz raw (4.4 oz cooked)"; "metric" → "170 g raw (123 g cooked)".
+       units: "us" | "metric" | "oz" | "g" | "lb". opt.vol = {unit:"cup", g:158}: the weighed side was measured by volume. */
+    label(grams, state, cook, units, opt) {
+      opt = isObj(opt) ? opt : {};
+      grams = Math.max(0, num(grams));
+      state = state === "cooked" ? "cooked" : "raw";
+      const c = cookLite(cook), fam = famOf(units);
+      const vol = isObj(opt.vol) && num(opt.vol.g) > 0 && opt.vol.unit ? opt.vol : null;
+      const side = (st, g) => (vol && st === state ? fmtVolume(g / num(vol.g), vol.unit) : fmtWeight(g, fam));
+      if (!c) return side(state, grams) + " " + (state === "cooked" ? "cooked" : opt.word === "dry" ? "dry" : "raw");
+      const raw = state === "cooked" ? grams / c.y : grams, cooked = state === "cooked" ? grams : grams * c.y;
+      return side("raw", raw) + " " + c.word + " (" + side("cooked", cooked) + " cooked)";
+    },
+    /* The food's own serving, raw first: "4 oz raw (2.9 oz cooked)", "1/4 cup dry (4.6 oz cooked)". */
+    servingLabel(food, units) {
+      const c = M.cook.of(food); if (!c) return "";
+      const sv = normServing(food.serving); if (!sv.g) return "";
+      const u = unitWord(sv.unit);
+      return M.cook.label(sv.g, "raw", c, units || personUnits(), { vol: u && VOLUME[u] ? { unit: u, g: sv.g / (sv.qty || 1) } : null });
+    },
+    /* Units for the servings screen: "oz raw", "oz cooked", "g raw", "g cooked", "lb raw", "lb cooked",
+       plus volume units ("cup dry", "cup cooked") from the food's portions. Each option:
+       { key, unit, state, label, g (grams of ONE unit), per (per ONE unit), step, vol }.
+       opt.only = "cooked" · opt.weights = ["oz","g"] · opt.cooked100 / opt.raw100 override the profiles. */
+    unitsFor(food, units, opt) {
+      opt = isObj(opt) ? opt : {};
+      const c = M.cook.of(food);
+      const only = opt.only === "cooked" ? "cooked" : null;
+      const raw100 = isObj(opt.raw100) ? normPer(opt.raw100) : rawPer100(food);
+      const ck100 = isObj(opt.cooked100) ? normPer(opt.cooked100) : (c ? M.cook.per100(food, "cooked") : null);
+      if (!ck100 || (!only && (!c || !raw100))) return [];
+      const states = only ? ["cooked"] : ["raw", "cooked"];
+      const word = c ? c.word : "raw";
+      const out = [];
+      const add = (unit, st, g, vol) => {
+        const key = unit + "-" + st;
+        if (!(g > 0) || out.some(o => o.key === key)) return;
+        out.push({ key, unit, state: st, label: unit + " " + (st === "cooked" ? "cooked" : word), g: r4(g), per: perAt(st === "cooked" ? ck100 : raw100, g), step: vol ? 0.25 : (STEP[unit] || 0.25), vol: !!vol });
+      };
+      const ws = Array.isArray(opt.weights) ? opt.weights : famOf(units) === "g" ? ["g", "oz", "lb"] : ["oz", "g", "lb"];
+      ws.forEach(u => { if (WEIGHT_G[u]) states.forEach(st => add(u, st, WEIGHT_G[u])); });
+      const vols = (list, st) => {
+        if (states.indexOf(st) < 0) return;
+        const byU = {};
+        (Array.isArray(list) ? list : []).forEach(a => {
+          if (!isObj(a) || !(num(a.g) > 0)) return;
+          const p = M.parseServing(a.label), u = unitWord(p.unit);
+          if (!u || !VOLUME[u]) return;
+          const q = p.qty || 1;
+          if (!byU[u] || Math.abs(q - 1) < Math.abs(byU[u].q - 1)) byU[u] = { q, g: num(a.g) / q };
+        });
+        Object.keys(byU).forEach(u => add(u, st, byU[u].g, true));
+      };
+      if (opt.vol !== false && isObj(food)) {
+        const sv = normServing(food.serving);
+        vols(normAlts(food.alts).concat(sv.g ? [{ label: sv.qty + " " + sv.unit, g: sv.g }] : []), "raw");
+        vols(c && c.alts, "cooked");
+      }
+      return out;
+    },
+    /* For an Entry / meal item / suggestion item: { state, cook, grams (in that state), fam, vol } or null.
+       Old entries on merged ids get their state from M.DB.alias. */
+    entryInfo(e) {
+      if (!isObj(e)) return null;
+      let state = e.state === "raw" || e.state === "cooked" ? e.state : null;
+      let cook = cookLite(e.cook);
+      if ((!state || !cook) && e.foodId) {
+        const al = M.cook.alias(e.foodId), f = M.foods.get(e.foodId), fc = cookLite(f && f.cook);
+        if (!state) state = al ? al.state : fc ? "raw" : null;
+        if (!cook) cook = fc;
+      }
+      if (!state) return null;
+      const sv = M.parseServing(e.servingLabel || ""), u = unitWord(sv.unit);
+      const g1 = unitGrams(e);
+      if (!(g1 > 0)) return null;
+      return { state, cook, grams: g1 * Math.max(0, num(e.servings, 1)), fam: u && WEIGHT_G[u] ? u : null, vol: u && VOLUME[u] ? { unit: u, g: g1 / (sv.qty || 1) } : null };
+    },
+    /* "6 oz raw (4.4 oz cooked)" for an entry-like, "" when it isn't a cook food. */
+    entryLabel(e, units) {
+      const i = M.cook.entryInfo(e); if (!i) return "";
+      return M.cook.label(i.grams, i.state, i.cook, i.fam || units || personUnits(), { vol: i.vol });
+    },
+    /* A copy of a cook food seen in its cooked state (serving / per / per100g /
+       alts all cooked). For code that only knows plain foods, e.g. describe. */
+    view(food, state) {
+      const c = M.cook.of(food);
+      if (!c || state !== "cooked") return food;
+      const p100 = M.cook.per100(food, "cooked"); if (!p100) return food;
+      const sv = normServing(food.serving), u = unitWord(sv.unit);
+      const cAlts = normAlts(c.alts);
+      let serving;
+      if (u && WEIGHT_G[u] && sv.g) serving = { qty: sv.qty, unit: sv.unit, g: sv.g };
+      else {
+        const vol = cAlts.filter(a => a.g && !isWeightLabel(a.label));
+        const a = vol.find(x => Math.abs((M.parseServing(x.label).qty || 1) - 1) < 1e-9) || vol[0] || cAlts[0];
+        if (a) { const p = M.parseServing(a.label); serving = { qty: p.qty || 1, unit: p.unit || "serving", g: a.g }; }
+        else serving = { qty: 100, unit: "g", g: 100 };
+      }
+      const wAlts = normAlts(food.alts).filter(a => isWeightLabel(a.label));
+      return Object.assign({}, food, { serving, per: M.foodMath.fromPer100(p100, serving.g), per100g: normPer(p100), alts: wAlts.concat(cAlts.filter(a => !wAlts.some(w => lc(w.label) === lc(a.label)))), state: "cooked" });
+    },
+    /* Raw grams of a list of items (cooked amounts are turned back into raw with y). */
+    rawTotal(items) {
+      let t = 0;
+      (Array.isArray(items) ? items : []).forEach(it => {
+        if (!isObj(it)) return;
+        const i = M.cook.entryInfo(it);
+        if (i) { t += i.state === "cooked" ? (i.cook ? i.grams / i.cook.y : i.grams) : i.grams; return; }
+        t += unitGrams(it) * Math.max(0, num(it.servings, 1));
+      });
+      return r1(t);
+    },
+    unitGrams,
+    /* Batch meals: {y, word:"raw"} from the batch's raw and cooked grams (null when unknown). */
+    batchCook(meal) {
+      const b = meal && meal.batch; if (!isObj(b)) return null;
+      const cg = num(b.cookedG), rg = num(b.rawG);
+      return cg > 0 && rg > 0 ? cookLite({ y: r4(cg / rg), word: "raw" }) : null;
+    },
+    /* Nutrition of `grams` cooked grams of a batch meal. */
+    batchPer(meal, grams) {
+      const cg = num(meal && meal.batch && meal.batch.cookedG);
+      return cg > 0 ? M.foodMath.scale(meal.per, num(grams) / cg) : M.foodMath.blank();
+    },
+    /* The display portion for batch macros: 4 oz (US) or 100 g (metric). */
+    portionG: units => (famOf(units || personUnits()) === "g" ? 100 : 4 * OZ_G),
+    batchSub(meal, units) { const cg = num(meal && meal.batch && meal.batch.cookedG); return cg > 0 ? "Batch · " + fmtWeight(cg, famOf(units || personUnits())) + " cooked" : ""; }
+  };
+
   /* ------------------------------------------------------------ generic DB */
   /* M.DB.generic is loaded by m-data.js AFTER this file; always read lazily. */
   let gCache = null, gCacheSrc = null;
@@ -305,7 +608,10 @@ window.M = window.M || {};
   function genericById(id) {
     const g = genericList();
     if (gCacheSrc !== g) { gCacheSrc = g; gCache = new Map(); g.forEach(f => { if (f && f.id) gCache.set(f.id, f); }); }
-    return gCache.get(id) || null;
+    const f = gCache.get(id);
+    if (f) return f;
+    const a = M.cook.alias(id);
+    return a ? gCache.get(a.id) || null : null;
   }
 
   /* ------------------------------------------------------------------ foods */
@@ -330,6 +636,8 @@ window.M = window.M || {};
     o.per = normPer(o.per);
     o.per100g = isObj(o.per100g) ? normPer(o.per100g) : null;
     o.alts = normAlts(o.alts);
+    o.cook = normCook(o.cook, o.per100g, o.source !== "generic");
+    if (!o.cook) delete o.cook;
     o.createdAt = num(o.createdAt) || now;
     o.updatedAt = now;
     o.uses = num(o.uses);
@@ -346,7 +654,7 @@ window.M = window.M || {};
       M.MS.foods[id] = merged; M.save(); return merged;
     },
     remove(id) { if (!M.MS.foods[id]) return false; delete M.MS.foods[id]; M.save(); return true; },
-    get(id) { return M.MS.foods[id] || genericById(id); },
+    get(id) { return M.MS.foods[id] || genericById(id); },   /* old raw/cooked generic ids resolve to the merged food */
     list() {
       return Object.values(M.MS.foods).sort((a, b) => num(b.lastUsed) - num(a.lastUsed) || num(b.updatedAt) - num(a.updatedAt) || lc(a.name).localeCompare(lc(b.name)));
     },
@@ -361,9 +669,26 @@ window.M = window.M || {};
   };
 
   /* ------------------------------------------------------------------ meals */
+  /* state/cook on entries and meal items: old merged ids → the new id + their
+     state; a cook food without a state was logged raw (its default); cook is
+     trimmed to {y, word}. Entries without a valid state carry neither field. */
+  function cookFields(o) {
+    const al = o.foodId ? M.cook.alias(o.foodId) : null;
+    const has = () => o.state === "raw" || o.state === "cooked";
+    if (al) { o.foodId = al.id; if (!has()) o.state = al.state; }
+    let ck = cookLite(o.cook);
+    if (o.foodId && (!ck || !has())) {
+      const f = M.foods.get(o.foodId), fc = cookLite(f && f.cook);
+      if (fc) { if (!ck) ck = fc; if (!has()) o.state = "raw"; }
+    }
+    if (has()) { if (ck) o.cook = ck; else delete o.cook; }
+    else { delete o.state; delete o.cook; }
+    return o;
+  }
   function normItem(it) {
     it = isObj(it) ? it : {};
     const o = Object.assign({}, it);
+    cookFields(o);
     o.id = o.id || M.uid();
     o.name = String(o.name || "Item").trim();
     o.brand = String(o.brand || "").trim();
@@ -386,6 +711,9 @@ window.M = window.M || {};
     o.slot = M.isSlot(o.slot) ? o.slot : "Any";
     o.items = (Array.isArray(o.items) ? o.items : []).map(normItem);
     o.servingsMade = num(o.servingsMade, 1) > 0 ? num(o.servingsMade, 1) : 1;
+    /* batch: per = the whole batch; rawG always recomputed from the items */
+    if (isObj(o.batch) && num(o.batch.cookedG) > 0) { o.servingsMade = 1; o.batch = { cookedG: r1(num(o.batch.cookedG)), rawG: M.cook.rawTotal(o.items) }; }
+    else delete o.batch;
     o.per = M.meals.computePer(o);
     o.createdAt = num(o.createdAt) || now;
     o.updatedAt = now;
@@ -447,8 +775,9 @@ window.M = window.M || {};
   /* -------------------------------------------------------------------- log */
   function normEntry(e) {
     e = isObj(e) ? e : {};
-    const food = e.foodId ? M.foods.get(e.foodId) : null;
-    const o = Object.assign({}, e);
+    const o = cookFields(Object.assign({}, e));
+    let food = o.foodId ? M.foods.get(o.foodId) : null;
+    if (food && o.state === "cooked") food = M.cook.view(food, "cooked");   /* fills below use the weighed state */
     o.id = o.id || M.uid();
     o.slot = M.isSlot(o.slot) ? o.slot : M.defaultSlot();
     o.name = String(o.name || (food && food.name) || "Food").trim();
@@ -495,9 +824,17 @@ window.M = window.M || {};
       return true;
     },
     move(dateKey, entryId, slot) { if (!M.isSlot(slot)) return null; return M.log.update(dateKey, entryId, { slot }); },
-    addMeal(dateKey, mealId, servings, slot) {
+    /* opt.grams (+ opt.unit "oz"|"g"|"lb") logs a portion of a batch meal by cooked
+       weight: per = the batch per one unit, so later edits to the meal never
+       change this day. */
+    addMeal(dateKey, mealId, servings, slot, opt) {
       const m = M.MS.meals[mealId]; if (!m) return [];
       const s = M.isSlot(slot) ? slot : (M.isSlot(m.slot) ? m.slot : M.defaultSlot());
+      if (isObj(m.batch) && num(m.batch.cookedG) > 0 && isObj(opt) && num(opt.grams) > 0) {
+        const u = WEIGHT_G[opt.unit] ? opt.unit : "oz", ug = WEIGHT_G[u], cg = num(m.batch.cookedG);
+        const per = {}; M.NUT.forEach(k => { per[k] = r4(num(m.per[k]) * ug / cg); });
+        return [M.log.add(dateKey, { slot: s, name: m.name, brand: "", servings: r4(num(opt.grams) / ug), servingLabel: "1 " + u + " cooked", g: r4(ug), per, mealId, state: "cooked", cook: M.cook.batchCook(m) })];
+      }
       const e = M.log.add(dateKey, { slot: s, name: m.name, brand: "", servings: num(servings, 1) > 0 ? num(servings, 1) : 1, servingLabel: "1 serving", g: null, per: m.per, mealId });
       return [e];
     },
@@ -607,7 +944,11 @@ window.M = window.M || {};
     if (!pid) return [];
     const from = M.addDays(M.today(), -59);
     const map = new Map();
-    const snap = e => ({ servingLabel: e.servingLabel || "1 serving", servings: num(e.servings, 1) || 1, g: num(e.g) > 0 ? num(e.g) : null, per: normPer(e.per), foodId: e.foodId || null, mealId: e.mealId || null, lastUsed: num(e.at) });
+    const snap = e => {
+      const o = { servingLabel: e.servingLabel || "1 serving", servings: num(e.servings, 1) || 1, g: num(e.g) > 0 ? num(e.g) : null, per: normPer(e.per), foodId: e.foodId || null, mealId: e.mealId || null, lastUsed: num(e.at) };
+      if (e.state === "raw" || e.state === "cooked") { o.state = e.state; if (cookLite(e.cook)) o.cook = cookLite(e.cook); }
+      return o;
+    };
     Object.values(M.MS.days).forEach(d => {
       if (!d || d.pid !== pid || d.date < from || !Array.isArray(d.entries)) return;
       d.entries.forEach(e => {
@@ -624,15 +965,16 @@ window.M = window.M || {};
   /* ----------------------------------------------------------------- search */
   const WORD_SPLIT = /[^\p{L}\p{N}%]+/u;
   function tokens(q) { return lc(q).split(WORD_SPLIT).filter(Boolean); }
-  /* -1 = no match; otherwise higher is better. Every token must hit name, brand or extra. */
-  function scoreText(toks, name, brand, extra) {
+  /* -1 = no match; otherwise higher is better. Every token must hit name, brand, kw or extra.
+     kw = words that count like name words ("raw" / "cooked" on meat, rice, pasta). */
+  function scoreText(toks, name, brand, extra, kw) {
     const n = lc(name), b = lc(brand), x = lc(extra);
-    const words = n.split(WORD_SPLIT).filter(Boolean);
+    const words = n.split(WORD_SPLIT).filter(Boolean), kws = lc(kw).split(WORD_SPLIT).filter(Boolean);
     let s = 0;
     for (const t of toks) {
       if (n === t) s += 60;
       else if (n.startsWith(t)) s += 30;
-      else if (words.some(w => w.startsWith(t))) s += 20;
+      else if (words.some(w => w.startsWith(t)) || kws.some(w => w.startsWith(t))) s += 20;
       else if (n.includes(t)) s += 10;
       else if (b.includes(t)) s += 6;
       else if (x.includes(t)) s += 3;
@@ -641,21 +983,36 @@ window.M = window.M || {};
     return s - Math.min(10, n.length / 8);
   }
   const usesBonus = o => Math.min(10, Math.log2(num(o.uses) + 1) * 2);
+  /* Cook foods also answer to "raw" / "dry" / "cooked" ("cooked chicken", "dry pasta"). */
+  const cookWords = f => { const c = M.cook.of(f); return c ? (c.word === "dry" ? "dry uncooked cooked" : "raw cooked") : ""; };
   function foodResult(kind, f) {
     const serving = normServing(f.serving);
-    return { kind, id: f.id, name: f.name, brand: f.brand || "", sub: M.fmtServing(serving), per: normPer(f.per), serving, alts: normAlts(f.alts), foodId: f.id, mealId: null, ref: f };
+    const r = { kind, id: f.id, name: f.name, brand: f.brand || "", sub: M.fmtServing(serving), per: normPer(f.per), serving, alts: normAlts(f.alts), foodId: f.id, mealId: null, ref: f };
+    const c = M.cook.of(f);
+    if (c) { r.cook = c; r.state = "raw"; const l = M.cook.servingLabel(f); if (l) r.sub = l; }
+    return r;
   }
   function mealResult(m) {
-    return { kind: "meal", id: m.id, name: m.name, brand: "", desc: m.desc || "", slot: m.slot, sub: "1 serving", per: normPer(m.per), serving: { qty: 1, unit: "serving", g: null }, alts: [], foodId: null, mealId: m.id, ref: m };
+    const r = { kind: "meal", id: m.id, name: m.name, brand: "", desc: m.desc || "", slot: m.slot, sub: "1 serving", per: normPer(m.per), serving: { qty: 1, unit: "serving", g: null }, alts: [], foodId: null, mealId: m.id, ref: m };
+    if (isObj(m.batch) && num(m.batch.cookedG) > 0) {
+      const u = personUnits(), pg = M.cook.portionG(u);
+      Object.assign(r, { batch: true, portionG: pg, per: M.cook.batchPer(m, pg), sub: M.cook.batchSub(m, u), portion: "per " + fmtWeight(pg, famOf(u)) });
+    }
+    return r;
   }
   function recentResult(rc) {
     const f = rc.foodId ? M.foods.get(rc.foodId) : null;
     const serving = f ? normServing(f.serving) : Object.assign(M.parseServing(rc.servingLabel), rc.g ? { g: rc.g } : {});
-    return { kind: "recent", id: "r:" + lc(rc.name) + "|" + lc(rc.brand), name: rc.name, brand: rc.brand || "", sub: rc.servingLabel || "1 serving", per: normPer(rc.per), serving, alts: f ? normAlts(f.alts) : [], foodId: rc.foodId || null, mealId: rc.mealId || null, ref: rc };
+    const r = { kind: "recent", id: "r:" + lc(rc.name) + "|" + lc(rc.brand), name: rc.name, brand: rc.brand || "", sub: rc.servingLabel || "1 serving", per: normPer(rc.per), serving, alts: f ? normAlts(f.alts) : [], foodId: rc.foodId || null, mealId: rc.mealId || null, ref: rc };
+    if (rc.state) { r.state = rc.state; r.cook = rc.cook || (f && cookLite(f.cook)) || null; }
+    return r;
   }
+  /* opt.recents === false / opt.meals === false leave those out (the add sheet's Foods list),
+     so a food already logged still shows up as a food instead of being folded into its recent. */
   M.search = function (q, opt) {
     opt = isObj(opt) ? opt : {};
     const pid = opt.pid || M.pid(), slot = opt.slot, limit = num(opt.limit, 40) || 40;
+    const wantRecents = opt.recents !== false, wantMeals = opt.meals !== false;
     const toks = tokens(q);
     const out = [], seen = new Set();
     /* Dedupe: same kind+name+brand, or a food/meal a recent already points at. */
@@ -669,8 +1026,8 @@ window.M = window.M || {};
       return true;
     };
     if (!toks.length) {
-      M.recents(pid, 10).forEach(rc => push(recentResult(rc)));
-      const meals = M.meals.list();
+      if (wantRecents) M.recents(pid, 10).forEach(rc => push(recentResult(rc)));
+      const meals = wantMeals ? M.meals.list() : [];
       if (slot) meals.filter(m => m.slot === slot).forEach(m => push(mealResult(m)));
       meals.filter(m => m.slot === "Any").forEach(m => push(mealResult(m)));
       meals.forEach(m => push(mealResult(m)));
@@ -679,15 +1036,16 @@ window.M = window.M || {};
     }
     const qn = lc(q).trim();
     const scored = [];
-    const consider = (r, bonus, extra) => {
-      const s = scoreText(toks, r.name, r.brand, extra);
+    const consider = (r, bonus, extra, kw) => {
+      const s = scoreText(toks, r.name, r.brand, extra, kw);
       if (s < 0) return;
       scored.push({ r, s: s + bonus + (lc(r.name) === qn ? 40 : 0) });
     };
-    M.recents(pid, 40).forEach((rc, i) => consider(recentResult(rc), 25 + Math.max(0, 10 - i / 4)));
-    M.meals.list().forEach(m => consider(mealResult(m), 15 + (slot && m.slot === slot ? 15 : m.slot === "Any" ? 6 : 0) + usesBonus(m), m.desc));
-    M.foods.list().forEach(f => consider(foodResult("food", f), 10 + usesBonus(f)));
-    genericList().forEach(f => { if (f && f.name) consider(foodResult("generic", f), 0); });
+    if (wantRecents) M.recents(pid, 40).forEach((rc, i) => consider(recentResult(rc), 25 + Math.max(0, 10 - i / 4)));
+    if (wantMeals) M.meals.list().forEach(m => consider(mealResult(m), 15 + (slot && m.slot === slot ? 15 : m.slot === "Any" ? 6 : 0) + usesBonus(m), m.desc));
+    M.foods.list().forEach(f => consider(foodResult("food", f), 10 + usesBonus(f), "", cookWords(f)));
+    /* plain meat / fish / rice / pasta (the cook foods) edge out mixed dishes that share a word */
+    genericList().forEach(f => { if (f && f.name) consider(foodResult("generic", f), M.cook.of(f) ? 3 : 0, "", cookWords(f)); });
     scored.sort((a, b) => b.s - a.s || lc(a.r.name).localeCompare(lc(b.r.name)));
     for (const x of scored) { if (out.length >= limit) break; push(x.r); }
     return out;

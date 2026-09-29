@@ -158,3 +158,68 @@
 /* "Not here? Add it as a new food" row at the end of search results */
 .m-addnew{display:block;width:100%;text-align:left;padding:14px 4px;border-top:1px solid var(--line);color:var(--acc);font-size:15px;min-height:48px}
 .m-addnew b{font-weight:700;margin-right:4px}
+
+/* ---- raw (cooked) amounts on the servings screen ---- */
+.m-det-amt{margin:10px 2px 0;font-size:15px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums}
+.m-det-of{margin:8px 2px 0;font-size:13px;font-weight:600;color:var(--mut);text-align:center;font-variant-numeric:tabular-nums}
+.m-howmuch{font-family:"Barlow Condensed","Barlow",sans-serif;font-size:20px;font-weight:600;margin:0 0 8px}
+.m-useg{display:flex;width:100%}
+.m-useg button{flex:1;min-height:52px;font-size:17px}
+.m-det-inmeal{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.m-batchinfo{margin:0 0 6px}
+.m-batchinfo .t{font-size:13px;color:var(--mut);font-variant-numeric:tabular-nums}
+
+/* ---- suggestion items with amounts ---- */
+.m-sugitems{list-style:none;margin:8px 0 0;padding:0;font-size:13px}
+.m-sugitems li{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:5px 0;border-top:1px solid var(--line)}
+.m-sugitems li:first-child{border-top:0}
+.m-sugitems .n{min-width:0;overflow-wrap:anywhere}
+.m-sugitems .n{flex:1}
+.m-sugitems .a{color:var(--mut);text-align:right;white-space:nowrap;flex:none;font-variant-numeric:tabular-nums}
+
+/* ---- meal builder: cooked as a batch ---- */
+.m-mbslot{grid-column:span 2}
+.m-mbrow.batch .m-mbslot{grid-column:1/-1}
+.m-mbrow.batch .m-mbsm{display:none}
+.m-batch{margin-top:12px;border-top:1px solid var(--line);padding-top:4px}
+.m-switch{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:52px;text-align:left;font-weight:600;font-size:16px}
+.m-switch-t{min-width:0}
+.m-batchbox{padding:2px 0 4px}
+.m-wrow{display:flex;gap:8px;align-items:stretch}
+.m-wrow input{flex:1;min-width:0}
+.m-wseg{flex:none}
+.m-wseg button{min-height:44px;min-width:46px}
+
+/* ---- food form: weighs less after cooking? ---- */
+.m-cookseg{margin:0}
+.m-cookseg button{font-size:14px;padding:11px 4px}
+.m-cookrow{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;font-size:15px}
+.m-cookrow span{color:var(--mut)}
+.m-f .m-cookrow input[type="number"]{width:86px;flex:none;text-align:center}
+
+/* ---- Train → Today summary ---- */
+.m-trainsum{padding:10px 12px}
+.m-ts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;align-items:center;gap:12px}
+.m-ts-v{font-size:13px;color:var(--mut);white-space:nowrap;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
+.m-ts-v b{font-family:"Barlow Condensed","Barlow",sans-serif;font-size:22px;font-weight:700;color:var(--ink)}
+.m-ts-k{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin-top:1px;white-space:nowrap}
+.m-ts-bar{height:5px;border-radius:3px;background:var(--sur2);overflow:hidden;margin-top:6px}
+.m-ts-bar i{display:block;height:100%;border-radius:3px;background:var(--carb)}
+.m-ts-c.pro .m-ts-bar i{background:var(--pro)}
+.m-ts-c.over .m-ts-bar i{background:var(--warn)}
+.m-ts-go{min-height:44px;padding:0 14px;font-size:17px}
+
+/* ---- storage full ---- */
+.m-warn{border-color:var(--warn);background:var(--warn-soft)}
+.m-warn .bd{padding:12px 14px;font-size:14px;line-height:1.35}
+.m-warn b{color:var(--warn)}
+
+/* Chalk's .stats (3 columns) loads after this file: win on specificity so the four
+   kcal / protein / carbs / fat tiles stay on one row; the unit select matches the stepper. */
+.stats.m-live,.stats.m-stats4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.stats.m-live .stat .v,.stats.m-stats4 .stat .v{white-space:nowrap}
+.m-det-grid select.sel{min-height:54px}
+@media (max-width:380px){
+  .stats.m-live .stat .v,.stats.m-stats4 .stat .v{font-size:20px}
+  .stats.m-live .stat .v small,.stats.m-stats4 .stat .v small{font-size:11px;margin-left:1px}
+}

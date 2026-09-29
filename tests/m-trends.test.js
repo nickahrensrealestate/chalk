@@ -88,6 +88,7 @@ function change(sel, value) {
   return M.ui.changes[name](el, { target: el });
 }
 const count = (html, re) => (html.match(re) || []).length;
+const fmt = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, (msg || "") + " expected " + a + " ≈ " + b + " (±" + tol + ")");
 
 const tests = [];
@@ -562,6 +563,207 @@ t("AI card: save / remove key, model select, Test toasts the result", async () =
   click('[data-m="t-ai-remove"]');
   assert.strictEqual(M.ai.getKey(), "");
   assert.ok(/No Claude yet/.test(M.ui.views.you()));
+});
+
+/* ======================================================================= */
+t("You form: a field change never re-renders — values and targets patch in place (iPhone keeps the keyboard)", () => {
+  M.ui.tab = "you";
+  M.reset(); M.trends.resetDraft();
+  const p = M.person("nick");
+  Object.assign(p, { sex: "m", age: 38, heightIn: 71, weightLb: 185, goalWeightLb: 175, activity: "active", pace: -1 });
+  M.calc.applyTargets(p);
+  M.checkins.done("nick", "setup");
+  show(M.ui.views.you());
+  const q = f => $('[data-m="t-num"][data-f="' + f + '"]');
+  const weight = q("weight"), goal = q("goal"), age = q("age"), box = $("#mt-tbox");
+  assert.ok(box && box.querySelector(".mt-tgrid"), "targets live in #mt-tbox");
+  /* the person typed a weight, then tapped Goal: the change event fires while Goal has focus */
+  goal.focus();
+  assert.strictEqual(document.activeElement, goal);
+  const before = renders, oldCal = p.targets.cal;
+  NOW += 1000;
+  change(weight, 180);
+  assert.strictEqual(renders, before, "no re-render");
+  assert.strictEqual(q("weight"), weight, "same weight box");
+  assert.strictEqual(q("goal"), goal, "same goal box");
+  assert.strictEqual(document.activeElement, goal, "focus stays where the person tapped");
+  assert.strictEqual($("#mt-tbox"), box, "same targets box");
+  assert.ok(p.targets.cal < oldCal && p.targets.p === 180);
+  assert.ok(box.innerHTML.indexOf(">" + fmt(p.targets.cal) + "<small>kcal</small>") > 0, "kcal patched in place");
+  assert.ok(/>180<small>g<\/small>/.test(box.innerHTML), "protein patched in place");
+  assert.ok(/Last weigh-in Sep 28/.test($("#mt-ci-body").innerHTML), "check-in line patched");
+  assert.strictEqual(p.updatedAt, NOW, "edit time stamped for sync");
+  /* cleaned-up values go back into the boxes */
+  change(age, 150);
+  assert.strictEqual(p.age, 120); assert.strictEqual(age.value, "120");
+  change(weight, "");
+  assert.strictEqual(p.weightLb, 180, "blank weight ignored"); assert.strictEqual(weight.value, "180", "box shows the kept weight");
+  q("hft").value = "5"; change(q("hin"), 13);
+  assert.strictEqual(p.heightIn, 73); assert.strictEqual(q("hft").value, "6"); assert.strictEqual(q("hin").value, "1");
+  p.heightIn = 71.6; M.save(); show(M.ui.views.you());
+  assert.strictEqual(q("hft").value, "6"); assert.strictEqual(q("hin").value, "0", "71.6 in shows 6 ft 0 in, not 5 ft 12 in");
+  /* selects patch too */
+  const sel = $('[data-m="t-num"][data-f="activity"]'), cal1 = p.targets.cal;
+  change(sel, "light");
+  assert.strictEqual(renders, before); assert.strictEqual($('[data-m="t-num"][data-f="activity"]'), sel);
+  assert.ok(p.targets.cal < cal1 && $("#mt-tbox").innerHTML.indexOf(fmt(p.targets.cal)) > 0);
+  /* incomplete numbers → the note says so, in place */
+  change(q("age"), "");
+  assert.strictEqual(p.age, null);
+  assert.ok(/Fill in sex, age, height and weight/.test($("#mt-tbox").innerHTML));
+  change(q("age"), 38);
+  /* manual targets: the grid holds inputs, so a numbers change leaves it alone */
+  click('[data-m="t-manual"]');
+  show(M.ui.views.you());
+  const tIn = $('[data-m="t-target"][data-f="cal"]');
+  tIn.focus();
+  const r2 = renders;
+  change(q("weight"), 182);
+  assert.strictEqual(renders, r2);
+  assert.strictEqual($('[data-m="t-target"][data-f="cal"]'), tIn, "manual input untouched");
+  assert.strictEqual(document.activeElement, tIn);
+  click('[data-m="t-manual"]');
+  tIn.blur();
+});
+
+t("Sync & backup card: not set up · off · join · on · sync now · restore (two taps) · turn off (two taps)", async () => {
+  M.ui.tab = "you";
+  M.reset(); M.trends.resetDraft(); toasts.length = 0;
+  const p = M.person("nick");
+  Object.assign(p, { sex: "m", age: 38, heightIn: 71, weightLb: 185, activity: "moderate", pace: 0 });
+  M.calc.applyTargets(p); M.checkins.done("nick", "setup");
+  const had = M.cloud;
+  try {
+    /* m-sync.js not loaded at all */
+    delete M.cloud;
+    let html = M.ui.views.you();
+    assert.ok(/Sync &amp; backup<\/h3>/.test(html) && /Cloud sync isn't set up yet\./.test(html));
+    assert.ok(html.indexOf("Sync &amp; backup") < html.indexOf("Person</h3>"), "sits above Person");
+    const calls = [];
+    const fake = {
+      conf: false, st: { on: false, code: "", lastSync: 0, lastError: "", pending: 0, busy: false }, tr: null, joinResult: null, restoreResult: false,
+      configured() { return this.conf; }, status() { return Object.assign({}, this.st); },
+      create() { calls.push("create"); Object.assign(this.st, { on: true, code: "ABCDEFGHJKLMNPQRSTUV" }); return this.st.code; },
+      join(v) { calls.push("join:" + v); return Promise.resolve(this.joinResult); },
+      leave() { calls.push("leave"); Object.assign(this.st, { on: false, code: "" }); return true; },
+      syncNow() { calls.push("sync"); this.st.lastSync = NOW; return Promise.resolve({ ok: true }); },
+      hasTrainingBackup() { calls.push("has"); return Promise.resolve(!!this.tr); },
+      restoreTraining() { calls.push("restore"); return Promise.resolve(this.restoreResult); },
+      training() { return this.tr; },
+      fmtCode(c) { return String(c).replace(/(.{4})(?=.)/g, "$1-"); }
+    };
+    M.cloud = fake;
+    assert.ok(/Cloud sync isn't set up yet\./.test(M.ui.views.you()), "not configured");
+    /* off */
+    fake.conf = true;
+    html = M.ui.views.you(); show(html);
+    assert.ok(/Share foods and meals between your phones and keep a backup\./.test(html));
+    assert.ok($('[data-m="t-sync-on"]') && $('[data-m="t-sync-joinshow"]'));
+    assert.strictEqual($("#mt-join").hidden, true, "join box starts hidden");
+    click('[data-m="t-sync-joinshow"]');
+    assert.strictEqual($("#mt-join").hidden, false);
+    assert.strictEqual($("#mt-join-code").getAttribute("autocapitalize"), "characters");
+    assert.strictEqual(document.activeElement, $("#mt-join-code"), "keyboard comes up on the code box");
+    await click('[data-m="t-sync-join"]');
+    assert.ok(/Type the code from the other phone/.test($("#mt-join-msg").textContent) && !$("#mt-join-msg").hidden);
+    assert.ok(!calls.some(c => /^join/.test(c)), "empty code → no call");
+    fake.joinResult = { ok: false, error: "No one is using that code yet. Check it on the other phone." };
+    $("#mt-join-code").value = "abcd-efgh-jklm-npqr-stuv";
+    $("#mt-join-code").focus();
+    await click('[data-m="t-sync-join"]');
+    assert.notStrictEqual(document.activeElement, $("#mt-join-code"), "Join puts the keyboard away (so the re-render isn't held back)");
+    assert.ok(calls.indexOf("join:abcd-efgh-jklm-npqr-stuv") >= 0, "typed code handed over as typed");
+    assert.strictEqual($("#mt-join-msg").textContent, fake.joinResult.error);
+    assert.strictEqual($('[data-m="t-sync-join"]').disabled, false, "button back");
+    assert.strictEqual($('[data-m="t-sync-join"]').textContent, "Join");
+    assert.strictEqual($("#mt-join-code").value, "abcd-efgh-jklm-npqr-stuv", "typed code kept");
+    fake.joinResult = { ok: true };
+    let r = renders;
+    $("#mt-join-code").focus();
+    await click('[data-m="t-sync-join"]');
+    assert.ok(renders > r && /Joined/.test(toasts[toasts.length - 1]), "joined → re-render");
+    fake.leave(); calls.length = 0;
+    /* turn on */
+    show(M.ui.views.you());
+    r = renders;
+    click('[data-m="t-sync-on"]');
+    assert.ok(calls.indexOf("create") >= 0 && renders > r && /Sync is on/.test(toasts[toasts.length - 1]));
+    html = M.ui.views.you(); show(html);
+    assert.ok(/ABCD-EFGH-JKLM-NPQR-STUV/.test($("#mt-code").textContent), "code in groups of 4");
+    assert.ok(/Type this code on the other phone/.test(html));
+    assert.ok(/Not synced yet/.test($("#mt-sync-status").textContent));
+    assert.ok(!$('[data-m="t-sync-restore"]'), "no restore without a backup");
+    await new Promise(res => setTimeout(res, 5));
+    assert.ok(calls.indexOf("has") >= 0, "asked the cloud about a training backup");
+    /* sync now → status patched in place */
+    const status = $("#mt-sync-status");
+    await click('[data-m="t-sync-now"]');
+    assert.ok(calls.indexOf("sync") >= 0);
+    assert.strictEqual($("#mt-sync-status"), status, "same node");
+    assert.strictEqual(status.textContent, "Synced just now");
+    assert.ok(status.classList.contains("ok"));
+    NOW += 2 * 60e3; M.trends.patchSync();
+    assert.strictEqual(status.textContent, "Synced 2 min ago");
+    fake.st.lastError = "Can't reach the internet. We'll try again soon."; fake.st.pending = 3;
+    M.trends.patchSync();
+    assert.ok(status.classList.contains("warn") && /Can't reach the internet\. We'll try again soon\. 3 changes waiting\./.test(status.textContent));
+    fake.st.lastError = ""; fake.st.pending = 0;
+    /* copy: no clipboard here → the fallback tells what to do */
+    await click('[data-m="t-sync-copy"]');
+    assert.ok(/Press and hold the code/.test(toasts[toasts.length - 1]));
+    /* the cloud has workouts this phone doesn't → the restore part appears in place */
+    fake.tr = { pid: "nick", t: NOW - DAY, n: 150, last: NOW - 2 * DAY, same: false, mine: false, missing: 150, held: true, busy: false };
+    M.trends.patchSync();
+    let rb = $('[data-m="t-sync-restore"]');
+    assert.ok(rb, "restore button added");
+    assert.ok(/<b>150 workouts<\/b> in the cloud aren't on this phone\./.test($("#mt-restore").innerHTML));
+    assert.ok(/replaces the training history on this phone/.test($("#mt-restore").textContent));
+    assert.strictEqual($("#mt-restore").nextElementSibling, $('[data-m="t-sync-off"]'), "above Turn off");
+    fake.restoreResult = false;
+    click(rb);
+    assert.strictEqual(calls.indexOf("restore"), -1, "first tap only arms");
+    assert.ok(/Tap again/.test(rb.textContent) && rb.classList.contains("mt-armed"));
+    M.trends.patchSync();
+    assert.strictEqual($('[data-m="t-sync-restore"]'), rb, "an armed button survives a status patch");
+    await click(rb);
+    assert.ok(calls.indexOf("restore") >= 0);
+    assert.ok(/Couldn't restore/.test(toasts[toasts.length - 1]));
+    rb = $('[data-m="t-sync-restore"]');
+    assert.strictEqual(rb.textContent, "Restore training backup");
+    assert.strictEqual(rb.disabled, false);
+    fake.restoreResult = true;
+    click(rb); await click(rb);
+    assert.ok(/Training restored/.test(toasts[toasts.length - 1]));
+    /* mid-workout: can't restore yet */
+    fake.tr = Object.assign({}, fake.tr, { busy: true });
+    html = M.ui.views.you();
+    assert.ok(/data-m="t-sync-restore" disabled/.test(html) && /Finish today's workout first/.test(html));
+    fake.tr = { pid: "nick", t: NOW - DAY, n: 4, last: NOW, same: false, mine: false, missing: 1, held: true, busy: false };
+    assert.ok(/<b>1 workout<\/b> in the cloud isn't on this phone\./.test(M.ui.views.you()), "singular reads right");
+    /* another phone's copy with nothing this phone lacks: still offered, with its date */
+    fake.tr = { pid: "nick", t: NOW - DAY, n: 3, last: NOW - DAY, same: false, mine: false, missing: 0, held: false, busy: false };
+    html = M.ui.views.you();
+    assert.ok(/Training backup: 3 workouts, saved Sep \d+, 2026\./.test(html) && /data-m="t-sync-restore"/.test(html));
+    /* nothing to get back → no button: this phone's own backup, a copy equal to this phone, an empty one */
+    [{ mine: true, same: false }, { mine: false, same: true }, { mine: false, same: false, n: 0 }].forEach(x => {
+      fake.tr = Object.assign({ pid: "nick", t: NOW, n: 3, last: NOW, missing: 0, held: false, busy: false }, x);
+      assert.ok(!/data-m="t-sync-restore"/.test(M.ui.views.you()), "no restore for " + JSON.stringify(x));
+    });
+    fake.tr = null;
+    /* turn off: two taps */
+    show(M.ui.views.you());
+    const off = $('[data-m="t-sync-off"]');
+    click(off);
+    assert.strictEqual(calls.indexOf("leave"), -1, "first tap only arms");
+    assert.strictEqual(off.textContent, "Tap again to turn off");
+    r = renders;
+    click(off);
+    assert.ok(calls.indexOf("leave") >= 0 && renders > r);
+    assert.ok(/Sync is off/.test(toasts[toasts.length - 1]));
+    assert.ok(/Share foods and meals/.test(M.ui.views.you()), "back to the off state");
+  } finally {
+    if (had) M.cloud = had; else delete M.cloud;
+  }
 });
 
 t("no person: views and cards degrade, actions never throw", () => {

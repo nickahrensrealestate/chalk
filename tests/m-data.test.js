@@ -15,6 +15,7 @@ const NUT = ["cal", "p", "c", "f", "fiber", "sugar", "sodium"];
 const SLOTS = ["Breakfast", "Lunch", "Dinner", "Snacks"];
 const STORES = ["King Soopers", "Costco", "Either"];
 const isNum = v => typeof v === "number" && isFinite(v);
+const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, (msg || "") + " expected " + a + " ≈ " + b + " (±" + tol + ")");
 const COUNT_UNITS = /^(spray|sprays|packet|packets|serving|servings|piece|pieces)$/i;
 
 const tests = [];
@@ -105,6 +106,8 @@ t("generic: alcohol items are flagged and plausible (kcal ≥ macro kcal)", () =
 
 t("generic: their staples and plain basics are covered", () => {
   const ids = new Set(M.DB.generic.map(f => f.id));
+  /* old raw/cooked ids live on as aliases of the merged food */
+  Object.keys(M.DB.alias).forEach(id => { ids.add(id); });
   [ /* what Nick and Katerina actually buy */
     "g_kirkland_organic_chicken", "g_pork_tenderloin_raw", "g_pork_tenderloin_cooked", "g_dkb_21_grains", "g_dkb_thin", "g_dkb_good_seed",
     "g_zucchini_raw", "g_zucchini", "g_broccoli_raw", "g_broccoli_cooked", "g_carrots", "g_carrots_cooked", "g_roma_tomato", "g_onion", "g_sweet_onion",
@@ -187,17 +190,64 @@ t("suggest: calories match macros (±15% + 10 kcal) and meals are high-protein",
   });
 });
 
-t("suggest: items reference generic foods with matching macros", () => {
+t("suggest: items reference generic foods with matching macros (cooked items use the cooked profile)", () => {
   const byId = new Map(M.DB.generic.map(f => [f.id, f]));
   M.DB.suggest.forEach(s => s.items.forEach(x => {
     const f = byId.get(x.foodId);
     assert.ok(f, s.id + " item '" + x.name + "' has no generic food");
     assert.strictEqual(x.name, f.name, s.id + " item name differs from food");
-    if (x.g && f.per100g) {
-      const e = f.per100g.cal * x.g / 100;
+    const p100 = x.state === "cooked" ? f.cook && f.cook.per100gCooked : f.per100g;
+    if (x.g && p100) {
+      const e = p100.cal * x.g / 100;
       assert.ok(Math.abs(e - x.per.cal) <= Math.max(3, 0.05 * e), s.id + " item " + x.name + " cal " + x.per.cal + " vs per100g×g " + e.toFixed(1));
     }
   }));
+});
+
+/* ---- raw ↔ cooked ---- */
+const PAIRS = { chicken_breast: "raw", chicken_thigh: "raw", ground_beef_80: "raw", ground_beef_85: "raw", ground_beef_90: "raw", ground_beef_93: "raw", ground_turkey_93: "raw", pork_tenderloin: "raw", salmon: "raw", white_rice: "dry", pasta: "dry" };
+t("cook foods: each raw/cooked pair is ONE food with both profiles; y from the pair", () => {
+  const byId = new Map(M.DB.generic.map(f => [f.id, f]));
+  Object.keys(PAIRS).forEach(slug => {
+    const f = byId.get("g_" + slug), word = PAIRS[slug];
+    assert.ok(f, "missing merged g_" + slug);
+    assert.ok(!byId.has("g_" + slug + "_" + word) && !byId.has("g_" + slug + "_cooked"), slug + ": the old pair is gone");
+    assert.ok(!/\b(raw|cooked|dry|uncooked)\b/i.test(f.name), "plain name: " + f.name);
+    const c = f.cook;
+    assert.ok(c && c.word === word && c.per100gCooked && Array.isArray(c.alts), slug + " cook");
+    const want = word === "dry" ? f.per100g.cal / c.per100gCooked.cal : f.per100g.p / c.per100gCooked.p;
+    assert.ok(Math.abs(c.y - want) < 1e-4, slug + " y " + c.y + " vs " + want);
+    assert.ok(word === "dry" ? c.y > 1 : c.y < 1, slug + ": meat weighs less cooked, grains more");
+    NUT.forEach(k => assert.ok(isNum(c.per100gCooked[k]) && c.per100gCooked[k] >= 0, slug + " cooked " + k));
+    /* serving / per / per100g stay the raw (dry) state */
+    near(f.per.cal, f.per100g.cal * f.serving.g / 100, Math.max(2, 0.02 * f.per.cal), slug + " per is raw");
+    assert.deepStrictEqual(M.DB.alias["g_" + slug + "_" + word], { id: f.id, state: "raw" });
+    assert.deepStrictEqual(M.DB.alias["g_" + slug + "_cooked"], { id: f.id, state: "cooked" });
+  });
+  assert.strictEqual(Object.keys(M.DB.alias).length, 22, "every old id has an alias");
+  Object.values(M.DB.alias).forEach(a => assert.ok(byId.has(a.id), "alias target " + a.id));
+  const k = byId.get("g_kirkland_organic_chicken"), cb = byId.get("g_chicken_breast");
+  assert.ok(k.cook && k.cook.y === cb.cook.y && JSON.stringify(k.cook.per100gCooked) === JSON.stringify(cb.cook.per100gCooked), "Kirkland uses chicken breast's cooked profile");
+  assert.ok(!/raw/i.test(k.name), k.name);
+  /* numbers in the spec */
+  assert.ok(Math.abs(6 * 28.3495 * cb.cook.y / 28.3495 - 4.35) < 0.01, "6 oz raw chicken ≈ 4.4 oz cooked");
+  assert.ok(Math.abs(2 * byId.get("g_white_rice").cook.y - 5.6) < 0.05, "2 oz dry rice ≈ 5.6 oz cooked");
+  const cups = byId.get("g_white_rice").cook.alts.find(a => a.label === "1 cup");
+  assert.strictEqual(cups && cups.g, 158, "1 cup cooked rice = 158 g");
+});
+
+t("suggest: cook items say which weight they are and carry y", () => {
+  const byId = new Map(M.DB.generic.map(f => [f.id, f]));
+  let n = 0;
+  M.DB.suggest.forEach(s => s.items.forEach(x => {
+    const f = byId.get(x.foodId);
+    if (!f.cook) { assert.ok(!x.state && !x.cook, s.id + " plain item has no state"); return; }
+    n++;
+    assert.ok(x.state === "raw" || x.state === "cooked", s.id + " " + x.name + " state");
+    assert.deepStrictEqual(x.cook, { y: f.cook.y, word: f.cook.word }, s.id + " cook");
+    assert.ok(new RegExp("^[\\d/ .]+ (oz|cup|cups) (" + (x.state === "cooked" ? "cooked" : f.cook.word) + ")$").test(x.servingLabel), s.id + " label " + x.servingLabel);
+  }));
+  assert.ok(n >= 10, "chicken, pork, rice and pasta items are cook items (" + n + ")");
 });
 
 /* ---- run ---- */

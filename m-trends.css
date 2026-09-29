@@ -72,16 +72,41 @@
 .mt-sumrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 14px 4px}
 .mt-tgrid{grid-template-columns:repeat(3,1fr);padding:0 14px;margin:8px 0 4px}
 .mt-tgrid .stat .v input.mini{height:36px;font-size:22px;width:100%}
-.mt-card>.hint{padding:0 14px 8px;margin:0}
+.mt-card>.hint,.mt-tbox>.hint{padding:0 14px 8px;margin:0}
 
 /* You: AI card */
 .mt-status{display:flex;align-items:flex-start;gap:8px;font-size:14px;line-height:1.35;margin:2px 0 10px}
 .mt-status i{width:10px;height:10px;border-radius:50%;background:var(--mut);flex:none;margin-top:5px}
 .mt-status.ok i{background:var(--ok)}
 .mt-key{display:flex;gap:8px;align-items:center}
-.mt-key input{flex:1;min-width:0;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--sur2);color:var(--ink);padding:0 12px;font-family:ui-monospace,Menlo,monospace;font-size:14px}
+.mt-key input{flex:1;min-width:0;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--sur2);color:var(--ink);padding:0 12px;font-family:ui-monospace,Menlo,monospace;font-size:16px}
 .mt-key .btn{flex:none;padding:0 14px}
 .mt-row #mt-ai-msg{min-width:0}
+
+/* You: sync & backup */
+.mt-sync .bd>.hint{margin:0 0 10px}
+.mt-quiet{color:var(--mut);margin:0}
+.mt-code{background:var(--sur2);border:1px solid var(--line);border-radius:12px;padding:10px 8px;margin:2px 0 8px;text-align:center;font-family:"Barlow Condensed","Barlow",sans-serif;font-size:22px;font-weight:700;letter-spacing:.05em;line-height:1.15;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;-webkit-user-select:all;user-select:all}
+.mt-coderow{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.mt-coderow .hint{flex:1;min-width:0;margin:0}
+.mt-coderow .btn{flex:none}
+.mt-syncrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 8px}
+.mt-syncrow .mt-status{flex:1;min-width:0;margin:0}
+.mt-syncrow .btn{flex:none}
+.mt-status.warn i{background:var(--warn)}
+.mt-restore{border-top:1px solid var(--line);padding-top:10px;margin:0 0 4px}
+.mt-restore .mt-text{margin:0 0 8px}
+.mt-restore .hint{margin:6px 0 0}
+.mt-off{margin-top:8px}
+.btn.mt-armed{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.mt-join{margin-top:12px}
+.mt-join[hidden],.mt-sync [hidden]{display:none}
+.mt-join>.hint{margin:0 0 6px}
+.mt-joinrow{display:flex;gap:8px;align-items:center}
+.mt-joinrow input{flex:1;min-width:0;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--sur2);color:var(--ink);padding:0 10px;font-family:"Barlow Condensed","Barlow",sans-serif;font-size:19px;font-weight:600;letter-spacing:.03em;text-transform:uppercase}
+.mt-joinrow input::placeholder{color:var(--mut);opacity:.75}
+.mt-joinrow .btn{flex:none;padding:0 16px}
+#mt-join-msg{margin:8px 0 0}
 
 /* setup card + preview + 2-week check-in */
 .mt-setup .bd>.hint{margin:0}

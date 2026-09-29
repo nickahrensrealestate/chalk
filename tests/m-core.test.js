@@ -510,6 +510,259 @@ t("export / import merge / reset", () => {
   assert.strictEqual(JSON.parse(localStorage.getItem(M.KEY)).v, 1, "reset re-persists a fresh state");
 });
 
+/* ---- raw ↔ cooked (needs the real food list) ---- */
+const loadData = () => vm.runInThisContext(fs.readFileSync(path.join(__dirname, "..", "m-data.js"), "utf8"), { filename: "m-data.js" });
+const CHK = { y: 0.7258, word: "raw" }, RICE = { y: 2.8077, word: "dry" };
+
+t("cook.label: raw first, cooked in parentheses (US, metric, dry, cups, no y)", () => {
+  loadData();
+  assert.strictEqual(M.cook.label(6 * M.cook.OZ, "raw", CHK, "us"), "6 oz raw (4.4 oz cooked)");
+  assert.strictEqual(M.cook.label(170, "raw", CHK, "metric"), "170 g raw (123 g cooked)");
+  assert.strictEqual(M.cook.label(2 * M.cook.OZ, "raw", RICE, "us"), "2 oz dry (5.6 oz cooked)");
+  assert.strictEqual(M.cook.label(4.4 * M.cook.OZ, "cooked", CHK, "oz"), "6.1 oz raw (4.4 oz cooked)", "cooked weight converts back to raw");
+  assert.strictEqual(M.cook.label(158, "cooked", RICE, "us", { vol: { unit: "cup", g: 158 } }), "2 oz dry (1 cup cooked)");
+  assert.strictEqual(M.cook.label(46, "raw", RICE, "us", { vol: { unit: "cup", g: 184 } }), "1/4 cup dry (4.6 oz cooked)");
+  assert.strictEqual(M.cook.label(237, "cooked", RICE, "metric", { vol: { unit: "cup", g: 158 } }), "84 g dry (1 1/2 cups cooked)");
+  assert.strictEqual(M.cook.label(12 * M.cook.OZ, "cooked", null, "us"), "12 oz cooked", "no y known: only the weighed side");
+  assert.strictEqual(M.cook.label(1.5 * M.cook.LB, "raw", CHK, "lb"), "1.5 lb raw (1.09 lb cooked)");
+});
+
+t("merged foods: old raw/cooked ids resolve to one food; y and both profiles kept", () => {
+  const f = M.foods.get("g_chicken_breast");
+  assert.ok(f && M.cook.of(f), "merged chicken breast has cook");
+  assert.strictEqual(M.foods.get("g_chicken_breast_cooked"), f);
+  assert.strictEqual(M.foods.get("g_chicken_breast_raw"), f);
+  assert.deepStrictEqual(M.cook.alias("g_chicken_breast_cooked"), { id: "g_chicken_breast", state: "cooked" });
+  assert.deepStrictEqual(M.cook.alias("g_white_rice_dry"), { id: "g_white_rice", state: "raw" });
+  assert.strictEqual(M.cook.alias("g_banana"), null);
+  near(f.cook.y, 22.5 / 31, 0.0001, "y = raw protein ÷ cooked protein");
+  near(M.foods.get("g_white_rice").cook.y, 365 / 130, 0.0001, "y = dry kcal ÷ cooked kcal");
+  assert.strictEqual(M.cook.per100(f, "raw").cal, 120);
+  assert.strictEqual(M.cook.per100(f, "cooked").cal, 165);
+  assert.deepStrictEqual(M.cook.perFor(f, "cooked", 100), M.foodMath.fromPer100(f.cook.per100gCooked, 100));
+  const k = M.foods.get("g_kirkland_organic_chicken");
+  assert.deepStrictEqual(k.cook.per100gCooked, f.cook.per100gCooked, "Kirkland gets chicken breast's cooked profile");
+  assert.strictEqual(M.cook.servingLabel(f, "us"), "4 oz raw (2.9 oz cooked)");
+  assert.strictEqual(M.cook.servingLabel(M.foods.get("g_white_rice"), "us"), "1/4 cup dry (4.6 oz cooked)");
+  assert.strictEqual(M.cook.servingLabel(M.foods.get("g_banana"), "us"), "", "plain foods have no cook label");
+});
+
+t("cook.unitsFor: oz/g/lb raw and cooked; cooked units use the cooked profile (fat that cooks off)", () => {
+  const beef = M.foods.get("g_ground_beef_80");
+  const u = M.cook.unitsFor(beef, "us");
+  assert.deepStrictEqual(u.map(o => o.key), ["oz-raw", "oz-cooked", "g-raw", "g-cooked", "lb-raw", "lb-cooked"]);
+  assert.deepStrictEqual(u.map(o => o.label).slice(0, 4), ["oz raw", "oz cooked", "g raw", "g cooked"]);
+  const g = k => u.find(o => o.key === k);
+  near(g("g-raw").per.cal, 2.54, 1e-6); near(g("g-cooked").per.cal, 2.5, 1e-6);
+  near(g("g-raw").per.f, 0.2, 1e-6); near(g("g-cooked").per.f, 0.16, 1e-6);
+  /* 100 g raw becomes 68.8 g cooked; logged cooked, that meat has less fat than the raw number */
+  const rawF = g("g-raw").per.f * 100, cookedF = g("g-cooked").per.f * 100 * beef.cook.y;
+  assert.ok(cookedF < rawF, "fat that cooks off counts: " + cookedF + " < " + rawF);
+  assert.strictEqual(g("oz-raw").step, 0.5); assert.strictEqual(g("g-raw").step, 5); assert.strictEqual(g("lb-raw").step, 0.25);
+  assert.deepStrictEqual(M.cook.unitsFor(beef, "metric").slice(0, 2).map(o => o.key), ["g-raw", "g-cooked"], "metric lists grams first");
+  const rice = M.cook.unitsFor(M.foods.get("g_white_rice"), "us");
+  const cup = rice.find(o => o.key === "cup-cooked"), dcup = rice.find(o => o.key === "cup-raw");
+  assert.ok(cup && dcup, "rice has cup dry and cup cooked");
+  assert.strictEqual(cup.label, "cup cooked"); assert.strictEqual(dcup.label, "cup dry");
+  assert.strictEqual(cup.g, 158); near(cup.per.cal, 205.4, 0.01);
+  assert.deepStrictEqual(M.cook.unitsFor(M.foods.get("g_banana"), "us"), []);
+  /* cooked view for code that only knows plain foods */
+  const v = M.cook.view(M.foods.get("g_white_rice"), "cooked");
+  assert.deepStrictEqual([v.serving.qty, v.serving.unit, v.serving.g, v.per.cal, v.state], [1, "cup", 158, 205.4, "cooked"]);
+  assert.strictEqual(M.cook.view(M.foods.get("g_chicken_breast"), "cooked").per.cal, 186.5);
+  assert.strictEqual(M.cook.view(M.foods.get("g_banana"), "cooked"), M.foods.get("g_banana"));
+});
+
+t("entries: state + cook stored; old ids canonicalized; labels read raw first everywhere", () => {
+  M.MS.days = {};
+  const f = M.foods.get("g_chicken_breast"), oz = M.cook.OZ;
+  const u = M.cook.unitsFor(f, "us"), ozRaw = u.find(o => o.key === "oz-raw"), ozCk = u.find(o => o.key === "oz-cooked");
+  const e1 = M.log.add(today, { slot: "Lunch", name: f.name, foodId: f.id, servings: 6, servingLabel: "1 oz raw", g: ozRaw.g, per: ozRaw.per, state: "raw", cook: { y: f.cook.y, word: "raw" } });
+  assert.strictEqual(e1.state, "raw"); assert.deepStrictEqual(e1.cook, { y: f.cook.y, word: "raw" });
+  assert.strictEqual(M.cook.entryLabel(e1, "us"), "6 oz raw (4.4 oz cooked)");
+  near(M.log.totals(today).cal, 6 * oz * 1.2, 0.1, "raw profile");
+  const e2 = M.log.add(today, { slot: "Dinner", name: f.name, foodId: f.id, servings: 4, servingLabel: "1 oz cooked", g: ozCk.g, per: ozCk.per, state: "cooked" });
+  assert.deepStrictEqual(e2.cook, { y: f.cook.y, word: "raw" }, "cook filled from the food");
+  assert.strictEqual(M.cook.entryLabel(e2, "us"), "5.5 oz raw (4 oz cooked)");
+  near(M.log.slotTotals(today, "Dinner").cal, 4 * oz * 1.65, 0.1, "cooked profile");
+  /* grams logged in metric read in grams */
+  const gRaw = u.find(o => o.key === "g-raw");
+  const e3 = M.log.add(today, { slot: "Snacks", foodId: f.id, servings: 170, servingLabel: "1 g raw", g: 1, per: gRaw.per, state: "raw" });
+  assert.strictEqual(M.cook.entryLabel(e3, "us"), "170 g raw (123 g cooked)", "the unit weighed wins over the person's units");
+  /* an entry saved before the merge */
+  const legacy = { id: "old1", slot: "Lunch", name: "Chicken breast, cooked", foodId: "g_chicken_breast_cooked", servings: 1.5, servingLabel: "4 oz (113 g)", g: 113, per: { cal: 186, p: 35, c: 0, f: 4.1 }, at: NOW };
+  assert.strictEqual(M.cook.entryLabel(legacy, "us"), "8.2 oz raw (6 oz cooked)");
+  const e4 = M.log.add(today, Object.assign({}, legacy, { id: undefined }));
+  assert.strictEqual(e4.foodId, "g_chicken_breast", "old id canonicalized"); assert.strictEqual(e4.state, "cooked");
+  assert.strictEqual(e4.per.cal, 186, "logged numbers never change");
+  const e5 = M.log.add(today, { slot: "Lunch", foodId: "g_white_rice_cooked", servings: 1 });
+  assert.strictEqual(e5.state, "cooked"); assert.strictEqual(e5.per.cal, 205.4, "a bare old cooked id fills from the cooked profile");
+  assert.strictEqual(M.cook.entryLabel(e5, "us"), "2 oz dry (1 cup cooked)");
+  /* describe items carry the whole portion in g; the label's grams win */
+  assert.strictEqual(M.cook.entryLabel({ foodId: "g_chicken_breast", state: "raw", servings: 1.5, servingLabel: "4 oz (113 g)", g: 169.5 }, "us"), "6 oz raw (4.3 oz cooked)");
+  /* plain foods: nothing */
+  assert.strictEqual(M.cook.entryLabel({ foodId: "g_banana", servings: 1, servingLabel: "1 medium (118 g)", g: 118 }, "us"), "");
+  /* recents carry state/cook so a recent reopens the same way */
+  const rc = M.recents("nick").find(x => x.name === f.name);
+  assert.ok(rc && rc.state && rc.cook && rc.cook.y === f.cook.y, JSON.stringify(rc));
+  assert.ok(M.search("", { pid: "nick" }).some(r => r.kind === "recent" && r.state), "recent results keep state");
+});
+
+t("custom foods: typed cook info saves y + a cooked profile of per100g ÷ y", () => {
+  const f = M.foods.add({ name: "Chicken breast (scanned bag)", source: "label", serving: { qty: 4, unit: "oz", g: 112 }, per: { cal: 110, p: 23, c: 0, f: 1.5, sodium: 60 }, per100g: { cal: 98.2, p: 20.5, c: 0, f: 1.3, sodium: 53.6 }, cook: { y: 0.75, word: "raw" } });
+  assert.deepStrictEqual([f.cook.y, f.cook.word], [0.75, "raw"]);
+  near(f.cook.per100gCooked.cal, 98.2 / 0.75, 0.01); near(f.cook.per100gCooked.p, 20.5 / 0.75, 0.01);
+  assert.strictEqual(M.cook.servingLabel(f, "us"), "4 oz raw (3 oz cooked)");
+  const up = M.foods.update(f.id, { per100g: { cal: 90, p: 20, c: 0, f: 1 } });
+  near(up.cook.per100gCooked.cal, 120, 0.01, "edits re-derive the cooked profile");
+  assert.strictEqual(M.foods.update(f.id, { cook: null }).cook, undefined, "turning it off removes cook");
+  assert.strictEqual(M.foods.add({ name: "Bad", cook: { y: 0 } }).cook, undefined, "invalid y is dropped");
+  const r = M.search("scanned chicken", { pid: "nick" })[0];
+  assert.strictEqual(r.sub, "4 oz (112 g)", "cook off → plain serving label");
+  M.foods.update(f.id, { cook: { y: 0.75, word: "raw" } });
+  const r2 = M.search("cooked scanned chicken", { pid: "nick" })[0];
+  assert.ok(r2 && r2.foodId === f.id && r2.sub === "4 oz raw (3 oz cooked)", JSON.stringify(r2 && r2.sub));
+  M.foods.remove(f.id);
+});
+
+t("search: 'cooked chicken', 'chicken breast cooked', 'dry pasta' still find the merged foods; plain chicken first", () => {
+  M.MS.days = {};   /* no recents: they would stand in for the generic rows */
+  const top = q => M.search(q, { pid: "nick", limit: 10 }).map(r => r.foodId || r.id);
+  const PLAIN = ["g_chicken_breast", "g_chicken_thigh", "g_kirkland_organic_chicken"];
+  ["chicken breast cooked", "chicken breast raw", "cooked chicken breast"].forEach(q => assert.strictEqual(top(q)[0], "g_chicken_breast", q + ": " + top(q).join(",")));
+  ["cooked chicken", "raw chicken", "chicken"].forEach(q => {
+    assert.ok(PLAIN.includes(top(q)[0]), q + " → plain chicken first, not a dish: " + top(q).join(","));
+    assert.ok(top(q).slice(0, 3).includes("g_chicken_breast"), q + " has chicken breast near the top");
+  });
+  assert.ok(top("dry pasta").includes("g_pasta") && top("uncooked rice").includes("g_white_rice") && top("rice cooked").includes("g_white_rice"));
+  assert.strictEqual(top("chicken sausage")[0], "g_chicken_sausage", "a named dish still wins its own search");
+  /* a logged food folds into its recent in the mixed list, but the Foods list still shows it */
+  M.log.add(today, { slot: "Lunch", foodId: "g_chicken_breast", servings: 6, servingLabel: "1 oz raw", g: M.cook.OZ, per: { cal: 34 }, state: "raw" });
+  assert.ok(!M.search("chicken breast", { pid: "nick" }).some(r => r.kind === "generic" && r.id === "g_chicken_breast"), "deduped behind the recent");
+  const foodsOnly = M.search("chicken breast", { pid: "nick", recents: false, meals: false });
+  assert.ok(foodsOnly.some(r => r.kind === "generic" && r.id === "g_chicken_breast"), "recents:false keeps the food");
+  assert.ok(foodsOnly.every(r => r.kind !== "recent" && r.kind !== "meal"));
+  M.MS.days = {};
+  const gen = M.search("chicken breast", { pid: "nick" }).find(r => r.id === "g_chicken_breast");
+  assert.strictEqual(gen.sub, "4 oz raw (2.9 oz cooked)"); assert.strictEqual(gen.state, "raw"); assert.ok(gen.cook);
+});
+
+t("batch meal: rawG from the items, per = whole batch, logged by cooked weight; later edits never touch logged days", () => {
+  M.MS.days = {};
+  const oz = M.cook.OZ, chk = M.foods.get("g_chicken_breast"), rice = M.foods.get("g_white_rice");
+  const cu = M.cook.unitsFor(chk, "us").find(o => o.key === "oz-raw"), ru = M.cook.unitsFor(rice, "us").find(o => o.key === "oz-raw");
+  const items = [
+    { name: chk.name, foodId: chk.id, servings: 64, servingLabel: "1 oz raw", g: cu.g, per: cu.per, state: "raw" },
+    { name: rice.name, foodId: rice.id, servings: 6, servingLabel: "1 oz dry", g: ru.g, per: ru.per, state: "raw" },
+    { name: "Olive oil", servings: 1, servingLabel: "1 tbsp (14 g)", g: 14, per: { cal: 124, f: 14 } },
+    { name: "Seasoning", servings: 1, servingLabel: "1 serving", per: { cal: 5 } }
+  ];
+  const m = M.meals.add({ name: "Chicken and rice prep", slot: "Lunch", servingsMade: 4, items, batch: { cookedG: 51 * oz } });
+  assert.strictEqual(m.servingsMade, 1, "a batch is one pot");
+  near(m.batch.rawG, 70 * oz + 14, 0.1, "raw grams: 64 oz + 6 oz + 14 g oil (no weight → not counted)");
+  near(m.per.cal, M.foodMath.sum(m.items).cal, 0.01, "per = the whole batch");
+  near(M.cook.batchCook(m).y, 51 * oz / m.batch.rawG, 0.0001);
+  const p4 = M.cook.batchPer(m, 4 * oz); near(p4.cal, m.per.cal * 4 / 51, 0.2);
+  assert.strictEqual(M.cook.batchSub(m, "us"), "Batch · 51 oz cooked");
+  assert.strictEqual(M.cook.batchSub(m, "metric"), "Batch · 1446 g cooked");
+  const sr = M.search("prep", { pid: "nick" }).find(r => r.kind === "meal");
+  assert.ok(sr.batch && sr.sub === "Batch · 51 oz cooked" && sr.portion === "per 4 oz" && Math.abs(sr.per.cal - p4.cal) < 0.2);
+  const [e] = M.log.addMeal(today, m.id, null, "Lunch", { grams: 12 * oz, unit: "oz" });
+  assert.deepStrictEqual([e.servings, e.servingLabel, e.state, e.mealId], [12, "1 oz cooked", "cooked", m.id]);
+  near(e.per.cal * 12, m.per.cal * 12 / 51, 0.05, "entry = batch totals × eaten ÷ cookedG");
+  const label = M.cook.entryLabel(e, "us");
+  assert.ok(/^16\.\d oz raw \(12 oz cooked\)$/.test(label), label);
+  const dayCal = M.log.totals(today).cal;
+  /* change the batch: add an item and a new cooked weight */
+  M.meals.update(m.id, { items: m.items.concat([{ name: "Butter", servings: 2, servingLabel: "1 tbsp (14 g)", g: 14, per: { cal: 100, f: 11 } }]), batch: { cookedG: 60 * oz } });
+  assert.strictEqual(M.log.totals(today).cal, dayCal, "logged day unchanged");
+  assert.strictEqual(M.cook.entryLabel(M.dayOf(today).entries[0], "us"), label, "logged label unchanged");
+  /* grams in metric */
+  const [e2] = M.log.addMeal(today, m.id, null, "Dinner", { grams: 340, unit: "g" });
+  assert.strictEqual(e2.servingLabel, "1 g cooked"); assert.strictEqual(e2.servings, 340);
+  /* without opt.grams a batch still logs the old way (fraction of the batch) */
+  assert.strictEqual(M.log.addMeal(today, m.id, 0.5, "Snacks")[0].servingLabel, "1 serving");
+  /* turning batch off */
+  const off = M.meals.update(m.id, { batch: null, servingsMade: 4 });
+  assert.strictEqual(off.batch, undefined); assert.strictEqual(off.servingsMade, 4);
+  M.meals.remove(m.id);
+});
+
+t("storage: a failed save keeps data, retries, reports once per streak", () => {
+  M.reset(); M.MS.days = {};
+  const calls = [];
+  M.onStorageError(s => calls.push(s.lastError));
+  const orig = localStorage.setItem;
+  let full = true;
+  localStorage.setItem = function (k, v) { if (full && k === M.KEY) { const e = new Error("The quota has been exceeded."); e.name = "QuotaExceededError"; throw e; } return orig.call(this, k, v); };
+  const before = localStorage.getItem(M.KEY);
+  M.log.add(today, { slot: "Lunch", name: "Kept in memory", per: { cal: 10 } });
+  assert.strictEqual(M.storage.ok, false);
+  assert.ok(/QuotaExceededError/.test(M.storage.lastError), M.storage.lastError);
+  assert.strictEqual(calls.length, 1, "listener told once");
+  assert.strictEqual(localStorage.getItem(M.KEY), before, "old copy untouched");
+  assert.ok(M.dayOf(today).entries.some(e => e.name === "Kept in memory"), "data kept in memory");
+  M.log.add(today, { slot: "Lunch", name: "Second", per: { cal: 10 } });
+  assert.strictEqual(calls.length, 1, "same streak: not told again");
+  const late = []; M.onStorageError(() => late.push(1));
+  assert.strictEqual(late.length, 1, "a listener that joins mid-streak hears about it");
+  full = false;
+  M.save();
+  assert.strictEqual(M.storage.ok, true); assert.strictEqual(M.storage.lastError, null);
+  assert.ok(M.storage.bytes > 100);
+  assert.strictEqual(JSON.parse(localStorage.getItem(M.KEY)).days["nick|" + today].entries.length, 2, "retry wrote everything");
+  full = true; M.save();
+  assert.strictEqual(calls.length, 2, "a new streak is reported again");
+  full = false; M.save();
+  localStorage.setItem = orig;
+});
+
+t("storage: daily .bak copy; load falls back to it when the main copy is damaged; reset removes it", () => {
+  const BAK = M.KEY + ".bak";
+  M.reset();
+  assert.strictEqual(localStorage.getItem(BAK), null, "reset clears the backup");
+  M.log.add(today, { slot: "Lunch", name: "Day one", per: { cal: 1 } });   /* 2nd save of the day copies the 1st */
+  const bak = JSON.parse(localStorage.getItem(BAK));
+  assert.strictEqual(bak.day, today); assert.strictEqual(bak.data.v, 1);
+  assert.strictEqual(M.storage.bakDay, today);
+  const kept = localStorage.getItem(BAK);
+  M.log.add(today, { slot: "Lunch", name: "Later today", per: { cal: 1 } });
+  assert.strictEqual(localStorage.getItem(BAK), kept, "one copy a day");
+  /* next day: the first save copies the last good main */
+  const t0 = NOW; NOW += DAY;
+  M.log.add(M.today(), { slot: "Lunch", name: "Day two", per: { cal: 1 } });
+  const b2 = JSON.parse(localStorage.getItem(BAK));
+  assert.strictEqual(b2.day, M.today());
+  assert.strictEqual(b2.data.days["nick|" + today].entries.length, 2, "yesterday's last save");
+  /* damage the main copy */
+  localStorage.setItem(M.KEY, "{\"v\":1,\"days\":");
+  M.load();
+  assert.strictEqual(M.storage.restoredFrom, M.today());
+  assert.strictEqual(M.MS.days["nick|" + today].entries.length, 2, "restored from the backup");
+  localStorage.setItem(M.KEY, JSON.stringify({ v: 1, days: "junk" }));
+  M.load(); assert.ok(M.storage.restoredFrom, "a bad shape counts as damaged");
+  M.save();
+  assert.strictEqual(JSON.parse(localStorage.getItem(M.KEY)).days["nick|" + today].entries.length, 2, "the restored copy is saved back");
+  M.load(); assert.strictEqual(M.storage.restoredFrom, null, "healthy main copy");
+  /* full phone: the backup is dropped to make room for the main copy */
+  const orig = localStorage.setItem; let room = false;
+  localStorage.setItem = function (k, v) { if (k === M.KEY && !room && localStorage.getItem(BAK) != null) { const e = new Error("full"); e.name = "QuotaExceededError"; throw e; } return orig.call(this, k, v); };
+  M.save();
+  assert.strictEqual(M.storage.ok, true, "saved after dropping the backup");
+  assert.strictEqual(localStorage.getItem(BAK), null);
+  localStorage.setItem = orig;
+  /* a big data set gets no copy (like Chalk's own chalk.bak), so it can't crowd out the training log */
+  M.save(); NOW += DAY; M.save();
+  assert.ok(localStorage.getItem(BAK), "small data: copied");
+  const cap = M.storage.bakMax; M.storage.bakMax = 50;
+  NOW += DAY; M.save();
+  assert.strictEqual(localStorage.getItem(BAK), null, "over the cap: no copy, old copy dropped");
+  assert.strictEqual(M.storage.ok, true);
+  M.storage.bakMax = cap; NOW -= DAY;
+  NOW = t0;
+  M.reset();
+});
+
 /* ---- sync ---- */
 t("sync is a silent no-op without window.claude", () => {
   assert.strictEqual(typeof window.claude, "undefined");
