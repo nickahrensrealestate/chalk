@@ -469,7 +469,7 @@ window.M = window.M || {};
     const t = trainCheck(id, r.data);
     if (!t) return;
     const h = fnv(t.raw);
-    st.train[id] = { h, t: num(r.client_updated), at, n: t.sum.n, last: t.sum.last, ids: t.sum.ids, del: false, dev };
+    st.train[id] = { h, t: num(r.client_updated), at, n: t.sum.n, last: t.sum.last, ids: t.sum.ids, del: false, dev, guest: r.data.guest === true };
     const tl = trainLocal();
     if (tl && tl.id === id && tl.h === h) st.hashes["train|" + id] = h;
   }
@@ -639,8 +639,14 @@ window.M = window.M || {};
       const lh = hashRec(key, local);
       if (lh === rh) { agree(key, kind, data, rh); return; }
       if (synced !== undefined && rh === synced) return;               /* nothing new in the cloud */
-      /* a phone that never synced this person takes the profile the cloud already set up */
-      if (synced === undefined && kind === "profile" && num(data.setupAt) > 0 && !(num(local.setupAt) > 0 && num(local.setupAt) < num(data.setupAt))) { take(data); return; }
+      if (kind === "profile") {
+        const rs = num(data.setupAt) > 0, ls = num(local.setupAt) > 0;
+        /* a profile nobody set up never replaces a real one; ours goes back up */
+        if (!rs && ls) { delete st.hashes[key]; return; }
+        /* a phone that never synced this person takes the profile the cloud already set up:
+           a new phone's first-day setup must not overwrite real targets */
+        if (synced === undefined && rs && !(ls && num(local.setupAt) < num(data.setupAt))) { take(data); return; }
+      }
       if (synced !== undefined && lh === synced) { take(keepLocal(kind, up === data ? data : up, local)); return; }
       /* both sides changed since they last agreed */
       if ((kind === "food" || kind === "meal") && isObj(st.base[key])) {
@@ -780,6 +786,31 @@ window.M = window.M || {};
     saveSt();
     return ch.applied;
   }
+  /* Each phone keeps only its own person's diary days and weigh-ins. The other person's rows
+     that already match the cloud leave this phone (they stay in the cloud, and switching
+     person pulls them back); rows changed here go up first. Their sync memory is written
+     away BEFORE the rows go, so a phone killed in between sends them again (harmless) and
+     never reads them as deleted. */
+  function trimOther(pid) {
+    const MS = M.MS;
+    if (!okPid(pid) || !isObj(MS) || unsaved) return 0;
+    const drop = [];
+    ["day", "body"].forEach(kind => {
+      const coll = MS[COLL[kind]];
+      if (!isObj(coll)) return;
+      Object.keys(coll).forEach(id => {
+        if (!validId(kind, id) || pidOfId(id) === pid) return;
+        const key = kind + "|" + id, rec = coll[id], h = st.hashes[key];
+        if (h !== undefined && isObj(rec) && hashRec(key, rec) === h) drop.push({ kind, id, key, h });
+      });
+    });
+    if (!drop.length) return 0;
+    drop.forEach(x => { delete st.hashes[x.key]; });
+    if (!lsSet(ST_KEY, JSON.stringify(st))) { drop.forEach(x => { st.hashes[x.key] = x.h; }); return 0; }
+    drop.forEach(x => { delete MS[COLL[x.kind]][x.id]; rcache.delete(x.key); markDirty(x.kind, x.id); });
+    commitLocal();
+    return drop.length;
+  }
 
   /* ------------------------------------------------------------------ push */
   function due(b, opts) { return !!(opts && opts.manual) || now() - num(b.at) > (b.k === "aside" ? ASIDE_AGAIN : REFUSED_AGAIN); }
@@ -796,6 +827,7 @@ window.M = window.M || {};
         if (!validId(kind, id) || !isObj(rec)) return;
         const key = kind + "|" + id;
         if (kind === "day" && st.hashes[key] === undefined && blankDay(rec)) return;   /* a day someone only looked at */
+        if (kind === "profile" && st.hashes[key] === undefined && !(num(rec.setupAt) > 0)) return;   /* defaults nobody set up stay here */
         seen.add(key);
         if (st.gone[key]) delete st.gone[key];
         const h = hashRec(key, rec);
@@ -827,19 +859,22 @@ window.M = window.M || {};
     if (tl.h === st.hashes[key]) { hold = null; return null; }
     const seen = st.train[tl.id];
     if (seen && !seen.del && seen.h === tl.h) { st.hashes[key] = tl.h; hold = null; return null; }
+    /* This phone's first person is its home person; anyone else only borrowed it. */
+    const home = !!(st.tp && st.tp.pids && st.tp.pids[0] === tl.id);
     /* The cloud copy came from another phone. Never overwrite workouts this phone doesn't have
-       (a fresh phone would wipe the backup it's meant to restore from). */
+       (a fresh phone would wipe the backup it's meant to restore from) — unless that copy was
+       made on a borrowed phone and this is the person's own phone, with workouts of its own. */
     if (seen && !seen.del && seen.h !== st.hashes[key]) {
       const miss = missingCount(seen, tl);
-      if (miss > 0) { hold = { id: tl.id, missing: miss, why: "missing" }; return null; }
+      if (miss > 0 && !(seen.guest && home && tl.n > 0)) { hold = { id: tl.id, missing: miss, why: "missing" }; return null; }
     }
     hold = null;
     const b = st.bad[key];
     if (b && b.h === tl.h && !due(b, opts)) { if (out) out.stuck++; return null; }
     if (!opts.manual && tl.busy && now() - num(st.trainAt) < TRAIN_GAP) return null;
-    return makeItem("train", tl.id, { v: 1, json: tl.raw }, false, tl.updated || now(), key, tl.h, () => {
+    return makeItem("train", tl.id, home ? { v: 1, json: tl.raw } : { v: 1, json: tl.raw, guest: true }, false, tl.updated || now(), key, tl.h, () => {
       st.hashes[key] = tl.h; st.trainAt = now();
-      st.train[tl.id] = { h: tl.h, t: tl.updated, at: "", n: tl.n, last: tl.last, ids: tl.ids, del: false, dev: st.device };
+      st.train[tl.id] = { h: tl.h, t: tl.updated, at: "", n: tl.n, last: tl.last, ids: tl.ids, del: false, dev: st.device, guest: !home };
     });
   }
   function metaItem() {
@@ -913,11 +948,16 @@ window.M = window.M || {};
     }
     saveSt();
   }
-  /* A chunk failed twice (409 / 5xx / timeout) while other requests went through: halve it
-     until the row that keeps failing is found, and set that row aside. */
+  /* A chunk failed twice (409 / 5xx / timeout): halve it until the row that keeps failing is
+     found, and set that row aside. Both halves go first, then the failing ones are split
+     again. A row is only set aside once something else got in during this sync (so the fault
+     is that row, not the server) or after it failed three times on its own. */
   async function bisect(ch, gen, e) {
-    if (ch.length === 1) { setBad(ch[0], e, "aside"); saveSt(); return; }
-    const mid = Math.ceil(ch.length / 2), parts = [ch.slice(0, mid), ch.slice(mid)];
+    if (ch.length === 1) {
+      if (!postOk && maxFail(ch) < 3) throw e;
+      setBad(ch[0], e, "aside"); saveSt(); return;
+    }
+    const mid = Math.ceil(ch.length / 2), parts = [ch.slice(0, mid), ch.slice(mid)], bad = [];
     for (const p of parts) {
       if (budget > BISECT_BUDGET) throw e;
       const e2 = await post(p, gen);
@@ -925,16 +965,20 @@ window.M = window.M || {};
       if (!e2) continue;
       const c = classify(e2);
       if (c === "fatal") throw e2;
-      if (c === "refuse") await refuse(p, e2, gen);
-      else { bumpFail(p, e2); await bisect(p, gen, e2); }
-      if (gen !== epoch) return;
+      if (c === "refuse") { await refuse(p, e2, gen); if (gen !== epoch) return; }
+      else bad.push({ p, e2 });
     }
+    /* both halves failed and nothing got in: that's the server, not a row (unless it's the
+       same few rows, sync after sync) */
+    if (bad.length === 2 && !postOk && !(ch.length <= 4 && maxFail(ch) >= 3)) throw e;
+    for (const b of bad) { await bisect(b.p, gen, b.e2); if (gen !== epoch) return; }
   }
+  /* Training goes alone; rows that failed before go in their own chunks, after the rest. */
   function chunkify(list) {
     const out = [];
     let ch = [], size = 0;
     for (const x of list) {
-      if (ch.length && (ch.length >= CHUNK_ROWS || size + x.bytes > CHUNK_BYTES || (x.kind === "train" || ch[0].kind === "train"))) { out.push(ch); ch = []; size = 0; }
+      if (ch.length && (ch.length >= CHUNK_ROWS || size + x.bytes > CHUNK_BYTES || x.kind === "train" || ch[0].kind === "train" || !!x.f !== !!ch[0].f)) { out.push(ch); ch = []; size = 0; }
       ch.push(x); size += x.bytes;
     }
     if (ch.length) out.push(ch);
@@ -947,9 +991,11 @@ window.M = window.M || {};
     got.items.forEach(x => {
       if (!x.s) return;
       if (x.bytes > MAX_ROW_BYTES) { setBad(x, { status: 413 }, "refused"); big++; return; }
-      const b = st.bad[x.key];
+      const b = st.bad[x.key], f = st.fail[x.key];
+      x.f = !!(f && f.h === x.h);
       (b && b.h === x.h ? again : send).push(x);
     });
+    send.sort((a, b) => (a.f ? 1 : 0) - (b.f ? 1 : 0));   /* stable: kind order kept within each group */
     pendingN = send.length + again.length + got.stuck + big;
     postOk = false; budget = 0; sentOk = new Set();
     if (!send.length && !again.length) return 0;
@@ -966,7 +1012,7 @@ window.M = window.M || {};
       if (!firstErr) firstErr = e;
       if (!postOk && failed.length >= 2) break;    /* nothing gets in: the server, not a row */
     }
-    if (postOk) for (const f of failed) { if (maxFail(f.ch) >= 2) await bisect(f.ch, gen, f.e); if (gen !== epoch) return 0; }
+    for (const f of failed) { if (maxFail(f.ch) >= 2) await bisect(f.ch, gen, f.e); if (gen !== epoch) return 0; }
     /* rows set aside earlier go last, one by one, so they can never hold up the rest */
     for (const x of again) {
       const e = await post([x], gen);
@@ -985,19 +1031,32 @@ window.M = window.M || {};
   }
 
   /* ------------------------------------------------ household checks + wipes */
-  /* Before anything goes up: our row comes back with our code, and another code sees none of it. */
+  /* Before anything goes up: our row comes back with our code, a second write of it gets a
+     newer server time (the updated_at trigger works: without it the other phone would never
+     see an edit), and another code sees none of it. */
   async function selfTest(gen, write) {
     const code = st.code;
+    const q = "?select=household,kind,id,deleted,updated_at&kind=eq.meta&id=eq.household&limit=5";
+    const stamp = rows => { const r = Array.isArray(rows) ? rows.find(x => isObj(x) && x.household === code) : null; return r ? tsVal(r.updated_at) : NaN; };
+    let mine = null;
     if (write) {
       if (!isObj(st.meta)) st.meta = { v: 1, createdAt: now(), by: st.device };
       const it = metaItem() || makeItem("meta", "household", st.meta, false, num(st.meta.createdAt) || now(), "meta|household", H(st.meta), () => {});
       await request("POST", upsertURL(), "[" + it.s + "]", code, PREFER);
       if (gen !== epoch) return false;
+      const t1 = stamp(await request("GET", endpoint() + q, null, code));
+      if (gen !== epoch) return false;
+      await request("POST", upsertURL(), "[" + it.s + "]", code, PREFER);
+      if (gen !== epoch) return false;
+      mine = await request("GET", endpoint() + q, null, code);
+      if (gen !== epoch) return false;
+      const t2 = stamp(mine);
+      if (!(t2 > t1)) throw { code: "setup" };
       try { it.ok(); } catch (e) {}
+    } else {
+      mine = await request("GET", endpoint() + q, null, code);
+      if (gen !== epoch) return false;
     }
-    const q = "?select=household,kind,id,deleted&kind=eq.meta&id=eq.household&limit=5";
-    const mine = await request("GET", endpoint() + q, null, code);
-    if (gen !== epoch) return false;
     if (!Array.isArray(mine) || !mine.some(r => isObj(r) && r.household === code)) throw { code: "setup" };
     const other = await request("GET", endpoint() + q, null, rand(20));
     if (gen !== epoch) return false;
@@ -1080,9 +1139,11 @@ window.M = window.M || {};
     if (!isOn()) return { ok: false, error: "Sync is off." };
     busy = true; badNote = ""; notify();
     try {
-      if (!st.verified) await selfTest(gen, !st.joining);
+      const tested = !st.verified;
+      if (tested) await selfTest(gen, !st.joining);
       if (gen !== epoch) return stopped;
-      if (!metaChecked || now() - num(st.metaAt) > META_EVERY) {
+      /* Is the household still there? Once per start and per day, and on every Sync now. */
+      if (!tested && (!metaChecked || opts.manual || now() - num(st.metaAt) > META_EVERY)) {
         const m = await checkMeta(gen);
         if (m === "gone") return { ok: false, error: st.note };
         if (gen !== epoch) return stopped;
@@ -1097,6 +1158,8 @@ window.M = window.M || {};
       }
       const pushed = await push(gen, opts);
       if (gen !== epoch) return stopped;
+      const who = curPid();
+      if (who && who === st.pp) trimOther(who);
       st.lastSync = now(); st.lastError = stuckLine() || badNote; retryN = 0; st.retryAt = 0;
       clearTimeout(retryT); retryT = null;
       if (!saveSt()) st.lastError = errText({ code: "storage" });
@@ -1188,7 +1251,7 @@ window.M = window.M || {};
     queued = null;
     rcache.clear();
     tcache = { raw: null, val: null };
-    hold = null; pendingN = 0; badNote = "";
+    hold = null; pendingN = 0; badNote = ""; metaChecked = false;
     unsaved = false;          /* a state with no hashes claims nothing, so it can always be written */
     const keep = { device: st.device, tp: st.tp, tsw: st.tsw, old: st.old };
     st = freshSt(keep.device);
@@ -1417,7 +1480,7 @@ window.M = window.M || {};
           lsSet(RESTORED_KEY, String(t.sum.n));
           const h = fnv(t.raw);
           st.hashes["train|" + pid] = h;
-          st.train[pid] = { h, t: num(r.client_updated), at: String(r.updated_at || ""), n: t.sum.n, last: t.sum.last, ids: t.sum.ids, del: false, dev: String(r.device || "") };
+          st.train[pid] = { h, t: num(r.client_updated), at: String(r.updated_at || ""), n: t.sum.n, last: t.sum.last, ids: t.sum.ids, del: false, dev: String(r.device || "").slice(0, 64), guest: r.data.guest === true };
           st.tp = { pids: [pid] }; st.tsw = null;
           hold = null;
           tcache = { raw: null, val: null };

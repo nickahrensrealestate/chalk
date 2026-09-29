@@ -77,27 +77,62 @@ window.M = window.M || {};
     const d = parseKey(key); if (!d) return String(key || "");
     try { return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); } catch (e) { return key; }
   };
+  /* Breakfast until 10:30, Lunch until 14:30, Snacks until 17:00, Dinner until 20:30, then Snacks. */
   M.defaultSlot = date => {
     const d = date instanceof Date ? date : new Date(M.now());
     const mins = d.getHours() * 60 + d.getMinutes();
-    return mins < 630 ? "Breakfast" : mins < 870 ? "Lunch" : mins < 1230 ? "Dinner" : "Snacks";
+    return mins < 630 ? "Breakfast" : mins < 870 ? "Lunch" : mins < 1020 ? "Snacks" : mins < 1230 ? "Dinner" : "Snacks";
   };
   M.isSlot = s => M.SLOTS.indexOf(s) >= 0;
 
   /* --------------------------------------------------------------- servings */
-  /* "1 cup (240 g)" <-> {qty:1, unit:"cup", g:240} */
+  /* {qty:1, unit:"cup", g:240} <-> "1 cup (240 g)". Amounts read as fractions ("¼ cup",
+     "1 ½ cups" stays "1 ½ cup"), a gram label never repeats itself ("100 g", not
+     "100 g (100 g)") and grams go inside a bracket the unit already has
+     ("1 container (6 oz, 170 g)"). parseServing reads all of these, the old
+     "0.25 cup (46 g)" / "1 oz (23 almonds) (28 g)" labels too. */
+  const FRAC = [[0.25, "¼"], [1 / 3, "⅓"], [0.5, "½"], [2 / 3, "⅔"], [0.75, "¾"]];
+  const FRAC_V = { "¼": 0.25, "⅓": 1 / 3, "½": 0.5, "⅔": 2 / 3, "¾": 0.75, "⅛": 0.125, "⅜": 0.375, "⅝": 0.625, "⅞": 0.875, "⅕": 0.2, "⅖": 0.4, "⅗": 0.6, "⅘": 0.8, "⅙": 1 / 6, "⅚": 5 / 6 };
+  function qtyText(q) {
+    const w = Math.floor(q + 1e-9), rem = q - w;
+    if (rem > 1e-6) for (const f of FRAC) if (Math.abs(rem - f[0]) <= 0.02) return (w ? w + " " : "") + f[1];
+    return String(+q.toFixed(2));
+  }
+  const GRAM_UNIT = /^(g|grams?)$/i;
   M.fmtServing = s => {
     s = s || {};
-    const qty = num(s.qty, 1) || 1, unit = String(s.unit || "serving").trim(), g = num(s.g);
-    return String(+qty.toFixed(2)) + " " + unit + (g > 0 ? " (" + String(+g.toFixed(1)) + " g)" : "");
+    const qty = num(s.qty, 1) || 1, unit = String(s.unit || "serving").trim() || "serving", g = num(s.g);
+    const head = qtyText(qty) + " " + unit;
+    if (!(g > 0) || GRAM_UNIT.test(unit)) return head;
+    const gs = String(+g.toFixed(1)) + " g";
+    return /\)$/.test(unit) && unit.indexOf("(") > 0 ? head.slice(0, -1) + ", " + gs + ")" : head + " (" + gs + ")";
   };
+  function parseQty(s) {
+    s = String(s || "").trim(); if (!s) return null;
+    let m = /^(\d+(?:\.\d+)?)?\s*([¼⅓½⅔¾⅛⅜⅝⅞⅕⅖⅗⅘⅙⅚])$/.exec(s);
+    if (m) return num(m[1]) + FRAC_V[m[2]];
+    m = /^(?:(\d+)\s+)?(\d+)\s*\/\s*(\d+)$/.exec(s);
+    if (m) return num(m[1]) + (num(m[3]) > 0 ? num(m[2]) / num(m[3]) : 0);
+    m = /^\d+(?:\.\d+)?$|^\.\d+$/.exec(s);
+    return m ? num(s) : null;
+  }
   M.parseServing = label => {
-    const str = String(label || "").trim();
-    const m = /^([\d.]+(?:\s*\/\s*\d+)?)?\s*([^()]*?)\s*(?:\((\d+(?:\.\d+)?)\s*g\))?\s*$/i.exec(str);
-    if (!m) return { qty: 1, unit: str || "serving", g: null };
+    let str = String(label == null ? "" : label).trim();
+    if (!str) return { qty: 1, unit: "serving", g: null };
+    let g = null;
+    /* grams at the end: "(28 g)" on its own, or ", 28 g)" inside the unit's own bracket */
+    let m = /\s*\(\s*(\d+(?:\.\d+)?)\s*g\s*\)\s*$/i.exec(str);
+    if (m) { g = num(m[1]); str = str.slice(0, m.index).trim(); }
+    else if ((m = /,\s*(\d+(?:\.\d+)?)\s*g\s*\)\s*$/i.exec(str)) && str.lastIndexOf("(", m.index) >= 0) { g = num(m[1]); str = str.slice(0, m.index).trim() + ")"; }
+    m = /^((?:\d+(?:\.\d+)?|\.\d+)?\s*[¼⅓½⅔¾⅛⅜⅝⅞⅕⅖⅗⅘⅙⅚]|(?:\d+\s+)?\d+\s*\/\s*\d+|\d+(?:\.\d+)?|\.\d+)(?=\s|$|[a-z(])\s*/i.exec(str);
     let qty = 1;
-    if (m[1]) { const fr = m[1].split("/"); qty = fr.length === 2 ? num(fr[0], 1) / (num(fr[1], 1) || 1) : num(m[1], 1); }
-    return { qty: qty || 1, unit: (m[2] || "serving").trim() || "serving", g: m[3] ? num(m[3]) : null };
+    if (m) { const q = parseQty(m[1]); if (q != null) { qty = q; str = str.slice(m[0].length); } }
+    return { qty: qty > 0 ? qty : 1, unit: str.trim() || "serving", g };
+  };
+  /* A serving label without its grams: "1 container (6 oz, 170 g)" → "1 container (6 oz)". */
+  M.servingText = label => {
+    const p = M.parseServing(label);
+    return qtyText(p.qty) + " " + p.unit;
   };
 
   /* ------------------------------------------------------------------ state */

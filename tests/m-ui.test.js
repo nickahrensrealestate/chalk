@@ -299,7 +299,7 @@ t("Foods tab renders the meal under Lunch; meal sheet logs to today", () => {
 
 t("Foods tab: My foods form saves and deletes", () => {
   click(q('[data-m="foods-seg"][data-v="foods"]'));
-  assert.ok(/No saved foods yet/.test($("app").textContent));
+  assert.ok(/Nothing in My foods yet/.test($("app").textContent));
   click(q('[data-m="food-new"]'));
   assert.ok(sheetOn());
   input(q('[data-m="ff"][data-k="name"]'), "Test bar");

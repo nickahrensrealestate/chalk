@@ -289,3 +289,8 @@
 .m-btnrow>.btn.m-armed[data-m="meal-del"],.m-btnrow>.btn.m-armed[data-m="ff-del"]{flex:1 1 100%}
 .btn.m-armed[data-m="mb-cancel"],.btn.m-armed[data-m="mb-fresh"],.btn.m-armed[data-m="mb-save"],.btn.m-armed[data-m="ff-save"],.btn.m-armed[data-m="ff-save-add"],.btn.m-armed[data-m="ff-log"]{text-transform:none;letter-spacing:0}
 .m-resume .btn.m-armed{flex:1 1 auto;white-space:normal}
+/* Foods tab starts at the same height as the other tabs */
+#app>.seg.scope.m-seg:first-child{margin-top:0}
+/* Chalk's .hint loads after this file: warnings keep the warning color, the batch tip keeps its space */
+.hint.m-warnline{color:var(--warn)}
+.hint.m-batchtip{color:var(--ink);font-size:14px;margin:8px 0 12px}

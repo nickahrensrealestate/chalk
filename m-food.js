@@ -93,20 +93,23 @@ window.M = window.M || {};
     }
   }
 
-  /* Lazy <script> loader (one load per URL, shared promise). */
+  /* Lazy <script> loader (one load per URL, shared promise). `integrity` (SRI): the browser runs
+     the file only when its bytes match that hash. `message` may be a function (read on failure). */
   const scriptLoads = {};
-  function loadScript(url, ready, ms, code, message) {
+  function loadScript(url, ready, ms, code, message, integrity) {
     try { if (ready()) return Promise.resolve(true); } catch (e) {}
     if (scriptLoads[url]) return scriptLoads[url];
+    const msgOf = () => (typeof message === "function" ? message() : message);
     scriptLoads[url] = new Promise((resolve, reject) => {
       const d = doc();
-      if (!d) { delete scriptLoads[url]; return reject(E(code, message)); }
+      if (!d) { delete scriptLoads[url]; return reject(E(code, msgOf())); }
       const s = d.createElement("script");
       s.src = url; s.async = true; s.crossOrigin = "anonymous";
+      if (integrity) s.integrity = integrity;
       let done = false;
-      const fail = () => { if (done) return; done = true; delete scriptLoads[url]; try { s.remove(); } catch (e) {} reject(E(code, message)); };
+      const fail = () => { if (done) return; done = true; delete scriptLoads[url]; try { s.remove(); } catch (e) {} reject(E(code, msgOf())); };
       const t = setTimeout(fail, ms || 15000);
-      s.onload = () => { clearTimeout(t); if (done) return; done = true; try { if (ready()) resolve(true); else { delete scriptLoads[url]; reject(E(code, message)); } } catch (e) { delete scriptLoads[url]; reject(E(code, message)); } };
+      s.onload = () => { clearTimeout(t); if (done) return; done = true; try { if (ready()) resolve(true); else { delete scriptLoads[url]; reject(E(code, msgOf())); } } catch (e) { delete scriptLoads[url]; reject(E(code, msgOf())); } };
       s.onerror = () => { clearTimeout(t); fail(); };
       d.head.appendChild(s);
     });
@@ -171,7 +174,7 @@ window.M = window.M || {};
     it = isObj(it) ? it : {};
     const g = gOf(it);
     const label = String(it.servingLabel || (M.fmtServing ? M.fmtServing({ qty: 1, unit: "serving", g }) : "1 serving")).trim();
-    return { name: String(it.name || "Food").trim(), brand: String(it.brand || "").trim(), servings: 1, servingLabel: label, g, per: perFromAI(it.per), source: source || "ai" };
+    return { name: cap(it.name) || "Food", brand: cap(it.brand), servings: 1, servingLabel: cap(label, 60) || "1 serving", g, per: perFromAI(it.per), source: source || "ai" };
   }
   const sumPer = items => {
     const o = {}; NUT.forEach(k => { o[k] = 0; });
@@ -201,7 +204,7 @@ window.M = window.M || {};
     auth: "Your Anthropic key is wrong. Check it in You → AI.",
     forbidden: "Your Anthropic key isn't allowed to do this. Check your Anthropic account.",
     rate_limited: "Too many requests. Try again in a minute.",
-    overloaded: "Claude is overloaded right now. Try again in a minute.",
+    overloaded: "Claude is busy right now. Try again in a minute.",
     server: "Claude had a problem. Try again.",
     timeout: "Claude took too long to answer. Try again.",
     offline: "You're offline. Check your connection and try again.",
@@ -808,9 +811,12 @@ window.M = window.M || {};
       return list.filter(f => f && priceItem(f.barcode) === item).sort((a, b) => num(b.lastUsed) - num(a.lastUsed) || num(b.updatedAt) - num(a.updatedAt))[0] || null;
     } catch (e) { return null; }
   }
-  /* Scanned raw meat / fish or dry rice / pasta takes the cook info (y, raw|dry) of the matching
-     built-in food, so the servings screen offers raw AND cooked amounts. Its own label is the
-     raw (or dry) profile; cooked = raw ÷ y. Already-cooked products are left alone. */
+  /* Scanned raw meat / fish or dry rice / pasta / quinoa takes the cook info (y, raw|dry) of
+     the matching built-in food, so the servings screen offers raw AND cooked amounts. Its own
+     label is the raw (or dry) profile; cooked = raw ÷ y. Already-cooked products are left
+     alone. The rules below pick the built-in food for the tricky names; any other built-in
+     food with cook info (cod, shrimp, scallops, quinoa …) matches when its main words are all
+     in the product's name. */
   const COOK_RULES = [
     [/\bchicken\b.*\b(breasts?|tenders?|tenderloins?|cutlets?)\b|\b(breasts?|tenders?|tenderloins?)\b.*\bchicken\b/, "chicken_breast"],
     [/\bchicken\b.*\bthighs?\b|\bthighs?\b.*\bchicken\b/, "chicken_thigh"],
@@ -821,17 +827,34 @@ window.M = window.M || {};
     [/\brice\b/, "white_rice"],
     [/\b(pasta|spaghetti|penne|rotini|macaroni|fettuccine|linguine|rigatoni|farfalle|fusilli|ziti|orzo|angel hair|lasagna|egg noodles|bowties?|elbows?)\b/, "pasta"]
   ];
-  const NOT_RAW = /\b(cooked|precooked|pre-cooked|grilled|roasted|rotisserie|smoked|deli|sliced|lunch|jerky|canned|pouch|nuggets?|breaded|fried|crispy|sausages?|meatballs?|patty|patties|burgers?|broth|stock|soup|salad|sauce|dip|spread|bites|snacks?|chips|crackers?|cakes?|cereal|flour|milk|vinegar|pudding|krispies|bran|ramen|instant|ready|microwav\w*|minute|steamed|bowls?|meals?|dinner|entree|kit|mix|helper|cheese|strips|popcorn|stuffed|ravioli|tortellini|gnocchi|oil|cauliflower|broccoli|veggie|vegetable)\b/;
+  const NOT_RAW = /\b(cooked|precooked|pre-cooked|grilled|roasted|rotisserie|smoked|deli|sliced|lunch|jerky|canned|pouch|nuggets?|breaded|fried|crispy|sausages?|meatballs?|patty|patties|burgers?|broth|stock|soup|salad|sauce|dip|spread|bites|snacks?|chips|crackers?|cakes?|cereal|flour|milk|vinegar|pudding|krispies|bran|ramen|instant|ready|microwav\w*|minute|steamed|bowls?|meals?|dinner|entree|kit|mix|helper|cheese|strips|popcorn|stuffed|ravioli|tortellini|gnocchi|oil|cauliflower|broccoli|veggie|vegetable|cocktail|scampi|tempura|battered|puffs?|bars?|pilaf|risotto)\b/;
+  /* the built-in food (with cook info) a scanned name stands for, or null */
+  function cookBase(name) {
+    const foods = builtInFoods().filter(f => isObj(f.cook) && num(f.cook.y) > 0);
+    const rule = COOK_RULES.find(r => r[0].test(name));
+    if (rule) {
+      let slug = rule[1];
+      if (slug === "ground_beef") { const m = /\b(\d{2})\s*(%|\/)/.exec(name); const lean = m ? num(m[1]) : 80; slug = lean >= 93 ? "ground_beef_93" : lean >= 90 ? "ground_beef_90" : lean >= 85 ? "ground_beef_85" : "ground_beef_80"; }
+      const hit = foods.find(f => f.id === "g_" + slug);
+      if (hit) return hit;
+    }
+    const have = new Set(wordsOf(name));
+    let best = null, bestN = 0;
+    foods.forEach(f => {
+      if (f.brand) return;
+      const main = nameParts(f).head.filter(w => !/\d/.test(w) && !DESCRIPTOR.test(w) && !PACK_WORD.test(w) && !STATE_WORD.test(w));
+      if (!main.length || !main.every(w => have.has(w))) return;
+      if (main.length > bestN) { best = f; bestN = main.length; }
+    });
+    return best;
+  }
   function cookFor(food) {
     try {
       if (!isObj(food) || !isObj(food.per100g) || !(num(food.per100g.cal) > 0)) return null;
       if (M.cook && typeof M.cook.of === "function" && M.cook.of(food)) return null;
       const name = lc(food.name).replace(/&/g, " and ");
       if (NOT_RAW.test(name)) return null;
-      const rule = COOK_RULES.find(r => r[0].test(name)); if (!rule) return null;
-      let slug = rule[1];
-      if (slug === "ground_beef") { const m = /\b(\d{2})\s*(%|\/)/.exec(name); const lean = m ? num(m[1]) : 80; slug = lean >= 93 ? "ground_beef_93" : lean >= 90 ? "ground_beef_90" : lean >= 85 ? "ground_beef_85" : "ground_beef_80"; }
-      const base = builtInFoods().find(f => f.id === "g_" + slug);
+      const base = cookBase(name);
       const bc = base && isObj(base.cook) ? base.cook : null;
       const y = bc ? num(bc.y) : 0;
       if (!(y > 0.05 && y < 20)) return null;
@@ -936,6 +959,9 @@ window.M = window.M || {};
   /* ======================================================================== */
   const SCAN = {
     bd: "https://cdn.jsdelivr.net/npm/barcode-detector@3.2.2/dist/iife/ponyfill.js",
+    /* the ponyfill runs only if its bytes match: SRI on the page, SHA-256 in the worker */
+    bdSri: "sha384-KJVUIUGb4pmfpWXfD8j3y9ARn6KoGC2vPC/wNUX1O1ZkYemh0BsuvsmdEU2+wS7O",
+    bdSha256: "e3aa2057178b8ea71dd97003270331bbcb46499197b68bc0c7dd18e40c0863ea",
     wasm: "https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.3/dist/reader/zxing_reader.wasm",
     formats: ["ean_13", "upc_a", "upc_e", "ean_8"],
     frameMs: 80,       /* ≈12 frames a second */
@@ -980,17 +1006,27 @@ window.M = window.M || {};
       return { kind: "native", detect: src => Promise.resolve().then(() => det.detect(src)).then(mapCodes, () => []), close() {} };
     }).catch(() => null);
   }
+  /* The worker fetches the ponyfill, checks its SHA-256, and only then runs it (importScripts
+     has no SRI). No crypto.subtle (not a secure page) → the worker fails and the page engine,
+     which has SRI, is used. The .wasm it loads can only do what this checked script lets it. */
   const WORKER_SRC = [
     "var det = null, boot = null;",
+    "function hex(buf) { return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join(''); }",
     "function init() {",
-    "  if (!boot) boot = new Promise(function (res, rej) {",
-    "    try {",
-    "      importScripts(" + JSON.stringify(SCAN.bd) + ");",
-    "      var api = self.BarcodeDetectionAPI;",
-    "      api.setZXingModuleOverrides({ locateFile: function (p, pre) { return /\\.wasm$/.test(p) ? " + JSON.stringify(SCAN.wasm) + " : pre + p; } });",
-    "      det = new api.BarcodeDetector({ formats: " + JSON.stringify(SCAN.formats) + " });",
-    "      api.prepareZXingModule({ fireImmediately: true }).then(function () { res(true); }, rej);",
-    "    } catch (e) { rej(e); }",
+    "  if (!boot) boot = fetch(" + JSON.stringify(SCAN.bd) + ", { mode: 'cors', credentials: 'omit' }).then(function (r) {",
+    "    if (!r.ok) throw new Error('http ' + r.status);",
+    "    return r.arrayBuffer();",
+    "  }).then(function (buf) {",
+    "    return self.crypto.subtle.digest('SHA-256', buf).then(function (h) {",
+    "      if (hex(h) !== " + JSON.stringify(SCAN.bdSha256) + ") throw new Error('ponyfill hash mismatch');",
+    "      var u = URL.createObjectURL(new Blob([buf], { type: 'text/javascript' }));",
+    "      try { importScripts(u); } finally { URL.revokeObjectURL(u); }",
+    "    });",
+    "  }).then(function () {",
+    "    var api = self.BarcodeDetectionAPI;",
+    "    api.setZXingModuleOverrides({ locateFile: function (p, pre) { return /\\.wasm$/.test(p) ? " + JSON.stringify(SCAN.wasm) + " : pre + p; } });",
+    "    det = new api.BarcodeDetector({ formats: " + JSON.stringify(SCAN.formats) + " });",
+    "    return api.prepareZXingModule({ fireImmediately: true });",
     "  });",
     "  return boot;",
     "}",
@@ -1040,7 +1076,7 @@ window.M = window.M || {};
   }
   function mainEngine() {
     const ready = () => !!(win().BarcodeDetectionAPI && typeof win().BarcodeDetectionAPI.BarcodeDetector === "function");
-    return loadScript(SCAN.bd, ready, 20000, "scanner_load", SCAN_MSG.load).then(() => {
+    return loadScript(SCAN.bd, ready, 20000, "scanner_load", SCAN_MSG.load, SCAN.bdSri).then(() => {
       const api = win().BarcodeDetectionAPI;
       api.setZXingModuleOverrides({ locateFile: (p, pre) => (/\.wasm$/.test(p) ? SCAN.wasm : pre + p) });
       const det = new api.BarcodeDetector({ formats: SCAN.formats });
@@ -1701,13 +1737,30 @@ window.M = window.M || {};
     return out;
   };
 
-  /* tesseract.js 5.1.1 — every file pinned on jsdelivr (worker, SIMD/non-SIMD LSTM core, English best_int data). */
+  /* tesseract.js 5.1.1 — every file pinned on jsdelivr (worker, SIMD/non-SIMD LSTM core, English
+     best_int data). The script runs only if its bytes match `sri`. */
   const TESS = {
     script: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js",
+    sri: "sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F",
     workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js",
     corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1",
-    langPath: "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int"
+    langPath: "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int",
+    scriptMs: 20000,   /* the small script */
+    startMs: 120000,   /* download (about 7 MB the first time) + start, at most */
+    readMs: 60000,     /* one read of one photo: the only step with a short timer */
+    idleMs: 90000      /* a reader nobody used this long is closed */
   };
+  const OCR_MSG = {
+    offline: "You're offline. Type the numbers in, or try again when you're online.",
+    load: "The label reader couldn't load. Try again, or type the numbers in.",
+    loadNoAI: "The label reader couldn't load. Try again, or type the numbers in. With an Anthropic key (You → AI), Claude can read labels too.",
+    slow: "The label reader took too long to download. Try again on Wi-Fi, or type the numbers in.",
+    read: "Reading the label took too long. Try a closer, brighter photo.",
+    download: "Downloading the label reader… One time only, about 7 MB.",
+    starting: "Starting the label reader…"
+  };
+  /* why the reader couldn't load, in words that fit this phone right now */
+  const ocrLoadMsg = () => (isOffline() ? OCR_MSG.offline : M.ai.ready() ? OCR_MSG.load : OCR_MSG.loadNoAI);
   const tessReady = () => !!(win().Tesseract && typeof win().Tesseract.createWorker === "function");
   const LABEL_PROMPT = "This photo shows a Nutrition Facts label from a food package. Copy the numbers exactly as printed. Do not estimate, round or convert.\n" +
     "Reply with ONLY this JSON, no prose, no code fences:\n" +
@@ -1723,22 +1776,65 @@ window.M = window.M || {};
     "If the label only lists values per 100 g or 100 mL, copy those and set \"basis\" to \"100g\". " +
     "If no nutrition label is visible, reply {\"found\": false}.";
 
+  /* One reader (a Tesseract worker) is kept while labels are being read, so a second photo
+     doesn't download and start it again. M.food.label.release() closes it (when the label
+     screen closes); it also closes itself after TESS.idleMs unused. A reader that finishes
+     starting after we gave up on it is closed at once. */
+  let ocr = null;   /* {T, p, worker, say, idle, dead} */
+  function dropOcr(o) {
+    if (!o) return;
+    clearTimeout(o.idle);
+    o.dead = true;
+    if (ocr === o) ocr = null;
+    const w = o.worker; o.worker = null;
+    if (w) { try { Promise.resolve(w.terminate()).catch(() => {}); } catch (e) {} }
+  }
+  function ocrWorker(say) {
+    const T = win().Tesseract;
+    if (ocr && ocr.T === T && !ocr.dead) { clearTimeout(ocr.idle); ocr.say = say; return ocr.p; }
+    dropOcr(ocr);
+    const o = { T, worker: null, say, idle: 0, dead: false };
+    const part = { core: 0, lang: 0 };
+    o.p = new Promise((resolve, reject) => {
+      let done = false;
+      const t = setTimeout(() => fail(E("ocr_load", isOffline() ? OCR_MSG.offline : OCR_MSG.slow)), TESS.startMs);
+      function fail(err) { if (done) return; done = true; clearTimeout(t); o.dead = true; if (ocr === o) ocr = null; reject(err); }
+      o.say(OCR_MSG.download);
+      const logger = m => {
+        if (!m || o.dead) return;
+        const st = lc(m.status), p = isNum(m.progress) ? Math.max(0, Math.min(1, m.progress)) : 0;
+        if (st === "recognizing text") { o.say("Reading label… " + Math.round(p * 100) + "%"); return; }
+        if (done) return;
+        if (/from cache/.test(st)) { o.say(OCR_MSG.starting); return; }
+        if (/core/.test(st)) part.core = p;
+        else if (/traineddata|language/.test(st)) { part.core = 1; part.lang = p; }
+        else return;
+        /* the core is ~57% of the download, the English data the rest */
+        const pct = Math.round(100 * (0.57 * part.core + 0.43 * part.lang));
+        o.say(pct > 0 && pct < 100 ? "Downloading the label reader… " + pct + "%. One time only, about 7 MB." : pct >= 100 ? OCR_MSG.starting : OCR_MSG.download);
+      };
+      Promise.resolve().then(() => T.createWorker("eng", 1, { workerPath: TESS.workerPath, corePath: TESS.corePath, langPath: TESS.langPath, workerBlobURL: true, logger }))
+        .then(w => {
+          if (done || o.dead) { try { Promise.resolve(w && w.terminate()).catch(() => {}); } catch (e) {} return; }
+          done = true; clearTimeout(t); o.worker = w; resolve(w);
+        }, () => fail(E("ocr_load", ocrLoadMsg())));
+    });
+    o.p.catch(() => {});
+    ocr = o;
+    return o.p;
+  }
   async function ocrText(file, say) {
-    say("Loading the reader…");
-    await loadScript(TESS.script, tessReady, 20000, "ocr_load", "The label reader couldn't load. Check your connection, or add your Anthropic key in You → AI.");
+    say(OCR_MSG.starting);
+    await loadScript(TESS.script, tessReady, TESS.scriptMs, "ocr_load", ocrLoadMsg, TESS.sri);
     say("Preparing the photo…");
     const prep = await M.img.prepOCR(file, { min: 1600, max: 2200 });
+    const worker = await ocrWorker(say);
+    const o = ocr;
     say("Reading label…");
-    const Tess = win().Tesseract;
-    let worker = null;
     try {
-      worker = await withTimeout(Tess.createWorker("eng", 1, {
-        workerPath: TESS.workerPath, corePath: TESS.corePath, langPath: TESS.langPath, workerBlobURL: true,
-        logger: m => { if (m && m.status === "recognizing text" && isNum(m.progress)) say("Reading label… " + Math.round(m.progress * 100) + "%"); }
-      }), 60000, "ocr", "The label reader took too long to start. Check your connection and try again.");
       const read = async psm => {
         try { await worker.setParameters({ tessedit_pageseg_mode: String(psm), preserve_interword_spaces: "1" }); } catch (e) {}
-        const res = await withTimeout(worker.recognize(prep.canvas || prep.blob), 60000, "ocr", "Reading the label took too long. Try a closer, brighter photo.");
+        const res = await withTimeout(worker.recognize(prep.canvas || prep.blob), TESS.readMs, "ocr", OCR_MSG.read);
         return String((res && res.data && res.data.text) || "");
       };
       /* single column of mixed text sizes first; a uniform block if that finds too little */
@@ -1750,9 +1846,11 @@ window.M = window.M || {};
       }
       return text;
     } catch (e) {
+      /* a reader that timed out may still be busy: start a fresh one next time */
+      if (o) dropOcr(o);
       throw wrapErr(e, "ocr", "The label couldn't be read. Try a closer, brighter photo, or type it in.");
     } finally {
-      if (worker) { try { await worker.terminate(); } catch (e) {} }
+      if (o && !o.dead) { clearTimeout(o.idle); o.idle = setTimeout(() => dropOcr(o), TESS.idleMs); try { if (o.idle && o.idle.unref) o.idle.unref(); } catch (e) {} }
     }
   }
 
@@ -1787,8 +1885,11 @@ window.M = window.M || {};
     const say = m => { try { if (typeof opt.onProgress === "function") opt.onProgress(m); } catch (e) {} };
     return Promise.resolve().then(async () => {
       if (!file) throw E("image", "Take a photo of the label first.");
-      if (!M.ai.probed()) { try { await withTimeout(M.ai.probe(), 2000); } catch (e) {} }
-      const canAI = opt.method !== "ocr" && M.ai.ready() && await M.ai.images();
+      /* Offline, Claude can't be asked; the phone's own reader still works if it was saved
+         on the phone before (the app keeps a copy). If it can't load, the message says offline. */
+      const offline = isOffline();
+      if (!offline && !M.ai.probed()) { try { await withTimeout(M.ai.probe(), 2000); } catch (e) {} }
+      const canAI = !offline && opt.method !== "ocr" && M.ai.ready() && await M.ai.images();
       if (canAI) {
         say("Reading label with Claude…");
         try {
@@ -1797,9 +1898,9 @@ window.M = window.M || {};
           return warning ? { food, method: "ai", rawText: "", warning } : { food, method: "ai", rawText: "" };
         } catch (e) {
           if (isE(e) && ["auth", "forbidden", "rate_limited", "billing", "no_label", "cancelled"].indexOf(e.code) >= 0) throw e;
-          say("Claude couldn't read it. Trying the built-in reader…");
+          say(isE(e) && e.code === "offline" ? "You're offline. Reading it on your phone…" : "Claude couldn't read it. Reading it on your phone…");
         }
-      }
+      } else if (offline && opt.method !== "ocr") say("You're offline. Reading it on your phone…");
       const rawText = await ocrText(file, say);
       const parsed = M.food.label.parse(rawText);
       if (!parsed.fields.length || (!parsed.per.cal && !parsed.per.p && !parsed.per.c && !parsed.per.f)) throw E("ocr", "Couldn't find the numbers on that label. Try a closer, brighter photo, or type them in.", rawText);
@@ -1817,6 +1918,9 @@ window.M = window.M || {};
     });
   };
 
+  /* Close the kept label reader (call when the label screen closes). Safe to call any time. */
+  M.food.label.release = function () { dropOcr(ocr); };
+
   /* ======================================================================== */
   /* M.food.photo / describe / estimateByName                                  */
   /* ======================================================================== */
@@ -1828,7 +1932,7 @@ window.M = window.M || {};
   function itemsFromAI(j, source) {
     const arr = isObj(j) && Array.isArray(j.items) ? j.items : Array.isArray(j) ? j : [];
     const items = arr.filter(isObj).map(it => itemFromAI(it, source)).filter(it => it.name);
-    return { items, note: isObj(j) && j.note ? String(j.note) : "" };
+    return { items, note: isObj(j) && j.note ? cap(j.note, 240) : "" };
   }
 
   M.food.photo = {
@@ -2069,8 +2173,9 @@ window.M = window.M || {};
   const STATE_WORD = /^(raw|uncooked|dry|cooked|grilled|baked|roasted|boiled|steamed|fried|sauteed|sautéed|seared|broiled|poached|smoked|leftover|leftovers)$/i;
   const coreWords = words => { let qw = toks(words); const core = qw.filter(w => !STATE_WORD.test(w) && !STYLE.test(w)); if (core.length) qw = core; return qw; };
   /* The person's own saved foods first (a full name match wins outright), then everything
-     with a small bonus for saved foods; near-ties go to the food with fewer name words they
-     didn't say, then to the food listed first. */
+     with a small bonus for saved foods; near-ties go to their own saved food, then to a food
+     they buy (built-in `staple`), then to the food with fewer name words they didn't say,
+     then to the food listed first. */
   M.food.matchLocal = function (words) {
     const qw = coreWords(words);
     if (!qw.length) return null;
@@ -2080,11 +2185,13 @@ window.M = window.M || {};
     if (bestMine) return bestMine;
     const scored = [];
     mine.forEach((f, i) => { const s = nameScore(qw, f); if (s >= 0) scored.push({ f, s: s + 8 + Math.min(8, Math.log2(num(f.uses) + 1) * 2), i }); });
-    builtInFoods().forEach((f, i) => { const s = nameScore(qw, f); if (s >= 0) scored.push({ f, s: s - (f.brand ? 1 : 0), i: 100000 + i }); });
+    /* a food they buy (built-in `staple`) gets a small bonus: "bread" → their Dave's loaf */
+    builtInFoods().forEach((f, i) => { const s = nameScore(qw, f); if (s >= 0) scored.push({ f, s: s - (f.brand ? 1 : 0) + (f.staple === true ? 3 : 0), i: 100000 + i }); });
     if (!scored.length) return null;
     const top = Math.max.apply(null, scored.map(x => x.s));
     if (top < 8) return null;
-    const near = scored.filter(x => x.s >= top - 3).map(x => Object.assign(x, { u: unsaid(qw, x.f) })).sort((a, b) => a.u - b.u || a.i - b.i);
+    const rank = x => (x.i < 100000 ? 0 : x.f.staple === true ? 1 : 2);
+    const near = scored.filter(x => x.s >= top - 3).map(x => Object.assign(x, { u: unsaid(qw, x.f) })).sort((a, b) => rank(a) - rank(b) || a.u - b.u || a.i - b.i);
     return near[0].f;
   };
   /* A saved meal named in the words: every word they said is in its name (two words or more,
@@ -2180,6 +2287,8 @@ window.M = window.M || {};
       if (!food && q.unit && !/^(g|oz|lb|ml|fl oz|cup|tbsp|tsp|small|medium|large|serving|piece)$/.test(q.unit)) { food = M.food.matchLocal(q.unit + " " + words); if (food) q.unit = null; }
       if (!food && !words && q.unit) { food = M.food.matchLocal(q.unit); if (food) q.unit = null; }
       if (!food && words) food = M.food.matchLocal(part);
+      /* toast is bread ("2 slices of toast", "sourdough toast") */
+      if (!food && /\btoast\b/i.test(words || part)) food = M.food.matchLocal(String(words || part).replace(/\btoast\b/gi, "bread"));
       if (!food) { unmatched.push(part); return; }
       const pv = plateView(food, part);
       const sc = scaleToQuantity(pv.food, q);
@@ -2191,25 +2300,51 @@ window.M = window.M || {};
     }
   };
 
+  /* A promise that gives up (code "slow") after ms; the original keeps running. */
+  function capWait(p, ms) {
+    let t = 0;
+    const stop = v => { clearTimeout(t); return v; };
+    return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(E("slow", AI_MSG.timeout)), ms); })]).then(stop, e => { stop(); throw e; });
+  }
+  /* One short note per reason Claude's answer is missing (no raw API text). */
+  const DESC_NOTE = {
+    offline: "You're offline, so this matched your words to your foods.",
+    slow: "Claude was slow, so this matched your words to your foods.",
+    timeout: "Claude was slow, so this matched your words to your foods.",
+    overloaded: "Claude is busy right now, so this matched your words to your foods.",
+    rate_limited: "Claude is busy right now, so this matched your words to your foods.",
+    other: "Claude didn't answer, so this matched your words to your foods."
+  };
+  const CLAUDE_CAP_MS = 6000;
+  /* describe(text, {slot, method?:"local", claudeMs?}) → {items, unmatched, method:"ai"|"local", note?}
+     Your words are matched on the phone first. When that finds every food, Claude gets ~6 s
+     to do better; otherwise it gets its full time. Offline, Claude isn't asked at all. */
   M.food.describe = function (text, opt) {
     opt = isObj(opt) ? opt : {};
     return Promise.resolve().then(async () => {
       const s = String(text == null ? "" : text).trim();
       if (!s) return { items: [], unmatched: [], method: "local" };
-      if (!M.ai.probed()) { try { await withTimeout(M.ai.probe(), 2000); } catch (e) {} }
+      const loc = M.food.describeLocal(s);
+      const covered = loc.items.length > 0 && !loc.unmatched.length;
       let aiNote = "";
-      if (M.ai.ready() && opt.method !== "local") {
-        try {
-          const prompt = "Someone described what they ate: \"" + s.replace(/"/g, "'").slice(0, 2000) + "\"." + slotHint(opt.slot) +
-            "\nList each food with the portion they said (or a realistic default if they gave none) and estimate its nutrition.\nReply with ONLY this JSON:\n" + ITEMS_SHAPE + "\n" + ITEMS_RULES;
-          const out = itemsFromAI(await M.ai.json(prompt, { tier: opt.tier || "quick" }), "ai");
-          if (out.items.length) return { items: out.items, unmatched: [], note: out.note, method: "ai" };
-        } catch (e) {
-          if (isE(e) && (e.code === "auth" || e.code === "forbidden" || e.code === "billing")) throw e;
-          aiNote = "Claude didn't answer" + (isE(e) && e.message ? " (" + e.message.replace(/\.$/, "") + ")" : "") + ", so this matched your words to your foods and the built-in list.";
+      if (opt.method !== "local") {
+        if (!M.ai.probed()) { try { await withTimeout(M.ai.probe(), 2000); } catch (e) {} }
+        if (M.ai.ready() && isOffline()) aiNote = DESC_NOTE.offline;
+        else if (M.ai.ready()) {
+          try {
+            const prompt = "Someone described what they ate: \"" + s.replace(/"/g, "'").slice(0, 2000) + "\"." + slotHint(opt.slot) +
+              "\nList each food with the portion they said (or a realistic default if they gave none) and estimate its nutrition.\nReply with ONLY this JSON:\n" + ITEMS_SHAPE + "\n" + ITEMS_RULES;
+            const ask = M.ai.json(prompt, { tier: opt.tier || "quick" });
+            ask.catch(() => {});
+            const j = covered ? await capWait(ask, num(opt.claudeMs) > 0 ? num(opt.claudeMs) : CLAUDE_CAP_MS) : await ask;
+            const out = itemsFromAI(j, "ai");
+            if (out.items.length) return { items: out.items, unmatched: [], note: out.note, method: "ai" };
+          } catch (e) {
+            if (isE(e) && (e.code === "auth" || e.code === "forbidden" || e.code === "billing")) throw e;
+            aiNote = DESC_NOTE[isE(e) && e.code] || DESC_NOTE.other;
+          }
         }
       }
-      const loc = M.food.describeLocal(s);
       const out = { items: loc.items, unmatched: loc.unmatched, method: "local" };
       if (aiNote) out.note = aiNote;
       return out;
@@ -2230,10 +2365,10 @@ window.M = window.M || {};
       if (!isObj(j) || !String(j.name || "").trim()) return null;
       const per = perFromAI(j.per);
       const serving = servingFromAI(j.serving, null);
-      const alts = (Array.isArray(j.alts) ? j.alts : []).filter(a => isObj(a) && a.label && num(a.g) > 0).map(a => ({ label: String(a.label), g: r1(num(a.g)) })).slice(0, 4);
+      const alts = (Array.isArray(j.alts) ? j.alts : []).filter(a => isObj(a) && a.label && num(a.g) > 0).map(a => ({ label: cap(a.label, 40), g: r1(num(a.g)) })).slice(0, 4);
       if (serving.g && !alts.some(a => a.g === 100)) alts.push({ label: "100 g", g: 100 });
       const t = now();
-      return { id: uid(), name: String(j.name).trim(), brand: String(j.brand || "").trim(), barcode: "", source: "ai", serving, per, per100g: serving.g ? scaleTo100(per, serving.g) : null, alts, createdAt: t, updatedAt: t, uses: 0, lastUsed: 0, pid: null };
+      return { id: uid(), name: cap(j.name), brand: cap(j.brand), barcode: "", source: "ai", serving, per, per100g: serving.g ? scaleTo100(per, serving.g) : null, alts, createdAt: t, updatedAt: t, uses: 0, lastUsed: 0, pid: null };
     });
   };
 
@@ -2242,12 +2377,13 @@ window.M = window.M || {};
   /* ======================================================================== */
   function remainingOf(opt) {
     const r = isObj(opt.remaining) ? opt.remaining : null;
-    if (r) return { cal: num(r.cal), p: num(r.p), c: num(r.c), f: num(r.f) };
+    /* a missing calorie number means "not known", not "none left" */
+    if (r && r.cal !== null && r.cal !== "" && isNum(Number(r.cal))) return { cal: num(r.cal), p: num(r.p), c: num(r.c), f: num(r.f) };
     try {
       const pid = opt.pid || (M.pid ? M.pid() : null);
       const t = M.person ? M.person(pid).targets : null;
       const eaten = M.log && M.log.totals ? M.log.totals(opt.date || (M.today ? M.today() : undefined), pid) : null;
-      if (t) return { cal: num(t.cal) - num(eaten && eaten.cal), p: num(t.p) - num(eaten && eaten.p), c: num(t.c) - num(eaten && eaten.c), f: num(t.f) - num(eaten && eaten.f) };
+      if (t && num(t.cal) > 0) return { cal: num(t.cal) - num(eaten && eaten.cal), p: num(t.p) - num(eaten && eaten.p), c: num(t.c) - num(eaten && eaten.c), f: num(t.f) - num(eaten && eaten.f) };
     } catch (e) {}
     return { cal: 600, p: 40, c: 60, f: 20 };
   }
@@ -2277,7 +2413,23 @@ window.M = window.M || {};
     return s;
   };
   const fits = (per, rem) => num(per && per.cal) <= Math.max(0, rem.cal) + 150;
-  /* (c) built-in ideas from M.DB.suggest */
+  /* Share of an idea's foods that they actually buy (built-in foods marked `staple`), 0…1. */
+  function stapleShare(s) {
+    const items = Array.isArray(s && s.items) ? s.items : [];
+    if (!items.length) return 0;
+    let byId = null;
+    try { byId = new Map(builtInFoods().map(f => [f.id, f])); } catch (e) { return 0; }
+    const food = it => {
+      if (!it || !it.foodId) return null;
+      let f = byId.get(it.foodId);
+      if (!f) { try { const a = M.DB && M.DB.alias && M.DB.alias[it.foodId]; if (a && a.id) f = byId.get(a.id); } catch (e) {} }
+      return f || null;
+    };
+    return items.filter(it => { const f = food(it); return !!(f && f.staple === true); }).length / items.length;
+  }
+  /* (c) built-in ideas from M.DB.suggest. Ideas made of foods they buy score higher. With no
+     calories left, only ideas that still fit (≤ 150) come back, lightest first, and the list
+     has .over = true so the screen can say why. */
   M.food.suggestBuiltin = function (opt) {
     opt = isObj(opt) ? opt : {};
     let list = [];
@@ -2285,12 +2437,16 @@ window.M = window.M || {};
     const remaining = remainingOf(opt);
     const n = num(opt.n, 6) || 6;
     const exclude = new Set(Array.isArray(opt.exclude) ? opt.exclude : []);
-    const scored = list.filter(s => s && s.id && !exclude.has(s.id)).map(s => ({ s, score: M.food.scoreSuggestion(s, opt.slot, remaining, opt.prefs, opt.jitter) }));
+    const scored = list.filter(s => s && s.id && !exclude.has(s.id)).map(s => ({ s, score: M.food.scoreSuggestion(s, opt.slot, remaining, opt.prefs, opt.jitter) + 8 * stapleShare(s) }));
     scored.sort((a, b) => b.score - a.score);
     const cap = Math.max(0, remaining.cal) + 150;
-    const ok = scored.filter(x => (x.s.per || sumPer(x.s.items)).cal <= cap);
-    const pool = ok.length >= n ? ok : scored;
-    return pool.slice(0, n).map(x => Object.assign({}, x.s, { per: x.s.per || sumPer(x.s.items), source: "idea", score: r1(x.score), items: (x.s.items || []).map(it => Object.assign({ servings: 1 }, it)) }));
+    const kcalOf = x => num((x.s.per || sumPer(x.s.items)).cal);
+    const ok = scored.filter(x => kcalOf(x) <= cap);
+    const over = remaining.cal <= 0;
+    const pool = over ? ok.sort((a, b) => kcalOf(a) - kcalOf(b)) : ok.length >= n ? ok : scored;
+    const out = pool.slice(0, n).map(x => Object.assign({}, x.s, { per: x.s.per || sumPer(x.s.items), source: "idea", score: r1(x.score), items: (x.s.items || []).map(it => Object.assign({ servings: 1 }, it)) }));
+    if (over) out.over = true;
+    return out;
   };
   /* A logged entry / meal item as a suggestion item: every field passed through as is
      (state, cook and anything newer), minus the entry's own id, slot and time. */
@@ -2322,8 +2478,11 @@ window.M = window.M || {};
         return { id: m.id, mealId: m.id, name: m.name, desc: m.desc || "", slot: m.slot, items, per: Object.assign({}, m.per || sumPer(items)), tags: [], source: "mine", uses: num(m.uses) };
       });
   };
-  /* (b) foods logged together in this slot on the same day, over the last 60 days (a saved
-     meal counts as one item). → [{id, keys, count, last, items}] most frequent first. */
+  /* (b) foods logged together in this slot, over the last 60 days (a saved meal counts as one
+     item). "Together" = logged within an hour of the first one (a snack at 3 pm and another at
+     5 pm are two sittings). → [{id, keys, count, last, items}] most frequent first. */
+  const COMBO_GAP = 60 * 60 * 1000;
+  const entryKey = e => (e.mealId ? "m:" + e.mealId : e.foodId ? "f:" + e.foodId : "n:" + lc(e.name) + "|" + lc(e.brand));
   M.food.combos = function (pid, slot, days) {
     pid = pid || (M.pid ? M.pid() : null);
     if (!pid || !M.MS || !isObj(M.MS.days) || !slot) return [];
@@ -2332,13 +2491,24 @@ window.M = window.M || {};
     Object.keys(M.MS.days).forEach(id => {
       const d = M.MS.days[id];
       if (!d || d.pid !== pid || !(d.date >= from) || !(d.date <= today) || !Array.isArray(d.entries)) return;
-      const map = new Map(), pos = new Map();
-      d.entries.forEach((e, i) => {
-        if (!e || e.slot !== slot || !e.name) return;
-        const k = e.mealId ? "m:" + e.mealId : e.foodId ? "f:" + e.foodId : "n:" + lc(e.name) + "|" + lc(e.brand);
-        if (!map.has(k) || num(e.at) >= num(map.get(k).at)) { map.set(k, e); pos.set(k, i); }
+      /* sittings: entries by time; one without a time joins the untimed group */
+      const rows = [];
+      d.entries.forEach((e, i) => { if (isObj(e) && e.slot === slot && e.name) rows.push({ e, i, at: num(e.at) }); });
+      rows.sort((a, b) => a.at - b.at || a.i - b.i);
+      const groups = [];
+      let cur = null;
+      rows.forEach(r => {
+        if (!(r.at > 0)) { (groups.untimed = groups.untimed || []).push(r); return; }
+        if (!cur || r.at - cur.start > COMBO_GAP) { cur = { start: r.at, rows: [] }; groups.push(cur); }
+        cur.rows.push(r);
       });
-      if (map.size >= 2) sets.push({ keys: Array.from(map.keys()).sort(), map, pos, date: d.date });
+      const all = groups.map(g => g.rows);
+      if (groups.untimed) all.push(groups.untimed);
+      all.forEach(g => {
+        const map = new Map(), pos = new Map();
+        g.forEach(({ e, i }) => { const k = entryKey(e); if (!map.has(k) || num(e.at) >= num(map.get(k).at)) { map.set(k, e); pos.set(k, i); } });
+        if (map.size >= 2) sets.push({ keys: Array.from(map.keys()).sort(), map, pos, date: d.date });
+      });
     });
     const cand = new Map();
     const addCand = keys => { if (keys.length >= 2) cand.set(keys.join("~"), keys); };
@@ -2357,12 +2527,17 @@ window.M = window.M || {};
     return kept.sort((a, b) => weight(b) - weight(a) || (a.last < b.last ? 1 : a.last > b.last ? -1 : 0));
   };
   const shortName = n => { const s = String(n || "").replace(/\s*\([^)]*\)/g, "").split(",")[0].trim(); return s || String(n || "Food"); };
+  /* The foods in a list of items, as one key (amounts ignored): "f:id" or "n:name|brand". */
+  const foodsKey = items => (Array.isArray(items) ? items : []).filter(isObj).map(it => (it.foodId ? "f:" + it.foodId : "n:" + lc(String(it.name || "").replace(/\s+/g, " ").trim()) + "|" + lc(it.brand))).sort().join("~");
   M.food.suggestOften = function (opt) {
     opt = isObj(opt) ? opt : {};
     const rem = remainingOf(opt), exclude = new Set(Array.isArray(opt.exclude) ? opt.exclude : []);
+    /* a combo that is just one of their saved meals (same foods) is already offered as that meal */
+    const saved = new Set();
+    try { (M.meals && M.meals.list ? M.meals.list(opt.slot) : []).forEach(m => { if (m && Array.isArray(m.items) && m.items.length) saved.add(foodsKey(m.items)); }); } catch (e) {}
     return M.food.combos(opt.pid, opt.slot, 60)
       .map(c => Object.assign(c, { per: sumPer(c.items), sid: "often:" + c.id }))
-      .filter(c => !exclude.has(c.sid) && fits(c.per, rem))
+      .filter(c => !exclude.has(c.sid) && fits(c.per, rem) && !saved.has(foodsKey(c.items)))
       .slice(0, num(opt.n, 3) || 3)
       .map(c => {
         const names = c.items.map(it => shortName(it.name));
@@ -2387,24 +2562,46 @@ window.M = window.M || {};
     "Reply with ONLY this JSON, no prose, no code fences:\n{\"suggestions\":[{\"name\": string, \"desc\": string (one plain sentence), \"store\": \"King Soopers\" or \"Costco\" or \"Either\", \"prepMin\": number, " +
     "\"items\":[{\"name\": string, \"servingLabel\": string like \"6 oz (170 g)\", \"g\": number or null, \"per\": {\"cal\": number, \"p\": number, \"c\": number, \"f\": number, \"fiber\": number, \"sugar\": number, \"sodium_mg\": number}}]}]}\n" +
     "per is for that item's whole portion. Calories kcal; p c f fiber sugar grams; sodium_mg milligrams. Numbers only.";
-  /* (d) Claude ideas → [] on any problem (never throws) */
+  /* (d) Claude ideas → [] when Claude isn't set up; rejects {code, message} when it fails. */
   M.food.suggestClaude = function (opt) {
     opt = isObj(opt) ? opt : {};
     return Promise.resolve().then(async () => {
       if (!M.ai.probed()) { try { await withTimeout(M.ai.probe(), 1500); } catch (e) {} }
       if (!M.ai.ready()) return [];
-      const j = await M.ai.json(SUGGEST_PROMPT(opt.slot, remainingOf(opt), opt.prefs, pantry()), { tier: "quick", cache: false });
+      const j = await M.ai.json(SUGGEST_PROMPT(opt.slot, remainingOf(opt), opt.prefs, pantry()), { tier: "quick", cache: false, signal: opt.signal });
       const arr = isObj(j) && Array.isArray(j.suggestions) ? j.suggestions : Array.isArray(j) ? j : [];
       return arr.filter(isObj).map(sg => {
         const items = (Array.isArray(sg.items) ? sg.items : []).filter(isObj).map(it => itemFromAI(it, "ai"));
         if (!items.length || !String(sg.name || "").trim()) return null;
-        return { id: "ai_" + uid(), name: String(sg.name).trim(), desc: String(sg.desc || "").trim(), slot: opt.slot || "Any", store: /costco/i.test(sg.store) ? "Costco" : /soopers|kroger/i.test(sg.store) ? "King Soopers" : "Either", prepMin: r0(num(sg.prepMin)), items, per: sumPer(items), tags: ["high-protein"], source: "claude" };
+        return { id: "ai_" + uid(), name: cap(sg.name), desc: cap(sg.desc, 240), slot: opt.slot || "Any", store: /costco/i.test(sg.store) ? "Costco" : /soopers|kroger/i.test(sg.store) ? "King Soopers" : "Either", prepMin: r0(num(sg.prepMin)), items, per: sumPer(items), tags: ["high-protein"], source: "claude" };
       }).filter(Boolean).slice(0, 3);
     });
   };
-  /* suggest({pid, slot, remaining, prefs, exclude, ai?:false}) → [Suggestion] in this order:
-     "mine" (saved meals that fit) · "often" (usual combos in this slot) · "idea" (built-in) · "claude".
-     Never rejects. When Claude fails the list has .aiError (plain words). */
+  /* Why Claude's ideas are missing: one short fixed sentence per reason (no raw API text).
+     Problems they must fix themselves (wrong key, no credits, model) keep their own message. */
+  const SUG_NOTE = {
+    offline: "You're offline, so there are no ideas from Claude.",
+    slow: "Claude was slow, so there are no ideas from Claude this time.",
+    timeout: "Claude was slow, so there are no ideas from Claude this time.",
+    overloaded: "Claude is busy right now. Try again in a minute.",
+    rate_limited: "Claude is busy right now. Try again in a minute.",
+    network: "Claude isn't answering right now. Try again in a minute.",
+    other: "Claude didn't answer. Try again."
+  };
+  const sugNote = e => {
+    const code = isE(e) ? e.code : "";
+    if (SUG_NOTE[code]) return SUG_NOTE[code];
+    if (["auth", "forbidden", "billing", "model"].indexOf(code) >= 0 && e.message) return e.message;
+    return SUG_NOTE.other;
+  };
+  const SUGGEST_CLAUDE_MS = 20000;
+  /* suggest({pid, slot, remaining, prefs, exclude, ai?:false, onClaude?, claudeMs?}) → [Suggestion]
+     in this order: "mine" (saved meals that fit) · "often" (usual combos in this slot) · "idea"
+     (built-in) · "claude". Never rejects. The phone's own ideas never wait long for Claude:
+     - with onClaude(list, note): the phone's ideas come back at once (list.claudePending = true
+       while Claude is asked), then onClaude gets Claude's ideas, or [] and a plain note;
+     - without it: Claude gets up to claudeMs (20 s), then the list comes back without it.
+     list.aiError = why Claude's ideas are missing (plain words); list.over = no calories left. */
   M.food.suggest = function (opt) {
     opt = isObj(opt) ? opt : {};
     const safe = f => { try { return f() || []; } catch (e) { return []; } };
@@ -2413,14 +2610,32 @@ window.M = window.M || {};
       const often = safe(() => M.food.suggestOften(opt));
       const n = Math.max(3, (num(opt.n, 6) || 6) - mine.length - often.length);
       const ideas = safe(() => M.food.suggestBuiltin(Object.assign({}, opt, { n })));
-      let claude = [], aiError = "";
-      if (opt.ai !== false) {
-        try { claude = await M.food.suggestClaude(opt); }
-        catch (e) { claude = []; aiError = isE(e) ? e.message : AI_MSG.network; }
+      const out = mine.concat(often, ideas);
+      if (ideas.over) out.over = true;
+      if (opt.ai === false) return out;
+      if (!M.ai.probed()) { try { await withTimeout(M.ai.probe(), 1500); } catch (e) {} }
+      if (!M.ai.ready()) return out;
+      if (isOffline()) { out.aiError = SUG_NOTE.offline; return out; }
+      const ctl = typeof AbortController === "function" ? new AbortController() : null;
+      const ask = M.food.suggestClaude(Object.assign({}, opt, { signal: ctl ? ctl.signal : undefined }));
+      ask.catch(() => {});
+      if (typeof opt.onClaude === "function") {
+        const cb = opt.onClaude;
+        out.claudePending = true;
+        ask.then(list => { try { cb(Array.isArray(list) ? list : [], ""); } catch (e) {} },
+          e => { try { cb([], sugNote(e)); } catch (x) {} });
+        return out;
       }
-      const out = mine.concat(often, ideas, claude);
-      if (aiError) out.aiError = aiError;
-      return out;
+      try {
+        const claude = await capWait(ask, num(opt.claudeMs) > 0 ? num(opt.claudeMs) : SUGGEST_CLAUDE_MS);
+        const all = out.concat(claude);
+        if (out.over) all.over = true;
+        return all;
+      } catch (e) {
+        if (isE(e) && e.code === "slow" && ctl) { try { ctl.abort(); } catch (x) {} }
+        out.aiError = sugNote(e);
+        return out;
+      }
     }).catch(() => safe(() => M.food.suggestBuiltin(opt)));
   };
 

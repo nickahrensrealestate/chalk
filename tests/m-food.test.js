@@ -124,7 +124,7 @@ t("ai.json key path: plain-English errors for 401, 403, 429, 529, 500, 400 credi
     [401, { type: "authentication_error", message: "invalid x-api-key" }, "auth", /key is wrong/i],
     [403, { type: "permission_error", message: "no" }, "forbidden", /isn't allowed/i],
     [429, { type: "rate_limit_error", message: "slow down" }, "rate_limited", /too many requests.*minute/i],
-    [529, { type: "overloaded_error", message: "Overloaded" }, "overloaded", /overloaded.*minute/i],
+    [529, { type: "overloaded_error", message: "Overloaded" }, "overloaded", /busy.*minute/i],
     [500, { type: "api_error", message: "boom" }, "server", /problem/i],
     [400, { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API." }, "billing", /credits/i],
     [404, { type: "not_found_error", message: "model" }, "model", /model/i]
@@ -940,7 +940,7 @@ t("describe with Claude: items from the reply; Claude failing falls back to loca
   global.fetch = async () => ({ ok: false, status: 529, json: async () => ({ error: { type: "overloaded_error" } }) });
   const f = await M.food.describe("2 eggs", {});
   assert.strictEqual(f.method, "local");
-  assert.ok(f.items.length === 1 && /overloaded/i.test(f.note), f.note);
+  assert.ok(f.items.length === 1 && f.note === "Claude is busy right now, so this matched your words to your foods.", f.note);
   global.fetch = async () => ({ ok: false, status: 401, json: async () => ({ error: { type: "authentication_error" } }) });
   await M.food.describe("2 eggs", {}).then(() => assert.fail(), e => assert.strictEqual(e.code, "auth", "a wrong key is surfaced"));
   M.ai.setKey(""); delete global.fetch;
@@ -992,7 +992,12 @@ t("combos: foods logged together in a slot over 60 days; a saved meal counts as 
   const oats = M.meals.add({ name: "Protein oats", desc: "", slot: "Breakfast", items: [{ name: "Oats", servingLabel: "1/2 cup", per: { cal: 150, p: 5, c: 27, f: 3 } }] });
   [1, 2, 3].forEach(d => logDay(d, "Breakfast", [EGG, TOAST, BUTTER]));
   [4, 5].forEach(d => logDay(d, "Breakfast", [EGG, TOAST]));
-  [6, 7].forEach(d => { logDay(d, "Breakfast", [{ name: "Banana", servingLabel: "1 medium (118 g)", per: { cal: 105, p: 1.3, c: 27, f: 0.4 } }]); M.log.addMeal(M.addDays(M.today(), -d), oats.id, 1, "Breakfast"); });
+  [6, 7].forEach(d => {
+    const key = M.addDays(M.today(), -d);
+    logDay(d, "Breakfast", [{ name: "Banana", servingLabel: "1 medium (118 g)", per: { cal: 105, p: 1.3, c: 27, f: 0.4 } }]);
+    const e = M.log.addMeal(key, oats.id, 1, "Breakfast")[0];
+    M.log.update(key, e.id, { at: Date.now() - d * 864e5 + 5 * 60000 });   /* logged 5 minutes after the banana */
+  });
   logDay(8, "Lunch", [EGG, TOAST]);
   logDay(70, "Breakfast", [EGG, TOAST]);
   const c = M.food.combos("nick", "Breakfast");
@@ -1002,6 +1007,20 @@ t("combos: foods logged together in a slot over 60 days; a saved meal counts as 
   assert.ok(oatsCombo && oatsCombo.servingLabel === "1 serving", "the saved meal is one item");
   assert.ok(c[0].items.every(i => !i.id && !i.slot && !i.at), "entry ids/slots/times not copied");
   assert.deepStrictEqual(M.food.combos("nick", "Dinner"), []);
+});
+
+t("UX2-25 combos: only foods logged within an hour of each other count as eaten together", () => {
+  M.reset();
+  const APPLE = { name: "Apple", servingLabel: "1 medium (182 g)", per: { cal: 95, p: 0.5, c: 25, f: 0.3 } };
+  const YOG = { name: "Greek yogurt", servingLabel: "1 cup (227 g)", per: { cal: 150, p: 20, c: 8, f: 4 } };
+  const at = (d, h, m) => { const x = new Date(); x.setDate(x.getDate() - d); x.setHours(h, m || 0, 0, 0); return x.getTime(); };
+  /* 3 pm apple, 5 pm yogurt: two snacks, three days running */
+  [1, 2, 3].forEach(d => { const key = M.addDays(M.today(), -d); M.log.add(key, Object.assign({ slot: "Snacks", servings: 1, at: at(d, 15) }, APPLE)); M.log.add(key, Object.assign({ slot: "Snacks", servings: 1, at: at(d, 17) }, YOG)); });
+  assert.deepStrictEqual(M.food.combos("nick", "Snacks"), [], "2 hours apart: not a combo");
+  /* the same two within 20 minutes on two days: a combo */
+  [4, 5].forEach(d => { const key = M.addDays(M.today(), -d); M.log.add(key, Object.assign({ slot: "Snacks", servings: 1, at: at(d, 15) }, APPLE)); M.log.add(key, Object.assign({ slot: "Snacks", servings: 1, at: at(d, 15, 20) }, YOG)); });
+  const c = M.food.combos("nick", "Snacks");
+  assert.deepStrictEqual(c.map(x => x.items.map(i => i.name).join(" + ") + " ×" + x.count), ["Apple + Greek yogurt ×2"]);
 });
 
 t("suggest: order is mine → often → idea → claude, each tagged; mine and often fit what's left", async () => {
@@ -1288,6 +1307,202 @@ t("BEF-04/OFL-04 scanner engine: no offline gate (a cached engine starts offline
   assert.strictEqual(M.food.scanner.state(), "failed");
   delete global.document; delete NAV.onLine;
   M.food.scanner._setEngine(null);
+});
+
+/* Built-in `staple` flags (the foods they buy) set just for one test, then put back. */
+function withStaples(ids, fn) {
+  const G = M.DB.generic, had = G.map(f => f.staple);
+  G.forEach(f => { delete f.staple; });
+  ids.forEach(id => { const f = G.find(x => x.id === id); assert.ok(f, "built-in food " + id); f.staple = true; });
+  const done = () => G.forEach((f, i) => { if (had[i] === undefined) delete f.staple; else f.staple = had[i]; });
+  let out;
+  try { out = fn(); } catch (e) { done(); throw e; }
+  if (out && typeof out.then === "function") return out.then(v => { done(); return v; }, e => { done(); throw e; });
+  done(); return out;
+}
+
+t("staples: describe picks the food they buy on near-ties (never over the food they named, never over their own saved food); 'toast' is bread", () => {
+  M.reset(); M.ai.setKey("");
+  const pick = s => { const r = M.food.describeLocal(s); return r.items.length ? r.items[0].foodId : "(none) " + r.unmatched.join(","); };
+  withStaples(["g_dkb_21_grains", "g_kirkland_organic_chicken", "g_greek_yogurt_2", "g_roma_tomato"], () => {
+    assert.deepStrictEqual(["2 slices bread", "6 oz chicken breast", "greek yogurt", "tomato"].map(pick), ["g_dkb_21_grains", "g_kirkland_organic_chicken", "g_greek_yogurt_2", "g_roma_tomato"]);
+    assert.strictEqual(pick("chicken thigh"), "g_chicken_thigh", "a staple never beats the food they named");
+    assert.strictEqual(pick("white bread"), "g_white_bread");
+    assert.strictEqual(pick("greek yogurt nonfat"), "g_greek_yogurt_0");
+    assert.strictEqual(pick("2 slices of toast"), "g_dkb_21_grains", "toast → bread");
+    const mine = M.foods.add({ name: "Greek yogurt 2%", brand: "Fage", source: "off", serving: { qty: 1, unit: "container", g: 150 }, per: { cal: 120, p: 15, c: 6, f: 3, fiber: 0, sugar: 6, sodium: 60 } });
+    assert.strictEqual(pick("greek yogurt"), mine.id, "their own saved food still first");
+  });
+  withStaples([], () => { assert.ok(/^g_/.test(pick("sourdough toast")), "toast → bread without staples too: " + pick("sourdough toast")); });
+});
+
+t("staples: built-in meal ideas made of foods they buy score higher", () => {
+  const rem = { cal: 700, p: 50, c: 70, f: 25 };
+  const idea = M.DB.suggest.find(s => s.id === "s_eggs_dkb_toast");
+  const ids = idea.items.map(it => it.foodId).filter(id => M.DB.generic.some(f => f.id === id));
+  const score = () => M.food.suggestBuiltin({ slot: "Breakfast", remaining: rem, jitter: 0, n: 99 }).find(s => s.id === idea.id).score;
+  const plain = withStaples([], score);
+  const all = withStaples(ids, score);
+  const some = withStaples(ids.slice(0, 1), score);
+  near(all - plain, 8 * ids.length / idea.items.length, 0.11, "all its built-in foods are staples");
+  assert.ok(some > plain && some < all, [plain, some, all].join(" "));
+});
+
+t("BEF-09/BEF-10 suggest: a usual combo that is one of their saved meals isn't shown twice; nothing left → only light ideas, lightest first, list.over", async () => {
+  M.reset(); M.ai.setKey("");
+  const meal = M.meals.add({ name: "Eggs and toast", desc: "The usual.", slot: "Breakfast", items: [EGG, TOAST] });
+  [1, 2, 3].forEach(d => logDay(d, "Breakfast", [EGG, TOAST]));
+  let list = await M.food.suggest({ pid: "nick", slot: "Breakfast", remaining: { cal: 700, p: 50, c: 70, f: 25 }, ai: false });
+  assert.ok(list.some(s => s.mealId === meal.id));
+  assert.ok(!list.some(s => s.source === "often"), "Egg + Bread = their 'Eggs and toast': " + list.map(s => s.source + ":" + s.name).join(", "));
+  assert.ok(!list.over);
+  [1, 2].forEach(d => logDay(d, "Breakfast", [BUTTER]));
+  list = await M.food.suggest({ pid: "nick", slot: "Breakfast", remaining: { cal: 700, p: 50, c: 70, f: 25 }, ai: false });
+  assert.ok(list.some(s => s.source === "often"), "Egg + Bread + Butter is not the saved meal");
+  for (const cal of [0, -300]) {
+    list = await M.food.suggest({ pid: "nick", slot: "Breakfast", remaining: { cal, p: 0, c: 0, f: 0 }, ai: false });
+    assert.strictEqual(list.over, true, "flag for the screen");
+    assert.ok(list.length >= 1 && list.every(s => s.per.cal <= 150), list.map(s => s.name + " " + s.per.cal).join(", "));
+    const kc = list.filter(s => s.source === "idea").map(s => s.per.cal);
+    assert.deepStrictEqual(kc, kc.slice().sort((a, b) => a - b), "lightest first");
+  }
+  list = await M.food.suggest({ pid: "nick", slot: "Breakfast", remaining: { cal: null }, ai: false });
+  assert.ok(!list.over && list.length >= 6, "calories left not known is not 'none left'");
+});
+
+t("UX2-03 scanned cod / shrimp / scallops / quinoa take the cook info of a matching built-in raw or dry food (when the built-in list has one)", async () => {
+  M.reset();
+  const G = M.DB.generic, n0 = G.length;
+  const add = (id, name, word, y, per100g) => G.push({ id, name, brand: "", barcode: "", source: "generic", serving: { qty: 4, unit: "oz", g: 113 }, per: per100g, per100g, alts: [], cook: { y, word, per100gCooked: Object.keys(per100g).reduce((o, k) => (o[k] = per100g[k] / y, o), {}) }, uses: 0, lastUsed: 0, createdAt: 0, updatedAt: 0, pid: null });
+  add("g_t_cod", "Cod, raw", "raw", 0.8, { cal: 82, p: 18, c: 0, f: 0.7, fiber: 0, sugar: 0, sodium: 54 });
+  add("g_t_shrimp", "Shrimp, raw", "raw", 0.85, { cal: 85, p: 20, c: 0, f: 0.5, fiber: 0, sugar: 0, sodium: 119 });
+  add("g_t_scallops", "Scallops, raw", "raw", 0.8, { cal: 69, p: 12, c: 3, f: 0.5, fiber: 0, sugar: 0, sodium: 392 });
+  add("g_t_quinoa", "Quinoa, dry", "dry", 2.6, { cal: 368, p: 14, c: 64, f: 6, fiber: 7, sugar: 0, sodium: 5 });
+  try {
+    const cf = (name, kcal) => M.food.cookFor({ name, per100g: { cal: kcal, p: 15, c: 1, f: 1, fiber: 0, sugar: 0, sodium: 100 } });
+    assert.deepStrictEqual([cf("Wild Caught Cod Fillets", 80), cf("Raw Shrimp 31-40 Count", 90), cf("Sea Scallops", 70), cf("Organic Tri-Color Quinoa", 370)].map(c => c && c.word + " " + c.y), ["raw 0.8", "raw 0.85", "raw 0.8", "dry 2.6"]);
+    near(cf("Wild Caught Cod Fillets", 80).per100gCooked.cal, 100, 0.01, "this label's raw ÷ y");
+    assert.deepStrictEqual([cf("Cooked Shrimp", 99), cf("Shrimp Cocktail", 99), cf("Breaded Cod Fillets", 200), cf("Quinoa Chips", 450)], [null, null, null, null], "already cooked or not the plain food");
+  } finally { G.length = n0; }
+});
+
+/* A fake Tesseract: counts workers, reports download progress, answers with `text`. */
+function fakeTess(text, opt) {
+  opt = opt || {};
+  const T = { made: 0, ended: 0, createWorker: async (lang, oem, o) => {
+    T.made++;
+    if (opt.startDelay) await new Promise(r => setTimeout(r, opt.startDelay));
+    if (o && o.logger) { o.logger({ status: "loading tesseract core", progress: 0 }); o.logger({ status: "loading tesseract core", progress: 1 }); o.logger({ status: "loading language traineddata", progress: 0.5 }); o.logger({ status: "loading language traineddata", progress: 1 }); }
+    return { setParameters: async () => {}, terminate: async () => { T.ended++; },
+      recognize: async () => { if (opt.readDelay) await new Promise(r => setTimeout(r, opt.readDelay)); if (o && o.logger) o.logger({ status: "recognizing text", progress: 0.5 }); return { data: { text } }; } };
+  } };
+  return T;
+}
+const LABEL_TXT = "Nutrition Facts\nServing size 1 bar (40g)\nCalories 190\nTotal Fat 7g\nSodium 210mg\nTotal Carbohydrate 23g\nDietary Fiber 3g\nTotal Sugars 8g\nProtein 10g";
+
+t("OFL-06/PRF-10/BEF-20 label reader: download progress in plain words; one reader kept for the next photo, closed by release(); a reader that starts too late is closed; only reading has a short timer", async () => {
+  M.ai.setKey("");
+  const realPrep = M.img.prepOCR, { TESS } = M.food._, keep = Object.assign({}, TESS);
+  M.img.prepOCR = async () => ({ canvas: {}, blob: {}, width: 10, height: 10 });
+  const photo = { type: "image/jpeg", size: 10 };
+  try {
+    M.food.label.release();
+    let T = global.Tesseract = fakeTess(LABEL_TXT);
+    const said = [];
+    const r = await M.food.label.fromImage(photo, { onProgress: m => said.push(m) });
+    assert.strictEqual(r.food.per.cal, 190);
+    assert.ok(said.includes("Downloading the label reader… One time only, about 7 MB."), said.join(" | "));
+    assert.ok(said.includes("Downloading the label reader… 57%. One time only, about 7 MB.") && said.includes("Downloading the label reader… 78%. One time only, about 7 MB."), said.join(" | "));
+    assert.ok(said.includes("Reading label… 50%"), said.join(" | "));
+    await M.food.label.fromImage(photo);
+    assert.deepStrictEqual([T.made, T.ended], [1, 0], "the second photo uses the same reader");
+    M.food.label.release();
+    assert.strictEqual(T.ended, 1, "release() closes it");
+    await M.food.label.fromImage(photo);
+    assert.strictEqual(T.made, 2, "a new one after release");
+    M.food.label.release();
+    /* starts after the time limit: we give up with plain words, and the late reader is closed */
+    TESS.startMs = 30;
+    T = global.Tesseract = fakeTess(LABEL_TXT, { startDelay: 80 });
+    await M.food.label.fromImage(photo).then(() => assert.fail(), e => { assert.strictEqual(e.code, "ocr_load"); assert.ok(/took too long to download.*Wi-Fi/.test(e.message), e.message); });
+    await new Promise(r => setTimeout(r, 120));
+    assert.deepStrictEqual([T.made, T.ended], [1, 1], "the late reader is closed at once");
+    Object.assign(TESS, keep);
+    /* a slow download is fine; a stuck read is not (and that reader is dropped) */
+    TESS.readMs = 30;
+    T = global.Tesseract = fakeTess(LABEL_TXT, { startDelay: 60, readDelay: 200 });
+    await M.food.label.fromImage(photo).then(() => assert.fail(), e => { assert.ok(/took too long.*closer, brighter photo/.test(e.message), e.message); });
+    assert.strictEqual(T.ended, 1, "the stuck reader is closed");
+  } finally { Object.assign(TESS, keep); M.food.label.release(); M.img.prepOCR = realPrep; delete global.Tesseract; }
+});
+
+t("OFL-07/OFL-08 label offline or reader not loading: Claude isn't asked offline; plain words that fit (offline / key saved / no key); the script is hash-checked (SRI)", async () => {
+  const { TESS } = M.food._;
+  let calls = 0;
+  global.fetch = async () => { calls++; return { ok: false, status: 500, json: async () => ({ error: { type: "api_error" } }) }; };
+  const photo = { type: "image/jpeg", size: 10 };
+  const scripts = [];
+  global.document = { head: { appendChild(s) { scripts.push(s); setTimeout(() => s.onerror && s.onerror(), 0); } }, createElement: () => ({ remove() {} }) };
+  try {
+    M.food.label.release();
+    M.ai.setKey("sk-ant-test");
+    NAV.onLine = false;
+    const said = [];
+    await M.food.label.fromImage(photo, { onProgress: m => said.push(m) }).then(() => assert.fail(), e => { assert.strictEqual(e.message, "You're offline. Type the numbers in, or try again when you're online."); });
+    assert.strictEqual(calls, 0, "offline: Claude isn't asked");
+    assert.ok(said[0] === "You're offline. Reading it on your phone…" && !said.some(m => /Claude/.test(m)), said.join(" | "));
+    delete NAV.onLine;
+    const said2 = [];
+    await M.food.label.fromImage(photo, { onProgress: m => said2.push(m) }).then(() => assert.fail(), e => { assert.strictEqual(e.message, "The label reader couldn't load. Try again, or type the numbers in."); });
+    assert.deepStrictEqual(said2.slice(0, 2), ["Reading label with Claude…", "Claude couldn't read it. Reading it on your phone…"], "online with a key: Claude first");
+    M.ai.setKey("");
+    await M.food.label.fromImage(photo).then(() => assert.fail(), e => { assert.ok(/couldn't load.*Anthropic key \(You → AI\), Claude can read labels too/.test(e.message), e.message); });
+    const s = scripts.find(x => x.src === TESS.script);
+    assert.ok(s, "tesseract.min.js requested");
+    assert.strictEqual(s.integrity, "sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F");
+    assert.strictEqual(s.crossOrigin, "anonymous");
+  } finally { delete NAV.onLine; delete global.document; delete global.fetch; M.ai.setKey(""); }
+});
+
+t("OFL-11/BEF-17 suggest never waits long for Claude: onClaude gets Claude's ideas later; without it a slow Claude is cut off (and aborted); offline skips Claude; short fixed notes", async () => {
+  M.reset(); M.ai.setKey("sk-ant-test");
+  const rem = { cal: 700, p: 50, c: 70, f: 25 };
+  const reply = { suggestions: [{ name: "Chicken rice bowl", desc: "Chicken over rice.", store: "Costco", prepMin: 10, items: [{ name: "Chicken breast", servingLabel: "6 oz (170 g)", g: 170, per: { cal: 280, p: 52, c: 0, f: 6, fiber: 0, sugar: 0, sodium_mg: 120 } }] }] };
+  let release = null, calls = 0, aborted = false;
+  global.fetch = (u, o) => { calls++; if (o && o.signal) o.signal.addEventListener("abort", () => { aborted = true; }); return new Promise(r => { release = () => r(claudeReply(reply)); }); };
+  try {
+    let got = null;
+    const t0 = Date.now();
+    const list = await M.food.suggest({ slot: "Lunch", remaining: rem, onClaude: (l, note) => { got = { l, note }; } });
+    assert.ok(Date.now() - t0 < 1000 && list.length >= 3 && list.every(s => s.source !== "claude"), "the phone's ideas at once");
+    assert.strictEqual(list.claudePending, true);
+    assert.strictEqual(got, null);
+    for (let i = 0; i < 50 && !release; i++) await new Promise(r => setTimeout(r, 10));
+    release();
+    for (let i = 0; i < 50 && !got; i++) await new Promise(r => setTimeout(r, 10));
+    assert.ok(got && got.l.length === 1 && got.l[0].source === "claude" && got.note === "", JSON.stringify(got));
+    /* no callback: a Claude that doesn't answer in time is cut off with a plain note */
+    aborted = false;
+    const slow = await M.food.suggest({ slot: "Lunch", remaining: rem, claudeMs: 60 });
+    assert.ok(slow.length >= 3 && !slow.some(s => s.source === "claude"));
+    assert.strictEqual(slow.aiError, "Claude was slow, so there are no ideas from Claude this time.");
+    assert.ok(aborted, "the slow request is stopped");
+    release();
+    /* offline: Claude isn't asked */
+    calls = 0; NAV.onLine = false;
+    const off = await M.food.suggest({ slot: "Lunch", remaining: rem });
+    assert.deepStrictEqual([calls, off.aiError], [0, "You're offline, so there are no ideas from Claude."]);
+    delete NAV.onLine;
+    /* fixed notes, never raw API text */
+    global.fetch = async () => ({ ok: false, status: 429, json: async () => ({ error: { type: "rate_limit_error", message: "raw words" } }) });
+    assert.strictEqual((await M.food.suggest({ slot: "Lunch", remaining: rem })).aiError, "Claude is busy right now. Try again in a minute.");
+    global.fetch = async () => ({ ok: false, status: 401, json: async () => ({ error: { type: "authentication_error", message: "raw words" } }) });
+    assert.ok(/key is wrong/.test((await M.food.suggest({ slot: "Lunch", remaining: rem })).aiError), "a problem they must fix keeps its own message");
+    let late = null;
+    await M.food.suggest({ slot: "Lunch", remaining: rem, onClaude: (l, note) => { late = note; } });
+    for (let i = 0; i < 50 && late === null; i++) await new Promise(r => setTimeout(r, 10));
+    assert.ok(/key is wrong/.test(late), "onClaude gets the note too: " + late);
+  } finally { delete NAV.onLine; delete global.fetch; M.ai.setKey(""); }
 });
 
 /* ---- run ---- */

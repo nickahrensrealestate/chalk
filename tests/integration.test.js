@@ -85,7 +85,7 @@ function buildPage({ real, sync }) {
 }
 
 /* Every page gets a fetch spy: pass 1 and 2 must never touch the network. */
-function boot({ real, sync, store }) {
+function boot({ real, sync, store, hook }) {
   const errors = [], fetches = [];
   const vc = new VirtualConsole();
   vc.on("jsdomError", e => errors.push(e && e.detail ? e.detail : e));
@@ -97,6 +97,7 @@ function boot({ real, sync, store }) {
     virtualConsole: vc,
     beforeParse(win) {
       Object.keys(store || {}).forEach(k => win.localStorage.setItem(k, store[k]));
+      if (hook) hook(win);
       win.fetch = (url, opt) => {
         fetches.push({ url: String(url), method: (opt && opt.method) || "GET", headers: Object.assign({}, opt && opt.headers), body: opt && opt.body });
         const get = !opt || !opt.method || opt.method === "GET";
@@ -198,6 +199,9 @@ function swRig(opts) {
     }
     if (how === "opaque") return Promise.resolve({ ok: false, status: 0, type: "opaque", clone() { return this; }, arrayBuffer: async () => new ArrayBuffer(0) });
     if (typeof how === "number") return Promise.resolve(new Response("error " + how, { status: how }));
+    if (how && typeof how === "object") return Promise.resolve(new Response(how.body, { status: 200, headers: { "content-type": "text/html" } }));
+    /* the server's index.html is this checkout's (install checks its version) */
+    if (/\/index\.html$/.test(url)) return Promise.resolve(new Response(HTML, { status: 200, headers: { "content-type": "text/html" } }));
     return Promise.resolve(new Response("NET " + url, { status: 200, headers: { "content-type": "text/plain" } }));
   };
   class R extends Request { constructor(u, init) { super(typeof u === "string" ? new URL(u, BASE + "sw.js").href : u, init); } }
@@ -233,15 +237,29 @@ t("sw.js: one version everywhere — CACHE, CORE ?v=, index.html's files and APP
   ["index.html", "manifest.json", "icon-180.png", "icon-192.png", "icon-512.png"].forEach(f => assert.ok(core.includes('"' + f + '"'), "CORE has " + f));
   ["m.css", "m-trends.css", "m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js", "m-sync.js"].forEach(f => assert.ok(core.includes('"' + f + '" + V'), "CORE has " + f + "?v="));
 });
-t("sw.js: CACHE changes whenever a CORE file changed since the last commit (OFL-13)", () => {
+/* OFL-13: a phone keeps the cached app until sw.js says a new version exists. So whenever any CORE file differs from
+   what's live (GitHub Pages serves main → origin/main, else main), CACHE must differ from the live CACHE too.
+   The file list is read from CORE itself, so a file added to CORE is covered automatically. */
+t("sw.js: CACHE differs from the live one whenever a CORE file differs from what's live (OFL-13)", () => {
   const { execFileSync } = require("child_process");
-  let headSw = null;
-  try { headSw = execFileSync("git", ["show", "HEAD:sw.js"], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch (e) { console.log("       (no git history here, check skipped)"); return; }
+  const git = args => execFileSync("git", args, { cwd: ROOT, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 << 20 });
+  let ref = null;
+  for (const r of ["origin/main", "main"]) { try { git(["rev-parse", "--verify", "-q", r + "^{commit}"]); ref = r; break; } catch (e) {} }
+  if (!ref) { console.log("       (no git history here, check skipped)"); return; }
   const cacheOfSrc = src => { const v = src.match(/const VERSION = (\d+);/); if (v) return "chalk-v" + v[1]; const c = src.match(/const CACHE = "([^"]+)"/); return c ? c[1] : null; };
-  const headCache = cacheOfSrc(headSw), nowCache = cacheOfSrc(SWSRC);
-  const files = ["index.html", "manifest.json", "icon-180.png", "icon-192.png", "icon-512.png", "m.css", "m-trends.css", "m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js", "m-sync.js"];
-  const changed = files.filter(f => { let old = null; try { old = execFileSync("git", ["show", "HEAD:" + f], { cwd: ROOT, stdio: ["ignore", "pipe", "ignore"] }); } catch (e) { return true; } return !old.equals(fs.readFileSync(path.join(ROOT, f))); });
-  if (changed.length) assert.notStrictEqual(nowCache, headCache, "these app files changed but sw.js still says " + nowCache + " — bump VERSION in sw.js, APP_VERSION and ?v= in index.html: " + changed.join(", "));
+  const liveCache = cacheOfSrc(git(["show", ref + ":sw.js"]).toString("utf8")), nowCache = cacheOfSrc(SWSRC);
+  const files = [...coreOf(SWSRC).matchAll(/"([^"]+)"/g)].map(m => m[1]).filter(f => f !== "./");
+  assert.ok(files.length >= 13 && files.includes("m-sync.js") && files.includes("index.html"), "CORE parsed: " + files.join(", "));
+  files.forEach(f => assert.ok(exists(f), "CORE file exists: " + f));
+  const liveBytes = f => { try { return git(["show", ref + ":" + f]); } catch (e) { return null; } };
+  /* the rule: any CORE file not byte-identical to live → the version must not be live's */
+  const problem = (read, now) => { const changed = files.filter(f => { const old = liveBytes(f); return !old || !old.equals(read(f)); }); return changed.length && now === liveCache ? changed : null; };
+  const bad = problem(f => fs.readFileSync(path.join(ROOT, f)), nowCache);
+  assert.ok(!bad, "these app files differ from " + ref + " but sw.js still says " + nowCache + ". Bump VERSION in sw.js, APP_VERSION and every ?v= in index.html: " + (bad || []).join(", "));
+  /* and the rule catches a forgotten bump: live files with one edited, version left at live's */
+  const edited = f => { const b = liveBytes(f) || Buffer.from(""); return f === "m-ui.js" ? Buffer.concat([b, Buffer.from("\n/* edit */")]) : b; };
+  assert.deepStrictEqual(problem(edited, liveCache), ["m-ui.js"], "an edit without a bump is caught");
+  assert.strictEqual(problem(edited, "chalk-v" + (SWV + 1)), null, "the same edit with a bump passes");
 });
 t("manifest.json description", () => {
   const m = JSON.parse(read("manifest.json"));
@@ -422,12 +440,34 @@ async function runSwPass() {
     await assert.rejects(cut.install());
     assert.strictEqual((cut.stores.get("chalk-v" + SWV) || new Map()).size, 0, "a body cut off halfway is never stored");
   });
-  await ta("activate deletes only old chalk-* caches, keeps the CDN/font caches and other apps' caches, tells open pages", async () => {
+  await ta("install refuses an index.html of another version (the CDN can lag a minute after a deploy)", async () => {
+    const stale = HTML.replace(/const APP_VERSION=\d+/, "const APP_VERSION=" + (SWV - 1));
+    const rig = swRig({ net: u => (/index\.html$/.test(u) ? { body: stale } : "ok") });
+    await assert.rejects(rig.install(), /not version/);
+    assert.strictEqual((rig.stores.get("chalk-v" + SWV) || new Map()).size, 0, "nothing stored");
+    const none = swRig({ net: u => (/index\.html$/.test(u) ? { body: "<!doctype html><p>GitHub is down</p>" } : "ok") });
+    await assert.rejects(none.install(), /not version/);
+  });
+  await ta("activate deletes only old chalk-* caches (keeps the newest older one a while), the CDN/font caches and other apps' caches stay; tells open pages", async () => {
     const m = () => new Map([["x", new Response("x")]]);
-    const rig = swRig({ caches: [["chalk-v15", m()], ["chalk-v" + SWV, m()], ["chalk-cdn", m()], ["chalk-fonts", m()], ["apollo-tracker-v3", m()], ["workbox-precache", m()]] });
+    const P = SWV - 1;
+    const rig = swRig({ caches: [["chalk-v" + (P - 1), m()], ["chalk-v" + P, m()], ["chalk-v" + SWV, m()], ["chalk-v" + (SWV + 1), m()], ["chalk-cdn", m()], ["chalk-fonts", m()], ["chalk-v9x", m()], ["apollo-tracker-v3", m()], ["workbox-precache", m()]] });
     await rig.activate();
-    assert.deepStrictEqual([...rig.stores.keys()].sort(), ["apollo-tracker-v3", "chalk-cdn", "chalk-fonts", "chalk-v" + SWV, "workbox-precache"].sort());
+    assert.deepStrictEqual([...rig.stores.keys()].sort(), ["apollo-tracker-v3", "chalk-cdn", "chalk-fonts", "chalk-v" + P, "chalk-v" + SWV, "workbox-precache"].sort());
     assert.strictEqual(JSON.stringify(rig.posted), JSON.stringify([{ type: "chalk-updated", cache: "chalk-v" + SWV }]));
+    /* next update: the one kept before goes, this one stays one more round */
+    const next = swRig({ caches: [["chalk-v" + (SWV - 2), m()], ["chalk-v" + (SWV - 1), m()], ["chalk-v" + SWV, m()]] });
+    await next.activate();
+    assert.deepStrictEqual([...next.stores.keys()].sort(), ["chalk-v" + (SWV - 1), "chalk-v" + SWV].sort());
+  });
+  await ta("a page still loading the version before gets its own files from the kept cache, even offline", async () => {
+    const P = SWV - 1, rig = swRig({ net: () => "down" });
+    rig.stores.set("chalk-v" + P, new Map([[rig.abs("m-core.js?v=" + P), new Response("OLD CORE")], [rig.abs("m-core.js"), new Response("OLDER CORE")]]));
+    rig.stores.set("chalk-v" + SWV, new Map([[rig.abs("m-core.js" + V), new Response("NEW CORE")]]));
+    await rig.activate();
+    assert.strictEqual(await (await rig.fire("m-core.js?v=" + P).res).text(), "OLD CORE", "never the new file under the old name");
+    assert.strictEqual(await (await rig.fire("m-core.js" + V).res).text(), "NEW CORE");
+    assert.strictEqual(await (await rig.fire("m-core.js").res).text(), "OLDER CORE", "an unversioned page from before ?v= still works");
   });
   await ta("app shell is cache first: opens instantly from the cache while the network hangs, and checks for an update", async () => {
     const rig = swRig({ net: () => "hang", netMs: 5000 });
@@ -525,10 +565,16 @@ async function runSyncPass() {
       });
     });
     await sleep(20);
-    t("You tab: Sync & backup card shows the code in groups of 4", () => {
+    t("You tab: Sync & backup card shows the code in groups of 4 (hidden behind Show when m-sync can mask it)", () => {
       click(w, q(d, '#app [data-a="pick-profile"][data-v="nick"]'));
       w.M.setMode("macros"); w.M.ui.tab = "you"; w.render();
       assert.ok(q(d, "#mt-sync"), "card rendered");
+      const show = q(d, '#mt-sync [data-m="t-sync-show"]');
+      if (typeof w.M.cloud.codeMasked === "function" && show) {
+        assert.strictEqual(q(d, "#mt-code").textContent, w.M.cloud.codeMasked(), "masked until Show");
+        assert.ok(!/EFGH/.test(q(d, "#mt-code").textContent), "the rest of the code is hidden");
+        click(w, show);
+      }
       assert.strictEqual(q(d, "#mt-code").textContent, "ABCD-EFGH-JKLM-NPQR-STUV");
       assert.ok(q(d, '#mt-sync [data-m="t-sync-now"]') && q(d, '#mt-sync [data-m="t-sync-off"]'));
       assert.ok(/Synced just now|Syncing/.test(q(d, "#mt-sync-status").textContent), q(d, "#mt-sync-status").textContent);

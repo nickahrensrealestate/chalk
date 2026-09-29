@@ -34,12 +34,14 @@
 .mt-chart .last{fill:var(--acc);stroke:var(--sur);stroke-width:2}
 .mt-chart .avg{fill:none;stroke:var(--acc);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .mt-chart .goal{stroke:var(--ok);stroke-width:1.5;stroke-dasharray:5 4}
-.mt-chart .tgt{stroke:var(--ok);stroke-width:1.5;stroke-dasharray:5 4}
+.mt-chart .tgt,.mt-chart .tgt-k{stroke:var(--ok);stroke-width:1.5;stroke-dasharray:5 4}
 .mt-chart .ll{fill:var(--ink);font-weight:700;font-size:12px;paint-order:stroke;stroke:var(--sur);stroke-width:3px;stroke-linejoin:round}
 /* goal / target label on a plate at the left; lines never run through the words */
 .mt-pill rect{fill:var(--sur);stroke:var(--ok);stroke-width:1}
 .mt-pill text{fill:var(--ink);font-weight:600;font-size:11px}
 .mt-pill.off rect{stroke:var(--line)}
+/* bar charts name the target line in a band above the bars */
+.mt-chart .mt-key text{fill:var(--ink);font-weight:600}
 /* tap readout */
 .mt-chart[data-pts]{cursor:pointer;-webkit-tap-highlight-color:transparent}
 .mt-tip line{stroke:var(--ink);stroke-width:1;opacity:.45}
@@ -84,7 +86,11 @@
 .mt-pacehint[hidden]{display:none}
 .mt-nowrap{white-space:nowrap;flex:none}
 .mt-manrow{min-height:56px}
-.mt-card .srow .seg button{min-height:40px}
+.mt-card .srow .seg button{min-height:44px}
+/* 44 px to tap: number boxes, the manual switch (a bigger invisible edge), the key link */
+.mt-card input.mini,.mt-form input.mini,.mt-b14 input.mini{height:44px}
+.mt-manrow .toggle::after{content:"";position:absolute;inset:-6px}
+.mt-keyhint a{display:inline-block;padding:13px 0;margin:-13px 0}
 .mt-hgt input.mini{width:56px}
 .mt-u{font-size:13px;color:var(--mut);font-weight:600}
 .mt-field{padding:8px 14px 4px}
@@ -101,7 +107,7 @@
 .mt-custom{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:10px 14px 0}
 .mt-sumrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 14px 4px}
 .mt-tgrid{grid-template-columns:repeat(3,1fr);padding:0 14px;margin:8px 0 4px}
-.mt-tgrid .stat .v input.mini{height:36px;font-size:22px;width:100%}
+.mt-tgrid .stat .v input.mini{height:44px;font-size:22px;width:100%}
 .mt-card>.hint,.mt-tbox>.hint{padding:0 14px 8px;margin:0}
 
 /* You: AI card */
@@ -121,9 +127,15 @@
 .mt-sync .bd>.hint{margin:0 0 10px}
 .mt-quiet{color:var(--mut);margin:0}
 .mt-code{background:var(--sur2);border:1px solid var(--line);border-radius:12px;padding:10px 8px;margin:2px 0 8px;text-align:center;font-family:"Barlow Condensed","Barlow",sans-serif;font-size:22px;font-weight:700;letter-spacing:.05em;line-height:1.15;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;-webkit-user-select:all;user-select:all}
-.mt-coderow{display:flex;align-items:center;gap:10px;margin:0 0 10px}
-.mt-coderow .hint{flex:1;min-width:0;margin:0}
-.mt-coderow .btn{flex:none}
+.mt-codebtns{display:flex;gap:8px;margin:0 0 8px}
+.mt-codebtns .btn{flex:1 1 0;min-width:0;min-height:44px}
+.mt-sync .bd>.mt-codehint{margin:0 0 12px}
+.mt-more2{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.mt-more2 .btn{flex:1 1 140px;min-width:0;min-height:44px;padding:0 8px}
+.mt-sync .bd>.mt-more2+.hint{margin:6px 0 0}
+.mt-joinfirst{display:flex;align-items:center;gap:10px;margin-top:10px;padding:8px 10px;background:var(--sur2);border-radius:10px}
+.mt-joinfirst .hint{flex:1;min-width:0;margin:0}
+.mt-joinfirst .btn{flex:none;min-height:44px}
 .mt-syncrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 8px}
 .mt-syncrow .mt-status{flex:1;min-width:0;margin:0}
 .mt-syncrow .btn{flex:none}
@@ -155,4 +167,4 @@
 .mt-b14{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 10px}
 .mt-b14 .lbl{line-height:1.25}
 .mt-setnote .mt-text{margin-bottom:10px}
-@media (max-width:340px){.mt-rangebar .mt-rl{display:none}.mt-rangebar{justify-content:flex-end}}
+@media (max-width:340px){.mt-rangebar .mt-rl{display:none}.mt-rangebar{justify-content:flex-end}.mt-code{font-size:19px;letter-spacing:.02em}}

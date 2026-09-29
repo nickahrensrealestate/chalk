@@ -268,8 +268,8 @@ t("views.trends: This week + Last 8 weeks use logged food", () => {
   const html = M.ui.views.trends();
   const ws = M.weekSummary("nick", 0);   /* m-core decides what counts (today may be left out of the averages) */
   assert.ok(new RegExp(">" + ws.logged + '<small>of 7</small></div><div class="k">Days logged</div>').test(html), "days logged");
-  assert.ok(new RegExp(">" + fmt(ws.avgCal) + '</div><div class="k">Avg calories</div><div class="mt-sub">of 2,000</div>').test(html), "avg calories vs 2,000");
-  assert.ok(new RegExp(">" + Math.round(ws.avgP) + '<small>g</small></div><div class="k">Avg protein</div><div class="mt-sub">of 150 g</div>').test(html), "avg protein");
+  assert.ok(new RegExp(">" + fmt(ws.avgCal) + '</div><div class="k">Calories a day</div><div class="mt-sub">of 2,000</div>').test(html), "avg calories vs 2,000");
+  assert.ok(new RegExp(">" + Math.round(ws.avgP) + '<small>g</small></div><div class="k">Protein a day</div><div class="mt-sub">of 150 g</div>').test(html), "avg protein");
   assert.ok(count(html, /<path class="bar"/g) >= 3, "this-week bars + week bars");
   assert.ok(/Sep 28: 600 cal · 60 g protein so far/.test(html), "day title, today marked so far");
   assert.ok(/not logged/.test(html));
@@ -447,7 +447,7 @@ t("views.you: renders all cards; t-num weight change updates profile + targets +
   assert.ok(/class="opt mt-opt cur" data-m="t-split" data-v="highprotein"/.test(html));
   Object.keys(M.calc.SPLITS).forEach(k => assert.ok(new RegExp('data-m="t-split" data-v="' + k + '"').test(html), "split option " + k));
   assert.ok(/data-m="t-manual"/.test(html));
-  assert.ok(new RegExp('>' + fmt(p.targets.cal) + '<small>cal</small>').test(html), "targets grid shows cal");
+  assert.ok(new RegExp('>' + fmt(p.targets.cal) + '</div><div class="k">Calories</div>').test(html), "targets grid shows calories (the label says the unit: it fits at 320 px)");
   /* weight change */
   show(html);
   const oldCal = p.targets.cal;
@@ -609,7 +609,7 @@ t("You form: a field change never re-renders — values and targets patch in pla
   assert.strictEqual(document.activeElement, goal, "focus stays where the person tapped");
   assert.strictEqual($("#mt-tbox"), box, "same targets box");
   assert.ok(p.targets.cal < oldCal && p.targets.p === 180);
-  assert.ok(box.innerHTML.indexOf(">" + fmt(p.targets.cal) + "<small>cal</small>") > 0, "calories patched in place");
+  assert.ok(box.innerHTML.indexOf(">" + fmt(p.targets.cal) + '</div><div class="k">Calories</div>') > 0, "calories patched in place");
   assert.ok(/>180<small>g<\/small>/.test(box.innerHTML), "protein patched in place");
   assert.ok(/Last weigh-in Sep 28/.test($("#mt-ci-body").innerHTML), "check-in line patched");
   assert.strictEqual(p.updatedAt, NOW, "edit time stamped for sync");
@@ -1034,8 +1034,16 @@ t("UIT-08/UIT-09/UIT-12..16/PRF-11/UIT-28: Steady, no −0.0, far estimates hidd
   M.charts.tip(svg, 0);
   assert.strictEqual(svg.querySelector(".mt-tip text").textContent, "Sep 28: 180 lb");
   assert.ok(/Tap the chart/.test(svg.getAttribute("aria-label")));
-  /* goal / target labels sit on a plate at the left */
-  assert.ok(/class="mt-pill gl"><rect x="44\.0"/.test(M.charts.bars([{ label: "Mo", v: 1800 }], { target: 2000 })));
+  /* the goal label sits on a plate at the left; a bar chart names its target above the bars (never on a bar) */
+  assert.ok(/class="mt-pill gl"><rect x="44\.0"/.test(M.charts.line([{ date: "2026-09-27", v: 180 }, { date: "2026-09-28", v: 179 }], { goal: 175 })));
+  const tb = M.charts.bars([{ label: "Mo", v: 2100 }, { label: "Tu", v: 1800 }], { target: 2000, unit: "cal" });
+  assert.ok(/<g class="mt-key"><line class="tgt-k" x1="40" x2="58" y1="8" y2="8"\/><text x="64" y="11\.5">Target 2,000 cal<\/text><\/g>/.test(tb), tb);
+  const firstTop = +/<path class="bar" d="M[\d.]+ [\d.]+ L[\d.]+ ([\d.]+)/.exec(tb)[1];
+  assert.ok(firstTop > 14, "the tallest bar stays below the key band");
+  /* heart rate ticks are whole beats */
+  const hr = M.charts.line([{ date: "2026-09-20", v: 52 }, { date: "2026-09-28", v: 60 }], { whole: true });
+  const ticks = Array.from(hr.matchAll(/text-anchor="end">([\d.,]+)<\/text>/g)).map(m => +m[1]);
+  assert.ok(ticks.length >= 3 && ticks.every(v => v === Math.round(v)), "whole ticks: " + ticks);
 });
 
 t("UIT-20/UIT-21: a failed Test warns in place (no 'You → AI'); hand-typed targets that don't add up get a hint", async () => {
@@ -1089,6 +1097,126 @@ t("BES-16/18/19: the code is picked out of pasted text; first / other phone butt
   assert.strictEqual(M.trends.restoredNote(), null, "only once");
   await new Promise(r => setTimeout(r, 950));
   assert.ok(toasts.indexOf("Training restored: 42 workouts") >= 0);
+});
+
+t("UIT-01 with F1's M.body.remove (moves weight + targets itself): deleting a heart rate keeps targets on the kept weight; no stray cloud delete", () => {
+  M.ui.tab = "trends"; M.reset(); M.trends.resetDraft();
+  const p = setupNick();
+  M.body.add({ date: M.addDays(M.today(), -3), w: 180 });
+  M.body.add({ date: M.today(), w: 190, rhr: 61 }); M.calc.applyTargets(p);
+  assert.strictEqual(p.weightLb, 190);
+  const real = M.body.remove;
+  /* the contract: remove resets weightLb to the latest weigh-in left and re-applies targets */
+  M.body.remove = function (date, id) {
+    const ok = real.call(M.body, date, id); if (!ok) return ok;
+    const q = M.person(id), lw = M.body.latest(id, "w");
+    if (lw) { q.weightLb = lw.value; if (!q.targetsManual) M.calc.applyTargets(q); }
+    return ok;
+  };
+  try {
+    M.sync.deleted.body.clear();
+    assert.ok(M.trends.removeBody("nick", M.today(), "rhr"));
+    const rec = M.MS.body["nick|" + M.today()];
+    assert.ok(rec && rec.w === 190 && rec.rhr == null, "weight kept, heart rate gone");
+    assert.strictEqual(p.weightLb, 190);
+    assert.deepStrictEqual(p.targets, M.calc.targets(p), "targets match the kept weight (not the older one)");
+    assert.ok(!M.sync.deleted.body.has("nick|" + M.today()), "the day still exists, so it is not sent as a delete");
+    assert.ok(M.trends.removeBody("nick", M.today(), "w"));
+    assert.strictEqual(p.weightLb, 180); assert.deepStrictEqual(p.targets, M.calc.targets(p));
+    assert.ok(M.sync.deleted.body.has("nick|" + M.today()), "a day with nothing left is a real delete");
+  } finally { M.body.remove = real; }
+});
+
+t("BES/SEC sync card: code hidden behind Show, stuck items said once, off-state note, Undo restore, Change code, Delete cloud copy, Join sync from setup", async () => {
+  M.ui.tab = "you"; M.reset(); M.trends.resetDraft(); toasts.length = 0;
+  const had = M.cloud, base = NOW;
+  NOW += 11 * 60e3;   /* the code made in the test above is no longer new */
+  try {
+    const calls = [];
+    const st = { on: true, code: "ABCDEFGHJKLMNPQRSTUV", lastSync: NOW, lastError: "", pending: 0, stuck: 0, busy: false, note: "" };
+    let undo = null, undoOk = true;
+    M.cloud = {
+      configured: () => true, status: () => Object.assign({}, st), training: () => null,
+      fmtCode: c => String(c).replace(/(.{4})(?=.)/g, "$1-"),
+      codeMasked: () => (st.code ? st.code.slice(0, 4) + "-••••-••••-••••-••••" : ""),
+      create() { Object.assign(st, { on: true, code: "ZZZZYYYYXXXXWWWWVVVV" }); return st.code; },
+      join: () => Promise.resolve({ ok: false }), leave() { st.on = false; st.code = ""; },
+      undoInfo: () => undo, undoRestore() { calls.push("undo"); return undoOk; },
+      changeCode() { calls.push("change"); st.code = "QQQQRRRRSSSSTTTTUUUU"; return Promise.resolve({ ok: true, code: st.code }); },
+      deleteCloud() { calls.push("delete"); Object.assign(st, { on: false, code: "", note: "Your cloud copy is deleted. Everything is still on this phone." }); return Promise.resolve({ ok: true }); }
+    };
+    setupNick();
+    show(M.ui.views.you());
+    const code = () => $("#mt-code").textContent;
+    assert.strictEqual(code(), "ABCD-••••-••••-••••-••••", "hidden at first");
+    const sh = $('[data-m="t-sync-show"]');
+    assert.ok(sh && sh.textContent === "Show" && sh.getAttribute("aria-pressed") === "false");
+    click(sh);
+    assert.strictEqual(code(), "ABCD-EFGH-JKLM-NPQR-STUV"); assert.strictEqual(sh.textContent, "Hide");
+    click(sh);
+    assert.strictEqual(code(), "ABCD-••••-••••-••••-••••");
+    /* copy by hand needs the real code on screen */
+    await click('[data-m="t-sync-copy"]');
+    assert.strictEqual(code(), "ABCD-EFGH-JKLM-NPQR-STUV", "copy fallback shows the code");
+    click('[data-m="t-sync-show"]');
+    /* stuck items: m-sync's line already counts them */
+    Object.assign(st, { lastError: "1 item isn't backed up yet. We'll keep trying.", pending: 1, stuck: 1 });
+    M.trends.patchSync();
+    assert.strictEqual($("#mt-sync-status").textContent, "1 item isn't backed up yet. We'll keep trying.");
+    Object.assign(st, { lastError: "", pending: 0, stuck: 0 });
+    /* Undo restore: two taps, refused mid-workout */
+    undo = { at: NOW - DAY, n: 12, pid: "nick" };
+    show(M.ui.views.you());
+    assert.ok(/Undo puts back the 12 workouts this phone had before\./.test($("#mt-undo").textContent));
+    const ub = $('[data-m="t-sync-undo"]');
+    click(ub); assert.strictEqual(calls.indexOf("undo"), -1, "first tap only arms"); assert.ok(/Tap again/.test(ub.textContent));
+    click(ub); assert.ok(calls.indexOf("undo") >= 0 && /Training put back/.test(toasts[toasts.length - 1]));
+    global.S.active = { id: "w" };
+    assert.ok(/data-m="t-sync-undo" disabled/.test(M.ui.views.you()) && /Finish today's workout first/.test(M.ui.views.you()));
+    delete global.S.active;
+    undo = { at: NOW, n: 3, pid: "kat" };
+    assert.ok(!/t-sync-undo/.test(M.ui.views.you()), "another person's undo isn't offered");
+    undo = null;
+    /* Change code: two taps, then the new code in full with the next step */
+    show(M.ui.views.you());
+    const cc = $('[data-m="t-sync-newcode"]');
+    click(cc); assert.strictEqual(calls.indexOf("change"), -1);
+    await click(cc);
+    assert.ok(calls.indexOf("change") >= 0);
+    show(M.ui.views.you());
+    assert.strictEqual(code(), "QQQQ-RRRR-SSSS-TTTT-UUUU", "the new code shows in full");
+    assert.ok(/Next:/.test($("#mt-sync").textContent));
+    /* Delete cloud copy: two taps, then the off card says what happened */
+    const del = $('[data-m="t-sync-delete"]');
+    click(del); assert.strictEqual(calls.indexOf("delete"), -1);
+    await click(del);
+    assert.ok(calls.indexOf("delete") >= 0 && /Cloud copy deleted/.test(toasts[toasts.length - 1]));
+    const off = M.ui.views.you();
+    assert.ok(/Your cloud copy is deleted\. Everything is still on this phone\./.test(off) && /First phone: start sync/.test(off));
+    /* the other phone turned sync off: the card is drawn again, not just its status line */
+    Object.assign(st, { on: true, code: "ABCDEFGHJKLMNPQRSTUV", note: "" });
+    show(M.ui.views.you());
+    Object.assign(st, { on: false, code: "", note: "Sync is off. The other phone deleted the cloud copy or changed the code. Everything is still on this phone." });
+    let r = renders;
+    M.trends.patchSync();
+    assert.ok(renders > r, "on → off redraws the card");
+    /* setup card on a phone with sync off: Join sync first */
+    M.reset(); M.trends.resetDraft();
+    let h = M.ui.setupCardHTML();
+    assert.ok(/Used Macros on another phone\? Join sync first\./.test(h) && /data-m="t-setup-join"/.test(h));
+    M.ui.tab = "diary"; show(h);
+    click('[data-m="t-setup-join"]');
+    assert.strictEqual(M.ui.tab, "you");
+    assert.strictEqual($("#mt-join").hidden, false, "You opens with the code box open");
+    assert.strictEqual($('[data-m="t-sync-joinshow"]').hidden, true);
+    show(M.ui.views.you());
+    assert.strictEqual($("#mt-join").hidden, true, "only once");
+    st.on = true; st.code = "ABCDEFGHJKLMNPQRSTUV";
+    assert.ok(!/t-setup-join/.test(M.ui.setupCardHTML()), "sync on: no hint");
+    /* no codeMasked (older m-sync): the code shows in full, no Show button */
+    delete M.cloud.codeMasked; show(M.ui.views.you());
+    assert.strictEqual(code(), "ABCD-EFGH-JKLM-NPQR-STUV"); assert.ok(!$('[data-m="t-sync-show"]'));
+  } finally { if (had) M.cloud = had; else delete M.cloud; M.ui.tab = "you"; NOW = base; }
 });
 
 /* ======================================================================= */

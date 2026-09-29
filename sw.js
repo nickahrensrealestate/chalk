@@ -3,6 +3,7 @@
    One version per launch: index.html asks for "m-core.js?v=16" etc. and CORE lists exactly those URLs, so a page
    never mixes files from two versions. A new version arrives as a new sw.js (CACHE bumped): install downloads the
    whole set (all or nothing), activate swaps it in and tells open pages, and the page reloads at a safe moment.
+   To ship a change to any CORE file: bump VERSION here, APP_VERSION and every ?v= in index.html (a test checks).
    Anything not cached: network with a hard 8 s budget for the whole body, else 504. Never a cut-off file.
    Pinned CDN files (scanner, label reader) and fonts are kept after first use, so they work offline. */
 const VERSION = 16;
@@ -38,6 +39,12 @@ self.addEventListener("install", e => {
     const got = await Promise.all(CORE.map(async u => {
       const res = await netWhole(new Request(u, { cache: "reload" }), 60000);
       if (!res || !res.ok) throw new Error("couldn't download " + u);
+      /* right after a deploy the CDN can still hand out the last index.html for a minute. That page would ask for the
+         last version's files, so this install fails and the browser tries again at the next check. */
+      if (u === "index.html") {
+        const m = /const APP_VERSION\s*=\s*(\d+)/.exec(await res.clone().text());
+        if (!m || +m[1] !== VERSION) throw new Error("index.html is not version " + VERSION + " yet");
+      }
       return [u, res];
     }));
     const cache = await caches.open(CACHE);
@@ -46,11 +53,15 @@ self.addEventListener("install", e => {
   })());
 });
 
+/* chalk-v15 → 15; other names → null */
+const verOf = k => { const m = /^chalk-v(\d+)$/.exec(k); return m ? +m[1] : null; };
 self.addEventListener("activate", e => {
   e.waitUntil((async () => {
-    /* the origin hosts other apps: only ever touch Chalk's own caches */
+    /* The origin hosts other apps: only ever touch Chalk's own caches. The newest older version stays one more round,
+       so a page that started loading it a moment ago still gets every one of its own files. */
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k.startsWith("chalk-") && k !== CACHE && k !== CDN && k !== FONTS).map(k => caches.delete(k)));
+    const prev = Math.max(-1, ...keys.map(verOf).filter(n => n != null && n < VERSION));
+    await Promise.all(keys.filter(k => k.startsWith("chalk-") && k !== CACHE && k !== CDN && k !== FONTS && verOf(k) !== prev).map(k => caches.delete(k)));
     await self.clients.claim();
     const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     list.forEach(c => { try { c.postMessage({ type: "chalk-updated", cache: CACHE }); } catch (x) {} });

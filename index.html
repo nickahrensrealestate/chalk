@@ -325,8 +325,8 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
 <body>
 <div class="top"><h1 id="title">Chalk</h1><div class="sub" id="subtitle"></div></div>
 <div class="modebar" id="modebar">
-  <button data-m="mode" data-v="train" class="on" aria-pressed="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h2M19 12h2M6 8v8M18 8v8M9 6v12M15 6v12M9 12h6"/></svg><span class="mb-l">Train</span></button>
-  <button data-m="mode" data-v="macros" aria-pressed="false"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v6a3 3 0 0 0 6 0V3M8 3v18M5 3v6M11 3v6M18 3c-2 1.5-3 4-3 7 0 1.7 1.3 3 3 3v8"/></svg>Macros</button>
+  <button data-m="mode" data-v="train" class="on" aria-pressed="true"><svg aria-hidden="true" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h2M19 12h2M6 8v8M18 8v8M9 6v12M15 6v12M9 12h6"/></svg><span class="mb-l">Train</span></button>
+  <button data-m="mode" data-v="macros" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v6a3 3 0 0 0 6 0V3M8 3v18M5 3v6M11 3v6M18 3c-2 1.5-3 4-3 7 0 1.7 1.3 3 3 3v8"/></svg>Macros</button>
 </div>
 <div id="scroll"><div class="wrap" id="app"></div></div>
 <div class="cta" id="cta"></div>
@@ -1359,7 +1359,7 @@ let CI=null; /* check-in draft: {mode,mix}; committed by ci-build / ci-apply, di
 function ciDraft(){ return CI=CI||{mode:(S.goal||{}).mode||"weights",mix:cp(S.mix||PRESETS.nick.mix)}; }
 function ciCommit(){ const D=ciDraft(); S.goal=S.goal||{mode:"weights",setAt:null}; S.goal.mode=D.mode; S.mix=D.mix; CI=null; }
 function render(){
-  if(window.M&&M.ui){ if(M.ui.chrome) M.ui.chrome(); if(M.mode()==="macros"){ showRest(); paintBadge(); M.ui.render(); return; } }
+  if(window.M&&M.ui){ if(M.ui.chrome) M.ui.chrome(); if(M.mode()==="macros"){ showRest(); paintBadge(); M.ui.render(); placeUpd(); return; } }
   document.querySelectorAll("#tabs button").forEach(b=>{ const on=b.dataset.tab===tab; b.classList.toggle("on",on); if(on) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current"); });
   const app=document.getElementById("app");
   const title=document.getElementById("title"), sub=document.getElementById("subtitle");
@@ -1371,7 +1371,7 @@ function render(){
   cta.classList.toggle("on",showCta);
   if(showCta){ const wid=nextWorkoutId(); const P=planFor(wid); cta.innerHTML=`<button class="btn primary block" data-a="start" data-wid="${esc(wid)}">Start ${esc(P.name||S.program.workouts[wid].name)}</button>`; } else cta.innerHTML="";
   if(lastTab!==tab){ const sc=document.getElementById("scroll"); if(sc) sc.scrollTop=0; lastTab=tab; }
-  showRest(); paintBadge();
+  showRest(); paintBadge(); placeUpd();
   mountAnims();
   showFlash();
 }
@@ -1708,12 +1708,15 @@ function viewSettings(){
 /* ================= SHEETS ================= */
 /* While a sheet is open the screen behind it is inert (VoiceOver and Tab stay inside the sheet); focus moves to the title
    and comes back to the button that opened it. sheetGen counts opens and closes so late work never hits a newer sheet. */
-let sheetGen=0, sheetOpener=null;
+let sheetGen=0, sheetOpener=null, lastTap=null;
 function sheetOn(){ const bg=document.getElementById("sheetBg"); return !!(bg&&bg.classList.contains("on")); }
 function bgInert(on){ [document.querySelector(".top"),...["modebar","scroll","cta","tabs"].map(id=>document.getElementById(id))].forEach(el=>{ if(!el) return; if(on) el.setAttribute("inert",""); else el.removeAttribute("inert"); }); }
+/* Safari on iPhone doesn't focus a tapped button, so the control tapped a moment ago counts as the opener too */
+document.addEventListener("click",e=>{ const b=e.target&&e.target.closest?e.target.closest("button,a[href],input,select,textarea,[tabindex]"):null; const sh=document.getElementById("sheet"); if(b&&sh&&!sh.contains(b)) lastTap={el:b,at:Date.now()}; },true);
 function openSheet(title,body){
   const sh=document.getElementById("sheet"), t=document.getElementById("sheetT"), bg=document.getElementById("sheetBg");
-  const a=document.activeElement; if(!sheetOn()&&a&&a!==document.body&&!sh.contains(a)) sheetOpener=a;
+  const a=document.activeElement, op=a&&a!==document.body&&!sh.contains(a)?a:(lastTap&&Date.now()-lastTap.at<1500?lastTap.el:null);
+  if(!sheetOn()&&op) sheetOpener=op;
   sheetGen++;
   t.textContent=title; document.getElementById("sheetB").innerHTML=body; bg.classList.add("on"); document.getElementById("sheetB").scrollTop=0;
   sh.removeAttribute("aria-hidden"); sh.removeAttribute("inert"); bgInert(true);
@@ -1839,7 +1842,7 @@ document.addEventListener("click",e=>{
     case "rest-add": if(T){ T.end+=30000; T.total+=30; T.fired=false; document.getElementById("restL").textContent="Rest"; document.getElementById("rest").classList.remove("go"); tickRest(); } break;
     case "rest-skip": stopRest(); break;
     case "sheet-close": closeSheet(); break;
-    case "upd-reload": location.reload(); break;
+    case "upd-reload": reloadApp(); break;
     case "hist": histOpen=histOpen===b.dataset.id?null:b.dataset.id; render(); break;
     case "hist-more": histN+=40; render(); break;
     case "del-log": openSheet("Delete workout?",`<p class="hint">Removes it from history. Current weights stay as they are.</p><button class="btn block danger" data-a="del-log-do" data-id="${esc(b.dataset.id)}" style="margin-top:8px">Delete</button>`); break;
@@ -1873,7 +1876,8 @@ document.addEventListener("click",e=>{
         let macOk=true; if(mac!=null&&window.M&&M.import){ try{ macOk=M.import(mac)!==false; }catch(e2){ macOk=false; } }
         S=s; upgrade(S); save(); applyTheme(); closeSheet(); render(); toast(macOk?"Restored":"Workouts restored. The food part couldn't be read."); } else toast("That's not a Chalk backup"); }catch(e){ S=prev; save(); applyTheme(); render(); toast("That's not a Chalk backup"); } break; }
     case "reset-prog": regen(); bumpProg(); save(); render(); toast("Program rebuilt"); break;
-    case "switch-profile": if(S.active){ toast("Finish your workout first"); break; } if(S.profile) S.switchFrom=S.profile; S.profile=null; tab="today"; save(); render(); break;
+    /* from Macros → You too: the picker (with Cancel) lives in Train, and Macros would keep showing the same person */
+    case "switch-profile": if(S.active){ toast("Finish your workout first"); break; } if(S.profile) S.switchFrom=S.profile; S.profile=null; tab="today"; if(inMacros()&&typeof M.setMode==="function") M.setMode("train"); save(); render(); break;
     case "switch-cancel": if(!S.profile&&S.switchFrom&&PRESETS[S.switchFrom]) S.profile=S.switchFrom; delete S.switchFrom; save(); render(); break;
     /* the same person picked again keeps their goal, mix, 45-day clock and program; someone else gets their own start */
     case "pick-profile": { const k=b.dataset.v, pr=PRESETS[k]; if(!pr) break; const same=!!S.switchFrom&&S.switchFrom===k; delete S.switchFrom; S.profile=k;
@@ -1906,12 +1910,12 @@ document.addEventListener("click",e=>{
     case "blk-unskip": { A.items[+b.dataset.bi].skipped=false; save(); render(); break; }
     case "brm": { const blk=A.items[+b.dataset.bi]; if(blk.moves.length>1){ blk.moves.splice(+b.dataset.mi,1); save(); render(); } else toast("A block needs one move"); break; }
     case "brm-block": { const bi=+b.dataset.bi; if(A.items.length>1){ ctOnRemove(bi); A.items.splice(bi,1); } save(); closeSheet(); render(); break; }
-    case "bswap-menu": openSheet("Swap "+getEx(A.items[+b.dataset.bi].moves[+b.dataset.mi].ex).n, exerciseList("bswap-do",`data-bi="${b.dataset.bi}" data-mi="${b.dataset.mi}"`,A.items[+b.dataset.bi].moves[+b.dataset.mi].ex)); break;
+    case "bswap-menu": openSheet("Swap "+getEx(A.items[+b.dataset.bi].moves[+b.dataset.mi].ex).n, exerciseList("bswap-do",`data-bi="${+b.dataset.bi}" data-mi="${+b.dataset.mi}"`,A.items[+b.dataset.bi].moves[+b.dataset.mi].ex)); break;
     case "bswap-do": { let id=b.dataset.ex; const bi=+b.dataset.bi, mi=+b.dataset.mi;
       if(id==="__new"){ openSheet("New exercise",newExerciseForm("bswap-do",`data-bi="${bi}" data-mi="${mi}"`)); break; }
       if(id==="__create"){ id=createCustom(); if(!id) break; }
       if(A.items[bi].moves[mi].ex!==id) A.items[bi].moves[mi]=newMove(id); save(); closeSheet(); render(); break; }
-    case "badd": openSheet("Add a move",exerciseList("badd-do",`data-bi="${b.dataset.bi}"`)); break;
+    case "badd": openSheet("Add a move",exerciseList("badd-do",`data-bi="${+b.dataset.bi}"`)); break;
     case "badd-do": { let id=b.dataset.ex; const bi=+b.dataset.bi;
       if(id==="__new"){ openSheet("New exercise",newExerciseForm("badd-do",`data-bi="${bi}"`)); break; }
       if(id==="__create"){ id=createCustom(); if(!id) break; }
@@ -1977,17 +1981,24 @@ if(S.active) wakeOn();
 const APP_VERSION=16, BOOT_AT=Date.now();
 let updReady=false, updCheckAt=0;
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){} return true; }
+function reloadApp(){ try{ location.reload(); }catch(e){} }
+function placeUpd(){ const u=document.getElementById("upd"); if(!u||u.hidden) return; const tabs=document.getElementById("tabs"), cta=document.getElementById("cta"); u.style.bottom=((tabs?tabs.offsetHeight:0)+(cta&&cta.classList.contains("on")?cta.offsetHeight:0)+12)+"px"; }
 function updateReady(){
   if(updReady) return; updReady=true;
-  if(quietNow()&&Date.now()-BOOT_AT<10000){ location.reload(); return; }
-  const u=document.getElementById("upd"); if(!u) return; const tabs=document.getElementById("tabs"), cta=document.getElementById("cta");
-  u.style.bottom=((tabs?tabs.offsetHeight:0)+(cta?cta.offsetHeight:0)+12)+"px"; u.hidden=false;
+  if(quietNow()&&Date.now()-BOOT_AT<10000){ reloadApp(); return; }
+  const u=document.getElementById("upd"); if(!u) return; u.hidden=false; placeUpd();
 }
-function checkUpdate(){ if(!("serviceWorker" in navigator)||Date.now()-updCheckAt<15*60000) return; updCheckAt=Date.now(); try{ navigator.serviceWorker.getRegistration().then(r=>r&&r.update()).catch(()=>{}); }catch(e){} }
-if("serviceWorker" in navigator && location.protocol==="https:"){
-  navigator.serviceWorker.addEventListener("message",e=>{ const d=e.data||{}; if(d.type==="chalk-updated"&&d.cache&&d.cache!=="chalk-v"+APP_VERSION) updateReady(); });
-  navigator.serviceWorker.register("sw.js").then(()=>{ updCheckAt=Date.now(); }).catch(()=>{});
-  document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"){ if(updReady&&quietNow()) location.reload(); } else checkUpdate(); });
+/* only a newer version counts: "chalk-v17" while this page is 16 */
+function swNewer(d){ const m=d&&typeof d.cache==="string"&&/^chalk-v(\d+)$/.exec(d.cache); return !!m&&+m[1]>APP_VERSION; }
+function checkUpdate(){ if(!("serviceWorker" in navigator)) return;
+  /* a message missed while the phone slept: ask the worker which version it has */
+  try{ const c=navigator.serviceWorker.controller; if(c) c.postMessage({type:"chalk-version?"}); }catch(e){}
+  if(Date.now()-updCheckAt<15*60000) return; updCheckAt=Date.now(); try{ navigator.serviceWorker.getRegistration().then(r=>r&&r.update()).catch(()=>{}); }catch(e){} }
+if("serviceWorker" in navigator){
+  /* the listeners work with any worker; only https registers one (tests register it by hand) */
+  navigator.serviceWorker.addEventListener("message",e=>{ const d=e.data||{}; if((d.type==="chalk-updated"||d.type==="chalk-version")&&swNewer(d)) updateReady(); });
+  document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden"){ if(updReady&&quietNow()) reloadApp(); } else checkUpdate(); });
+  if(location.protocol==="https:") navigator.serviceWorker.register("sw.js").then(()=>{ updCheckAt=Date.now(); }).catch(()=>{});
 }
 </script>
 </body>

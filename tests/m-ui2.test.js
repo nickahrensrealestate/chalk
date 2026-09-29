@@ -222,6 +222,9 @@ t("UX1-02 grams that can't be right are flagged beside Grams ('1 tortilla = 459 
   assert.strictEqual(gw({ qty: 2, unit: "tbsp", g: 32 }), "");
   assert.ok(gw({ qty: 1, unit: "cup", g: 900 }));
   assert.strictEqual(gw({ qty: 1, unit: "serving", g: 900 }), "", "unknown units are never flagged");
+  /* real big packages are fine: a 14 oz shake bottle, a can, a tub, a large potato, a fillet */
+  [["bottle", 414], ["can", 355], ["container", 907], ["large", 369], ["fillet", 340]].forEach(x => assert.strictEqual(gw({ qty: 1, unit: x[0], g: x[1] }), "", x.join(" ")));
+  assert.ok(gw({ qty: 2, unit: "slices", g: 900 }), "2 slices = 900 g is flagged");
   openFoods("foods");
   click(q('[data-m="food-new"]'));
   assert.ok($("m-ff-gwarn").hidden);
@@ -275,6 +278,63 @@ t("UIF-04 barcode lookup while picking: × on the amount screen returns to the b
     await sleep(320);
     assert.ok(sheetOn() && $("sheetT").textContent === "New meal", "× went back to the builder");
   } finally { M.food.lookup = saved; }
+});
+
+t("UIF-04 Scan barcode while picking: Cancel returns to the builder (and × on Add item too)", async () => {
+  reset(); newMeal("Scan snack");
+  click(q('[data-m="mb-add"]'));
+  const sc = M.food.scanner.start; M.food.scanner.start = () => new Promise(() => {});
+  try { click(q('.m-tools [data-m="open-scan"]')); } finally { M.food.scanner.start = sc; }
+  assert.strictEqual($("sheetT").textContent, "Scan barcode");
+  const cancel = qa("#sheetB button").find(b => b.textContent === "Cancel");
+  click(cancel);
+  assert.ok(sheetOn() && $("sheetT").textContent === "New meal", "Cancel went back to the builder");
+  assert.strictEqual(q('[data-m="mb"][data-k="name"]').value, "Scan snack");
+  /* × on Add item itself */
+  click(q('[data-m="mb-add"]'));
+  click(q('[data-a="sheet-close"]'));
+  await sleep(320);
+  assert.ok(sheetOn() && $("sheetT").textContent === "New meal", "× on Add item went back to the builder");
+  /* outside the builder, Cancel just closes */
+  M.ui.close(); M.ui.draft = null; M.ui.tab = "diary"; M.ui.render();
+  click(q('#cta [data-m="add"]'));
+  M.food.scanner.start = () => new Promise(() => {});
+  try { click(q('.m-tools [data-m="open-scan"]')); } finally { M.food.scanner.start = sc; }
+  click(qa("#sheetB button").find(b => b.textContent === "Cancel"));
+  assert.ok(!sheetOn());
+});
+
+t("CPY-19 meal sheet: the button reads 'Add to <meal>' and follows the Meal picker", () => {
+  reset();
+  const m = M.meals.add({ name: "Egg plate", slot: "Breakfast", servingsMade: 1, items: [egg()] });
+  openFoods("meals");
+  click(q('[data-m="meal"][data-id="' + m.id + '"]'));
+  assert.strictEqual($("m-meal-go").textContent, "Add to Breakfast");
+  change(q('[data-m="meal-slot"]'), "Lunch");
+  assert.strictEqual($("m-meal-go").textContent, "Add to Lunch");
+  click($("m-meal-go"));
+  assert.strictEqual(M.log.slotEntries(M.today(), "Lunch").length, 1);
+  assert.strictEqual(lastToast(), "Added to Lunch");
+});
+
+t("UIF-02 builder: 'Servings it makes' at 0 → 'Enter how many servings it makes.', never saved as 1; save toasts say where it went", () => {
+  reset(); newMeal("Zero servings");
+  M.ui.draft.items.push(egg()); M.ui.openBuilder();
+  input(q('[data-m="mb"][data-k="servingsMade"]'), "0");
+  click(q('[data-m="mb-save"]'));
+  assert.ok(sheetOn() && $("m-mb-msg").textContent === "Enter how many servings it makes.", $("m-mb-msg").textContent);
+  assert.strictEqual(M.meals.list().length, 0);
+  input(q('[data-m="mb"][data-k="servingsMade"]'), "2");
+  click(q('[data-m="mb-save"]'));
+  const m = M.meals.list()[0];
+  assert.strictEqual(m.servingsMade, 2);
+  assert.strictEqual(lastToast(), 'Saved "Zero servings" to Saved meals');
+  /* editing says "Saved changes" */
+  openFoods("meals");
+  click(q('[data-m="meal"][data-id="' + m.id + '"]'));
+  click(q('[data-m="meal-edit"]'));
+  click(q('[data-m="mb-save"]'));
+  assert.strictEqual(lastToast(), 'Saved changes to "Zero servings"');
 });
 
 t("UIF-05 editing a food keeps its other portions and exact per-100 g; Log to today with no change doesn't save", () => {
@@ -473,7 +533,7 @@ t("UX1-08/OFL-10 after a label read the numbers are in the form: 'Type it in ins
   } finally { M.food.label.fromImage = saved; }
 });
 
-t("UX1-13 'Log it' on a meal idea logs ONE entry named after the idea, items kept on it", async () => {
+t("UX1-13/CPY-19 'Add to Dinner' on a meal idea logs ONE entry named after the idea, items kept on it", async () => {
   reset();
   M.ui.render();
   click(q('[data-m="suggest"]'));
@@ -482,12 +542,18 @@ t("UX1-13 'Log it' on a meal idea logs ONE entry named after the idea, items kep
   const card = qa(".m-sug").find(c => c.querySelector('[data-m="sug-save"]'));
   assert.ok(card, "a built-in idea");
   const name = card.querySelector("h3").textContent, n = card.querySelectorAll(".m-sugitems li").length;
+  assert.strictEqual(card.querySelector('[data-m="sug-log"]').textContent, "Add to Dinner");
   click(card.querySelector('[data-m="sug-log"]'));
   const list = M.log.slotEntries(M.today(), "Dinner");
   assert.strictEqual(list.length, 1);
   assert.strictEqual(list[0].name, name);
   assert.strictEqual(list[0].items.length, n);
   near(list[0].per.cal, M.foodMath.sum(list[0].items).cal, 0.5);
+  assert.strictEqual(lastToast(), "Added " + name + " to Dinner");
+  /* the entry's items survive a save + reload */
+  M.save(); M.load();
+  const again = M.log.slotEntries(M.today(), "Dinner")[0];
+  assert.ok(again && Array.isArray(again.items) && again.items.length === n, "items kept after reload");
 });
 
 t("UX2-12 Suggest offers a batch meal sized to the protein left, logged by cooked weight", async () => {
@@ -507,7 +573,7 @@ t("UX2-12 Suggest offers a batch meal sized to the protein left, logged by cooke
   const pG = m.per.p / m.batch.cookedG;
   near(s.grams * pG, 40, 3.5, "portion covers the protein left");
   const btn = card.querySelector('[data-m="sug-log"]');
-  assert.ok(/^Log \d+(\.\d)? oz$/.test(btn.textContent), btn.textContent);
+  assert.ok(/^Add \d+(\.\d)? oz to Dinner$/.test(btn.textContent), btn.textContent);
   click(btn);
   const e = M.log.slotEntries(M.today(), "Dinner")[0];
   assert.ok(e && e.mealId === m.id && e.state === "cooked" && e.servingLabel === "1 oz cooked", JSON.stringify(e));
