@@ -820,13 +820,15 @@ window.M = window.M || {};
     /* DY-05: a food sold "per 100 g" (common from Open Food Facts) opens in grams, so 32 from the scale means 32 g */
     const bu = lc(unitOfLabel(opts[0].label));
     if (det.mode !== "edit" && !opt.unit && !opt.unitLabel && (bu === "g" || bu === "ml") && num(opts[0].g) > 0 && opts.some(x => x.key === "g")) { det.unit = "g"; det.grams = num(opts[0].g); }
-    if (det.mode !== "edit" && !opt.unit && !opt.unitLabel) {
+    if (det.mode !== "edit" && !opt.unit) {
       /* KJ-03: a serving of several pieces ("6 slices (56 g)") opens on one piece, 6 of them,
-         so typing 4 means 4 slices (not 4 × 6) */
-      const b = opts[0], bp = M.parseServing(b.label), bw = pieceWord(b.label);
-      if (b.key === det.unit && bw && num(bp.qty) > 1) {
+         so typing 4 means 4 slices (not 4 × 6). C2a: a Recent row of an old entry saved as
+         "6 slices" × 1 too, when it is the food's own serving and the grams agree. */
+      const b = opts.find(x => x.key === det.unit), bp = b ? M.parseServing(b.label) : null, bw = b ? pieceWord(b.label) : "";
+      if (b && !b.grams && bw && num(bp.qty) > 1 && (!opt.unitLabel || b === opts[0])) {
         const one = opts.find(x => !x.grams && x !== b && Math.abs(num(M.parseServing(x.label).qty) - 1) < 1e-9 && pieceWord(x.label) === bw);
-        if (one) { det.unit = one.key; det.servings = r4(num(bp.qty) * det.servings); }
+        const gOk = one && (!(num(b.g) > 0 && num(one.g) > 0) || Math.abs(num(bp.qty) * num(one.g) - num(b.g)) <= num(b.g) * 0.03);
+        if (one && gOk) { det.unit = one.key; det.servings = r4(num(bp.qty) * det.servings); }
       }
     }
     /* MF-03 (decision 7): the amount typed in the search wins ("2 eggs", "4 slices turkey", "150 g …") */
@@ -857,7 +859,9 @@ window.M = window.M || {};
     const typedSt = t.state === "cooked" ? "cooked" : t.state === "raw" || t.state === "dry" ? "raw" : null;
     const W = M.cook.UNIT_G;
     if (wu && W[wu]) {
-      const g = q * (u === "kg" ? 1000 : W[wu]), st = typedSt || (dry && g >= 100 ? "cooked" : "raw"), o = opts.find(x => x.key === wu + "-" + st);
+      /* MF-02: pasta by weight is dry ("4 oz pasta" = off the box); rice / quinoa read cooked from 100 g up */
+      const pasta = /\b(pasta|spaghetti|penne|noodles?|macaroni|linguine|fettuccine|rigatoni|orzo|rotini|ziti)\b/i.test(String((food && food.name) || ""));
+      const g = q * (u === "kg" ? 1000 : W[wu]), st = typedSt || (dry && g >= 100 && !pasta ? "cooked" : "raw"), o = opts.find(x => x.key === wu + "-" + st);
       return o ? { key: o.key, g, state: st } : null;
     }
     if (wu) {
@@ -866,9 +870,24 @@ window.M = window.M || {};
       return o ? { key: o.key, g: q * o.g, state: o.state } : null;
     }
     /* "2 breasts"; "12 shrimp" → the "large shrimp" piece when there is one */
-    const pcs = opts.filter(x => !x.vol && !W[x.unit] && (!typedSt || x.state === typedSt) && (sing(x.unit) === u || sing(lc(String(x.unit)).replace(/\([^)]*\)/g, " ").trim().split(/\s+/).pop()) === u));
+    const piece = st => opts.filter(x => !x.vol && !W[x.unit] && (!st || x.state === st) && (sing(x.unit) === u || sing(lc(String(x.unit)).replace(/\([^)]*\)/g, " ").trim().split(/\s+/).pop()) === u));
+    /* a count doesn't change with cooking: "2 cooked chicken breasts" is 2 breasts even with only a raw breast unit */
+    let pcs = piece(typedSt); if (!pcs.length && typedSt) pcs = piece(null);
     const o = pcs.find(x => sing(x.unit) === u) || (/\bjumbo\b/i.test(String(t.q || "")) && pcs.find(x => /\bjumbo\b/i.test(x.unit))) || pcs.find(x => /\blarge\b/i.test(x.unit)) || pcs[0];
     return o ? { key: o.key, g: q * o.g, state: o.state } : null;
+  }
+  /* The search words without the amount typed ("2 chicken breasts" → "chicken breasts", "1 cup cooked quinoa" →
+     "quinoa", "chicken 6 oz" → "chicken"); the words as typed when M.searchAmount finds no amount. */
+  function nameNoAmount(q) {
+    const s0 = String(q || "").trim();
+    try {
+      if (typeof M.searchAmount !== "function" || !isObj(M.searchAmount(s0))) return s0;
+      const U = "(?:cups?|tbsps?|tsps?|fl\\.? ?oz|oz|g|grams?|kg|lbs?|ml|slices?|pieces?|scoops?|cans?|links?)";
+      /* the number must stand alone or touch a unit ("150g"), so "7up" stays "7up" */
+      const s = s0.replace(new RegExp("^(?:\\d+\\s+[½¼¾⅓⅔]|\\d+(?:[.,/]\\d+)?|[½¼¾⅓⅔]|half|an?)(?=\\s|" + U + "\\b)\\s*(?:" + U + "\\b)?\\s*(?:of\\s+)?(?:(?:raw|cooked|dry)\\b)?\\s*", "i"), "")
+        .replace(new RegExp("\\s+(?:x\\s*)?\\d+(?:\\.\\d+)?\\s*(?:" + U + "\\b)?\\s*(?:(?:raw|cooked|dry)\\b)?$", "i"), "").trim();
+      return s || s0;
+    } catch (e) { return s0; }
   }
   /* Plain foods: { unit, servings } or { grams } for the typed amount, or null (no matching unit). */
   function typedPlain(t, opts, name) {
@@ -883,6 +902,9 @@ window.M = window.M || {};
       return { x, n: num(p.qty) > 0 ? num(p.qty) : 1, ok: ws.indexOf(u) >= 0 };
     }).filter(h => h.ok);
     if (hits.length) { const h = hits.find(y => Math.abs(y.n - 1) < 1e-9) || hits[0]; return { unit: h.x.key, servings: r4(q / h.n) }; }
+    /* "8 oz milk": a drink sold in ml counts fluid ounces (8 oz = 1 cup), not ounces of weight */
+    const ml = /\(\s*([\d.]+)\s*ml\s*\)\s*$/i.exec(String(b.label || ""));
+    if ((u === "oz" || u === "fl oz") && ml && num(ml[1]) > 0 && num(b.g) > 0 && gOpt) return { grams: r4(q * 29.5735 * num(b.g) / num(ml[1])) };
     const wg = { oz: 28.349523125, lb: 453.59237, kg: 1000 }[u];
     return wg && gOpt ? { grams: r4(q * wg) } : null;
   }
@@ -1169,7 +1191,8 @@ window.M = window.M || {};
       if (off.length) offHTML = '<div class="ex-div">From Open Food Facts</div>' + off.map(f => { const r = offFood(f); add.list.push(r); return resultRow(r, add.list.length - 1); }).join("");
       else if (add.offState === "error") offHTML = '<div class="m-offstate mut small" role="status">' + esc(add.offErr || "Open Food Facts didn't answer. Try again in a minute.") + '</div>';
     } else if (searching) offHTML = '<div class="m-offstate mut small" role="status">Searching online…</div>';
-    const addNew = q ? '<button class="m-addnew" data-m="open-form" data-name="' + esc(q) + '"><b>+ Not here?</b> Add <span class="m-keepcase">“' + esc(q) + '”</span> as a new food</button>' : "";
+    const nq = q ? nameNoAmount(q) : "";   /* C2a: "2 chicken breasts" → a new food named "chicken breasts" */
+    const addNew = q ? '<button class="m-addnew" data-m="open-form" data-name="' + esc(nq) + '"><b>+ Not here?</b> Add <span class="m-keepcase">“' + esc(nq) + '”</span> as a new food</button>' : "";
     if (!add.list.length) {
       if (q && searching) return addNew + offHTML;
       return '<div class="empty">' + (q ? "Not in the app yet. Add it once and it's saved for next time." : add.seg === "recent" ? "Nothing logged yet. Search above or try Foods." : "Search for a food, or scan a label.") + '</div>' +

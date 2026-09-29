@@ -1822,6 +1822,23 @@ t("F2b r5 P3: file buttons are read once (PL-12); wording (PL-14): barcode toast
   assert.strictEqual(lastToast(), "“Egg scramble” is back");
 });
 
+t("C2b r5: Describe row steppers really are 44 px (m.css beats index.html's later .stepper.sm rules)", () => {
+  /* m.css loads BEFORE index.html's inline <style>, so a tie in specificity loses (seen 40×42 in Chromium) */
+  const css = fs.readFileSync(path.join(__dirname, "..", "m.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+  const spec = sel => { const s = sel.replace(/::?[a-z-]+(\([^)]*\))?/gi, m => (m.startsWith("::") ? " x" : ".p")); return [(s.match(/#[\w-]+/g) || []).length, (s.match(/\.[\w-]+|\[[^\]]+\]/g) || []).length, (s.replace(/[.#][\w-]+|\[[^\]]+\]/g, "").match(/[a-z][\w-]*/gi) || []).length]; };
+  const beats = (a, b) => a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2];
+  const rules = src => { const out = []; src.replace(/([^{}]+)\{([^{}]*)\}/g, (m, sel, body) => { sel.split(",").forEach(x => out.push({ sel: x.trim(), body })); return m; }); return out; };
+  const shell = rules((html.match(/<style>([\s\S]*?)<\/style>/) || ["", ""])[1]);
+  const theirs = re => shell.filter(r => /^\.stepper\.sm( button| input)?$/.test(r.sel) && re.test(r.body)).map(r => spec(r.sel));
+  const cols = rules(css).filter(r => /m-istep/.test(r.sel) && /\.m-item/.test(r.sel) && /grid-template-columns:\s*44px 1fr 44px/.test(r.body));
+  assert.ok(cols.length, "a Describe-row rule sets 44px columns");
+  cols.forEach(r => theirs(/grid-template-columns/).forEach(o => assert.ok(beats(spec(r.sel), o), r.sel + " must beat .stepper.sm")));
+  const hts = rules(css).filter(r => /m-istep (button|input)/.test(r.sel) && /\.m-item/.test(r.sel) && /height:\s*44px/.test(r.body));
+  assert.strictEqual(hts.length, 2, "button and input heights");
+  hts.forEach(r => theirs(/height/).forEach(o => assert.ok(beats(spec(r.sel), o), r.sel + " must beat .stepper.sm button/input")));
+});
+
 (async () => {
   let pass = 0, fail = 0;
   for (const x of tests) {

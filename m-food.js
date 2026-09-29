@@ -2565,6 +2565,8 @@ window.M = window.M || {};
       .replace(/\b(?:strawberry\s+)?(?:jelly|jam)\s+sandwich(es)?\b/gi, "jam sandwich")
       .replace(/\bhalf\s*(?:and|&|n|'n'|’n’)\s*half\b/gi, "halfnhalf")
       .replace(/\bstir[\s-]*(?:fry|fried|fries)\b/gi, "stirfry")
+      /* "2 whites" is egg whites, never white bread ("2 eggs 2 whites toast") */
+      .replace(/\b(\d+(?:\.\d+)?|one|two|three|four|five|six|eight|ten)\s+whites\b/gi, "$1 egg whites")
       .replace(/\bpb\b(?!\s+sandwich)/gi, "peanut butter");
   }
   function splitDescribe(text) {
@@ -2727,6 +2729,7 @@ window.M = window.M || {};
   const MEAL_KEEP = "(?!\\s*(?:meats?|sausages?|burritos?|sandwich(?:es)?|bars?|packs?|sizes?)\\b)";
   const MEAL_AT = new RegExp("\\b(?:for|at|as|during)\\s+(?:the\\s+|my\\s+|a\\s+)?(?:" + MEALW + ")\\b" + MEAL_KEEP, "gi");
   const MEAL_LEAD = new RegExp("^\\s*(?:" + MEALW + ")\\b" + MEAL_KEEP + "\\s*(?:[:\\-–—]|\\b(?:was|were|is)\\b)?", "i");
+  const MEAL_WORD_ONLY = new RegExp("^(?:(?:" + MEALW + "|then|later)[\\s:]*)+$", "i");
   const TIME_WORDS = /\b(?:later|today|tonight|this\s+(?:morning|afternoon|evening)|last\s+night|yesterday|i|we|had|ate|eaten|was|were|just|then|also)\b/gi;
   function stripMealWords(part) {
     let s = String(part == null ? "" : part).replace(MEAL_AT, " ");
@@ -2817,6 +2820,8 @@ window.M = window.M || {};
     return { items, unmatched };
     /* one part → [items] or null (nothing found) */
     function build(part, depth) {
+      /* "cucumber half" is half a cucumber */
+      part = String(part).replace(/^([a-z][a-z'\s]*?)\s+(half|quarter)$/i, (m0, f, h) => (/\band$/i.test(f) ? m0 : h + " " + f));
       const q = M.food.parseQuantity(part);
       if (q.words) q.words = q.words.replace(/\bhalfnhalf\b/gi, "half and half");
       part = part.replace(/\bhalfnhalf\b/gi, "half and half");
@@ -2849,7 +2854,7 @@ window.M = window.M || {};
          yogurt blueberries agave" or "2 chicken breasts 1 cup rice broccoli"): when the words
          split into parts that are all foods, each is logged */
       const wsW = String(q.words || "").split(/\s+/).filter(Boolean);
-      const canSplit = depth < SPLIT_DEPTH && wsW.length >= 2 && wsW.length <= 12 && !wsW.some(w => DISH.test(singular(lc(w).replace(/[^a-z]/g, ""))));
+      const canSplit = depth < SPLIT_DEPTH && wsW.length >= 2 && wsW.length <= 30 && !wsW.some(w => DISH.test(singular(lc(w).replace(/[^a-z]/g, ""))));
       /* SD-07: an amount left inside the words ("eggs 2 whites", "toast 2 eggs") means more than
          one food: cut first */
       const midNum = canSplit && wsW.some((w, k) => k > 0 && /^\d+(?:[.,]\d+)?[a-z]*$/i.test(w));
@@ -2934,7 +2939,8 @@ window.M = window.M || {};
         /* two words: an unknown word after the food ("chicken strips") or a describing word before
            it ("french toast") makes one dish; a plural before it is its own food ("oats banana") */
         if (n === 2 && (got[got.length - 1].unknown != null || (got[0].unknown != null && !/s$/i.test(ws[0])))) return null;
-        return got.filter(it => it.unknown == null || coreWords(it.unknown.replace(/^[\d\s.,\/½¼¾⅓⅔⅛]+/, "")).length);
+        /* a meal word inside a long note ("… broccoli dinner cod …") names the meal, not a food */
+        return got.filter(it => it.unknown == null || (coreWords(it.unknown.replace(/^[\d\s.,\/½¼¾⅓⅔⅛]+/, "")).length && !MEAL_WORD_ONLY.test(it.unknown.trim())));
       }
     }
     function one(part, q, depth) {

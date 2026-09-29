@@ -7,12 +7,10 @@
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --fat:#F0A25C; } }
 :root[data-theme="dark"]{ --fat:#F0A25C; }
 
-/* ---- mode bar (Train | Macros) ---- */
-.modebar{flex:none;z-index:5;display:grid;grid-template-columns:1fr 1fr;height:44px;background:var(--sur2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-.modebar button{display:flex;align-items:center;justify-content:center;gap:8px;height:44px;font-family:"Barlow Condensed","Barlow",sans-serif;font-size:16px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);background:var(--sur2)}
-.modebar button+button{border-left:1px solid var(--line)}
-.modebar button svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-.modebar button.on{background:var(--acc);color:var(--acc-ink)}
+/* ---- mode bar (Train | Macros): index.html styles the switch. Only these two still win over it
+   (its .modebar svg is less specific), so they stay; the rest of the old block was dead. ---- */
+.modebar{z-index:5}
+.modebar button svg{width:20px;height:20px}
 
 /* ---- shared bits ---- */
 .m-row{width:100%;text-align:left;min-height:56px}
@@ -432,9 +430,10 @@
 .m-unfq[hidden]{display:none}
 .m-unfq .m-warnline:empty{display:none}
 .m-unfq>.btn{margin-top:10px}
-/* PL-09: Describe rows: 44 × 44 steppers, and × keeps a 6 px gap from + */
-.m-item>.m-istep{width:136px;grid-template-columns:44px 1fr 44px}
-.m-item>.m-istep button,.m-item>.m-istep input{height:44px}
+/* PL-09: Describe rows: 44 × 44 steppers, and × keeps a 6 px gap from +
+   (.stepper.sm in the selector: index.html's own .stepper.sm rules load later and win ties) */
+.m-item>.stepper.sm.m-istep{width:136px;grid-template-columns:44px 1fr 44px}
+.m-item>.stepper.sm.m-istep button,.m-item>.stepper.sm.m-istep input{height:44px}
 .m-item>.icon{width:44px;height:44px;margin:0}
 .m-mbedit .stepper.sm{grid-template-columns:44px 1fr 44px}
 .m-mbedit .stepper.sm button,.m-mbedit .stepper.sm input{height:44px}

@@ -2263,6 +2263,33 @@ t("F4R5 SD-13 small typos still find the food ('chiken breast', 'brocoli', 'bann
   assert.deepStrictEqual(f5("xyzzy blorp").unmatched, ["xyzzy blorp"]);
 });
 
+t("C4R5 a long note with no commas (13–40 words) is still cut into foods, fast", () => {
+  M.reset();
+  const note = "2 eggs 2 slices daves toast butter banana coffee chicken breast 1 cup rice broccoli 6oz salmon asparagus quinoa greek yogurt blueberries agave";
+  assert.ok(note.split(" ").length > 20);
+  const t0 = Date.now(), r = f5(note), ms = Date.now() - t0;
+  assert.deepStrictEqual(r.unmatched, [], JSON.stringify(r.unmatched));
+  const names = r.items.map(i => i.name).join(" | ");
+  ["egg", "banana", "chicken breast", "rice", "broccoli", "salmon", "asparagus", "quinoa", "greek yogurt", "blueberr", "agave"].forEach(w => assert.ok(names.toLowerCase().indexOf(w) >= 0, w + " missing: " + names));
+  const ch = r.items.find(i => /chicken breast/i.test(i.name));
+  assert.strictEqual(ch.state, "raw"); near(ch.g, 175, 0.5, "one breast, raw");
+  assert.ok(ms < 1500, "took " + ms + " ms");
+});
+t("C4R5 '2 whites' is egg whites (never white bread); 'cucumber half' is half a cucumber; meal words inside a long note aren't foods", () => {
+  M.reset();
+  let r = f5("2 eggs 2 whites toast");
+  assert.deepStrictEqual(r.unmatched, []);
+  assert.ok(r.items.some(i => /^egg white/i.test(i.name) && Math.round(i.per.cal * i.servings) === 34), r.items.map(i => i.name).join(" | "));
+  assert.ok(!r.items.some(i => /white, sandwich|bread, white/i.test(i.name)), "no white bread: " + r.items.map(i => i.name).join(" | "));
+  const cu = r4one("cucumber half");
+  assert.ok(/^cucumber/i.test(cu.name)); near(cu.g, 150, 1, "half a cucumber");
+  near(r4one("chicken breast half").g, 87.5, 0.6, "half a breast, raw");
+  assert.ok(/half and half/i.test(r4one("half and half").name), "half and half stays one food");
+  r = f5("lunch 2 chicken breasts 2 cups rice broccoli dinner cod quinoa asparagus snack greek yogurt blueberries");
+  assert.deepStrictEqual(r.unmatched, []);
+  assert.ok(r.items.some(i => /^cod/i.test(i.name)) && r.items.some(i => /greek yogurt/i.test(i.name)), r.items.map(i => i.name).join(" | "));
+});
+
 /* ---- run ---- */
 (async () => {
   let pass = 0, fail = 0;

@@ -795,6 +795,25 @@ function runPlanStashPass() {
         assert.deepStrictEqual(stored().mix, JSON.parse(w.eval("JSON.stringify(PRESETS." + other + ".mix)")));
         assert.ok(!("zz" in kept()), "unknown names dropped");
         switchTo(who); assert.strictEqual(sameBytes(stored(), S0), raw0);
+        /* C6: a kept plan with a null exercise or a broken day never reaches Today (it crashed there); bad side fields fall back */
+        const pr2 = JSON.parse(w.eval("JSON.stringify(PRESETS." + other + ")"));
+        for (const bad of [{ program: { order: ["A"], workouts: { A: { name: "A", items: [null] } } } },
+          { program: { order: ["A"], workouts: { A: { name: "A", items: [{ t: "block", moves: [null] }] } } } },
+          { program: { order: ["A"], workouts: { A: { name: "A", items: [] }, ABS: null } } },
+          { program: { order: ["A"], workouts: { A: { name: "A", items: "x" } } } }]) {
+          w.localStorage.setItem("chalk.people", JSON.stringify({ [other]: bad }));
+          switchTo(other);
+          assert.strictEqual(stored().profile, other); assert.deepStrictEqual(stored().mix, pr2.mix, "preset used: " + JSON.stringify(bad));
+          assert.ok(d.getElementById("app").textContent.length > 200, "Today still draws");
+          switchTo(who); assert.strictEqual(sameBytes(stored(), S0), raw0);
+        }
+        w.localStorage.setItem("chalk.people", JSON.stringify({ [other]: { program: { order: ["A"], workouts: { A: { name: "A", items: [] } } }, plan: "zz", goal: 5, mix: [], cyc: "q", next: 7, block: "b", absNext: "y", pick: 3, lastSummary: { rec: null } } }));
+        switchTo(other);
+        { const now = stored(); assert.deepStrictEqual(now.mix, pr2.mix); assert.strictEqual(now.goal.mode, pr2.goal); assert.deepStrictEqual(now.cyc, {}); assert.strictEqual(now.block, 0);
+          assert.strictEqual(now.absNext, true); assert.strictEqual(now.pick, null); assert.strictEqual(now.lastSummary, null); assert.strictEqual(now.next, "A"); assert.ok(!now.plan || Array.isArray(now.plan.items)); }
+        switchTo(who); assert.strictEqual(sameBytes(stored(), S0), raw0);
+        w.localStorage.setItem("chalk.people", '{"__proto__":{"program":1},"zz":{}}'); switchTo(other); switchTo(who);
+        assert.ok(!Object.keys(kept()).some(k => k !== "nick" && k !== "kat"), "only real people kept");
         w.localStorage.setItem("chalk.people", "{not json"); switchTo(other); assert.strictEqual(stored().profile, other, "unreadable key: still switches");
         tab("settings"); click(w, q(d, '#app [data-a="wipe"]')); click(w, q(d, '#sheet [data-a="wipe-do"]'));
         assert.strictEqual(w.localStorage.getItem("chalk.people"), null);

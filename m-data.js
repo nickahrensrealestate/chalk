@@ -286,7 +286,7 @@ window.M = window.M || {}; M.DB = M.DB || {};
     W("carrots_cooked", "Carrots, cooked", "", 0.5, "cup, sliced", 78, [35, 0.8, 8.2, 0.2, 3, 3.5, 58], ["1 carrot", 46, "1 cup, sliced", 156, "100 g", 100], ST),
     W("carrots_baby", "Carrots, baby", "", 10, "baby carrots", 100, [35, 0.6, 8.2, 0.1, 2.9, 4.8, 78], ["1 baby carrot", 10, "5 baby carrots", 50, "100 g", 100], STW("baby carrots")),
     W("onion", "Onion, white", "", 0.5, "cup, chopped", 80, [40, 1.1, 9.3, 0.1, 1.7, 4.2, 4], ["1 medium", 110, "1 tbsp", 10, "100 g", 100], STW("red yellow")),
-    W("sweet_onion", "Onion, sweet", "", 0.5, "cup, chopped", 80, [32, 0.8, 7.6, 0.1, 0.9, 5, 8], ["1 cup, chopped", 160, "1 slice", 38, "100 g", 100], ST),
+    W("sweet_onion", "Onion, sweet", "", 0.5, "cup, chopped", 80, [32, 0.8, 7.6, 0.1, 0.9, 5, 8], ["1 onion", 331, "½ onion", 165.5, "1 cup, chopped", 160, "1 slice", 38, "100 g", 100], ST),
     W("mushrooms", "Mushrooms, white, raw", "", 1, "cup, sliced", 70, [22, 3.1, 3.3, 0.3, 1, 2, 5], ["100 g", 100]),
     W("green_beans", "Green beans, cooked", "", 1, "cup", 125, [35, 1.9, 7.9, 0.3, 3.2, 3.6, 1], ["½ cup", 63, "100 g", 100]),
     /* USDA: asparagus, raw (1 medium spear = 16 g) */

@@ -396,7 +396,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       const conv1 = lb => (u === "metric" ? M.units.lb2kg(lb) : lb);
       const stats = `<div class="stats">
         ${tile(dispW(latest.v, u), "Latest", wUnit(u), esc(fmtShort(latest.date)))}
-        ${tile(dispW(a7, u), "7-day average", wUnit(u), inWeek + " weigh-in" + (inWeek === 1 ? "" : "s"))}
+        ${tile(dispW(a7, u), "7-day average", wUnit(u), inWeek + ' <span class="mt-nb">weigh-in' + (inWeek === 1 ? "" : "s") + "</span>")}
         ${tile(rate == null ? "—" : steady ? "Steady" : signed(conv1(rate), u === "metric" ? 2 : 1), "Per week", rate == null || steady ? "" : wUnit(u), rate == null ? "needs 2 weeks" : rateSpan(all))}
       </div>`;
       let goalLine;
@@ -459,7 +459,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const stats = `<div class="stats">
       ${tile(n, "Days logged", "of 7")}
       ${tile(none ? "—" : fmtN(ws.avgCal), "Calories a day", "", "of " + fmtN(t.cal))}
-      ${tile(none ? "—" : r0(ws.avgP), "Protein a day", none ? "" : "g", "of " + r0(t.p) + " g", "pro")}
+      ${tile(none ? "—" : r0(ws.avgP), "Protein a day", none ? "" : "g", "of " + r0(t.p) + " g", none ? "" : "pro")}
     </div>`;
     const chart = M.charts.bars(vals, { target: t.cal, unit: "cal", label: "Calories each day, last 7 days", h: 150 });
     const note = !ws.logged ? `<p class="hint">Log a day of food and the bars fill in.</p>`
@@ -524,7 +524,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const u = units(p);
     const lw = M.body.latest(id, "w"), lr = M.body.latest(id, "rhr");
     const today = M.today();
-    const last = lw ? `<p class="hint mt-last">Last weigh-in: ${esc(fmtW(lw.value, u))}, ${esc(fmtShort(lw.date))}.</p>` : "";
+    const last = lw ? `<p class="hint mt-last">Last <span class="mt-nb">weigh-in:</span> ${esc(fmtW(lw.value, u))}, ${esc(fmtShort(lw.date))}.</p>` : "";
     return `<div class="mt-form">
       <div class="entry">
         <div><label class="lbl" for="mt-w">Weight (${wUnit(u)})</label><input class="mini" id="mt-w" type="number" step="0.1" min="0" inputmode="decimal" enterkeyhint="done" placeholder="${lw ? toDispW(lw.value, u) : "e.g. " + (u === "metric" ? "80.5" : "180.5")}"></div>
@@ -622,7 +622,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       <p class="mt-msg" id="mt-amsg-${mode}" role="status" hidden></p>
       <div class="srow" data-row="height"><div class="l">Height</div><div class="mt-ctl mt-hgt">${height}</div></div>
       <p class="mt-msg" id="mt-hmsg-${mode}" role="status" hidden></p>
-      <div class="srow" data-row="weight"><div><div class="l">Weight</div><div class="s">${mode === "setup" ? "Today's weight" : "Changing it logs today's weigh-in"}</div></div><div class="mt-ctl">${box("weight", 'step="0.1" min="0" inputmode="decimal"', toDispW(p.weightLb, u), u === "metric" ? "e.g. 80" : "e.g. 180", "Weight in " + (u === "metric" ? "kilograms" : "pounds"))}<span class="mt-u">${wUnit(u)}</span></div></div>
+      <div class="srow" data-row="weight"><div><div class="l">Weight</div><div class="s">${mode === "setup" ? "Today's weight" : 'Changing it logs today\'s <span class="mt-nb">weigh-in</span>'}</div></div><div class="mt-ctl">${box("weight", 'step="0.1" min="0" inputmode="decimal"', toDispW(p.weightLb, u), u === "metric" ? "e.g. 80" : "e.g. 180", "Weight in " + (u === "metric" ? "kilograms" : "pounds"))}<span class="mt-u">${wUnit(u)}</span></div></div>
       ${mode === "setup" ? "" : `<p class="mt-msg mt-wmsg" id="mt-wmsg" role="status" hidden></p>`}
       <div class="srow" data-row="goal"><div class="l">Goal weight</div><div class="mt-ctl">${box("goal", 'step="0.1" min="0" inputmode="decimal"', toDispW(p.goalWeightLb, u), u === "metric" ? "e.g. 75" : "e.g. 170", "Goal weight in " + (u === "metric" ? "kilograms" : "pounds"))}<span class="mt-u">${wUnit(u)}</span></div></div>
       <p class="mt-msg" id="mt-gmsg-${mode}" role="status" hidden></p>
@@ -708,7 +708,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       ${splits}
       <h4 class="mt-thd">Your daily targets</h4>
       <div class="mt-tbox" id="mt-tbox">${targetsBoxHTML(p)}</div>
-      <div class="srow mt-manrow"><div><div class="l" id="mt-man-l">Type my own targets</div><div class="s">Turn off to go back to the calculator.</div></div><button class="toggle ${manual ? "on" : ""}" data-m="t-manual" role="switch" aria-checked="${manual}" aria-labelledby="mt-man-l" aria-label="Type my own targets"><i></i></button></div>
+      <div class="srow mt-manrow"><div><div class="l" id="mt-man-l">Type my own targets</div><div class="s">${manual ? "Turn off to go back to the calculator." : "Turn on to type each number yourself."}</div></div><button class="toggle ${manual ? "on" : ""}" data-m="t-manual" role="switch" aria-checked="${manual}" aria-labelledby="mt-man-l" aria-label="Type my own targets"><i></i></button></div>
     </div>`;
   }
   const sumText = sum => (sum === 100 ? "Adds up to 100%" : "Adds up to " + sum + "%. It must be 100%.");
@@ -732,7 +732,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const u = units(p);
     const unitWord = unit => (unit === "g" ? "grams" : unit === "oz" ? "ounces" : unit);
     const MC = { p: "pro", c: "carb", f: "fat" };   /* LK-07: the macro colors the Diary uses */
-    const cell = (k, label, unit) => `<div class="stat${MC[k] ? " " + MC[k] : ""}"><div class="v num">${manual ? `<input class="mini" type="number" inputmode="numeric" enterkeyhint="done" min="0" data-m="t-target" data-f="${k}" value="${r0(num(t[k]))}" aria-label="${label} target${unit ? " in " + unitWord(unit) : ""}">` : fmtN(t[k])}${manual || !unit ? "" : `<small>${unit}</small>`}</div><div class="k">${label + (manual && unit ? " (" + unit + ")" : "")}</div></div>`;
+    const cell = (k, label, unit) => `<div class="stat${MC[k] ? " " + MC[k] : ""}"><div class="v num">${manual ? `<input class="mini" type="number" inputmode="numeric" enterkeyhint="done" min="0" data-m="t-target" data-f="${k}" value="${r0(num(t[k]))}" aria-label="${label} target${unit ? " in " + unitWord(unit) : ""}">` : fmtN(t[k])}${manual || !unit ? "" : `<small>${unit}</small>`}</div><div class="k">${label}${manual && unit ? ' <span class="mt-lc">(' + unit + ")</span>" : ""}</div></div>`;
     const grid = `<div class="stats mt-tgrid">${cell("cal", "Calories", "")}${cell("p", "Protein", "g")}${cell("c", "Carbs", "g")}${cell("f", "Fat", "g")}${cell("fiber", "Fiber", "g")}${cell("water", "Water", "oz")}</div>`;
     let note = "";
     if (manual) note = `<p class="mt-msg" id="mt-tmsg" role="status" hidden></p>` + manualNote(t, u);
@@ -770,7 +770,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const dueNow = due === "body14" || (due === "refresh60" && !!bc && bc.days >= 14 && !snoozedTill(sn));
     const next = snoozedTill(sn) ? "Skipped until " + esc(fmtDay(sn)) + "." : dueNow ? '<span class="tag warn">Due now</span>'
       : !bc ? "" : bc.dueKey <= M.today() ? "Next one today." : "Next one " + esc(fmtShort(bc.dueKey)) + ".";
-    return ((lw ? "Last weigh-in " + esc(fmtShort(lw.date)) : "Last check-in " + esc(fmtDay(bc.last))) + ". " + next).trim();
+    return ((lw ? 'Last <span class="mt-nb">weigh-in</span> ' + esc(fmtShort(lw.date)) : "Last check-in " + esc(fmtDay(bc.last))) + ". " + next).trim();
   }
   function checkinsCard(id, p) {
     /* before setup there is nothing to call "still right" (CP-08) */
@@ -1564,7 +1564,9 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     if (el && el.dataset) { el.disabled = true; el.textContent = "Syncing…"; }
     let pr;
     try { pr = Cl.syncNow(); } catch (e) { pr = null; }
-    return Promise.resolve(pr).then(r => { reset(); patchSync(); toast(r && r.ok ? "Synced" : SYNC_FAIL); }, () => { reset(); patchSync(); toast(SYNC_FAIL); });
+    /* the toast gives the same reason as the status line ("The cloud is having trouble…"), not always "check your internet" */
+    const fail = r => (r && typeof r.error === "string" && r.error.trim() ? "Couldn't sync. " + r.error.trim() : SYNC_FAIL);
+    return Promise.resolve(pr).then(r => { reset(); patchSync(); toast(r && r.ok ? "Synced" : fail(r)); }, () => { reset(); patchSync(); toast(SYNC_FAIL); });
   };
   A["t-sync-restore"] = el => {
     const Cl = cloud(); if (!Cl || !Cl.status().on || typeof Cl.restoreTraining !== "function") return;

@@ -853,10 +853,11 @@ window.M = window.M || {};
       return w === "t" ? t : m;
     };
     const out = Object.assign({}, mine, { id: mine.id, pid: mine.pid, date: mine.date });
+    delete out.gone;          /* a delete list an older build kept in the day never stays in the diary */
     out.entries = cpy(entries);
     out.water = field("water", B ? b.w : 0, S ? S.w : 0, v => !num(v));
     out.note = field("note", B ? b.n : "", S ? S.n : "", v => !v);
-    const body = d => { const o = Object.assign({}, d); delete o.updatedAt; return canon(o); };
+    const body = d => { const o = Object.assign({}, d); delete o.updatedAt; delete o.gone; return canon(o); };
     const ob = body(out);
     if (ob === body(theirs)) return theirs;
     if (ob === body(mine)) return mine;
@@ -2068,9 +2069,18 @@ window.M = window.M || {};
   try {
     const days = isObj(M.MS) && isObj(M.MS.days) ? M.MS.days : null;
     let n = 0;
-    if (days && st.code) Object.keys(days).forEach(id => {
+    if (days) Object.keys(days).forEach(id => {
       const key = "day|" + id, rec = days[id];
-      if (!isObj(rec) || !validId("day", id) || st.hashes[key] === undefined || has(st.base, key) || !recentDay(id)) return;
+      if (!isObj(rec)) return;
+      /* A day an older build took whole from a newer phone's row keeps that row's delete list.
+         It never belongs in the diary (or a backup). If the day is still just as it was at the
+         last sync (its old hash counted the list), it still counts as synced: nothing to send. */
+      if ("gone" in rec) {
+        const old = st.code && st.hashes[key] !== undefined ? H(rec) : "";
+        delete rec.gone;
+        if (old && old === st.hashes[key]) { st.hashes[key] = hashRec(key, rec); n++; }
+      }
+      if (!st.code || !validId("day", id) || st.hashes[key] === undefined || has(st.base, key) || !recentDay(id)) return;
       if (hashRec(key, rec) === st.hashes[key]) { st.base[key] = dayBase(rec); n++; }
     });
     if (n) saveSt(true);

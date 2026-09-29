@@ -640,7 +640,7 @@ t("You form: a field change never re-renders — values and targets patch in pla
   assert.ok(p.targets.cal < oldCal && p.targets.p === 180);
   assert.ok(box.innerHTML.indexOf(">" + fmt(p.targets.cal) + '</div><div class="k">Calories</div>') > 0, "calories patched in place");
   assert.ok(/>180<small>g<\/small>/.test(box.innerHTML), "protein patched in place");
-  assert.ok(/Last weigh-in Sep 28/.test($("#mt-ci-body").innerHTML), "check-in line patched");
+  assert.ok(/Last weigh-in Sep 28/.test($("#mt-ci-body").textContent), "check-in line patched");
   assert.strictEqual(p.updatedAt, NOW, "edit time stamped for sync");
   /* cleaned-up values go back into the boxes */
   const age0 = p.age;
@@ -1963,6 +1963,13 @@ t("R5 P3: macro colors, targets heading, one gold button in Train, left labels, 
     M.cloud.syncNow = () => Promise.reject(new Error("offline"));
     await M.ui.actions["t-sync-now"]({ dataset: {}, disabled: false, textContent: "" });
     assert.strictEqual(toasts[toasts.length - 1], "Couldn't sync. Check your internet, then tap Sync now again.");
+    /* CV: the sync gave a reason (a 503 → "The cloud is having trouble…"): the toast says that, like the status line, not "check your internet" */
+    M.cloud.syncNow = () => Promise.resolve({ ok: false, error: "The cloud is having trouble. We'll try again soon." });
+    await M.ui.actions["t-sync-now"]({ dataset: {}, disabled: false, textContent: "" });
+    assert.strictEqual(toasts[toasts.length - 1], "Couldn't sync. The cloud is having trouble. We'll try again soon.");
+    M.cloud.syncNow = () => Promise.resolve({ ok: false, error: "  " });
+    await M.ui.actions["t-sync-now"]({ dataset: {}, disabled: false, textContent: "" });
+    assert.strictEqual(toasts[toasts.length - 1], "Couldn't sync. Check your internet, then tap Sync now again.", "a blank reason: the plain message");
   } finally { if (had) M.cloud = had; else delete M.cloud; }
   /* setup: an age typo is named on Save, outlined, and nothing is saved */
   M.reset(); M.trends.resetDraft(); M.ui.tab = "diary"; show(M.ui.setupCardHTML());
@@ -1981,6 +1988,49 @@ t("R5 P3: macro colors, targets heading, one gold button in Train, left labels, 
   click('[data-m="t-save-setup"]');
   assert.ok(M.person("nick").setupAt, "saved"); assert.strictEqual(M.person("nick").age, 44);
   M.trends.resetDraft();
+});
+
+t("CV final check: weigh-in never splits at its hyphen, units stay lowercase, the switch line fits its state, the date box has no iOS chrome", () => {
+  M.ui.tab = "you"; M.reset(); M.trends.resetDraft(); toasts.length = 0;
+  const p = setupNick();
+  const css = fs.readFileSync(path.join(root, "m-trends.css"), "utf8");
+  /* 320 px: "Changing it logs today's weigh-" / "in" → the word is held together */
+  show(M.ui.views.you());
+  const sub = $('[data-row="weight"] .s');
+  assert.strictEqual(sub.textContent, "Changing it logs today's weigh-in");
+  assert.ok(sub.querySelector(".mt-nb") && sub.querySelector(".mt-nb").textContent === "weigh-in", "weigh-in in a no-wrap span");
+  assert.ok(/\.mt-nb\{white-space:nowrap\}/.test(css));
+  /* the check-in line and the log sheet line too */
+  M.body.add({ date: M.addDays(M.today(), -1), w: 184.2, pid: "nick" }); M.body.add({ date: M.today(), w: 184.0, pid: "nick" });
+  show(M.ui.views.you());
+  const ci = $("#mt-ci-body");
+  assert.ok(/Last weigh-in /.test(ci.textContent) && /<span class="mt-nb">weigh-in<\/span>/.test(ci.innerHTML), "check-in line: " + ci.innerHTML);
+  show(M.ui.views.trends());
+  const tileSub = Array.prototype.find.call(document.querySelectorAll(".mt-card .stat"), s => /7-day average/i.test(s.textContent)).querySelector(".mt-sub");
+  assert.strictEqual(tileSub.textContent, "2 weigh-ins"); assert.ok(tileSub.querySelector(".mt-nb"));
+  click('[data-m="t-log-body"]');
+  const last = document.querySelector(".mt-last");
+  assert.ok(last && /^Last weigh-in: 184 lb, /.test(last.textContent) && last.querySelector(".mt-nb"), "log sheet: " + (last && last.innerHTML));
+  try { closeSheet(); } catch (e) {}
+  /* typed targets: the unit is its own lowercase span under the uppercase label */
+  p.targetsManual = true; show(M.ui.views.you());
+  const k = $('#mt-tbox .stat.pro .k');
+  assert.strictEqual(k.textContent, "Protein (g)");
+  assert.ok(k.querySelector(".mt-lc") && k.querySelector(".mt-lc").textContent === "(g)");
+  assert.strictEqual($('#mt-tbox .stat:nth-child(1) .k').innerHTML, "Calories", "no unit, no span");
+  assert.ok(/\.mt-card \.stat \.k \.mt-lc\{text-transform:none/.test(css));
+  /* the switch's small line says what a tap does from here */
+  assert.strictEqual($(".mt-manrow .s").textContent, "Turn off to go back to the calculator.");
+  p.targetsManual = false; show(M.ui.views.you());
+  assert.strictEqual($(".mt-manrow .s").textContent, "Turn on to type each number yourself.");
+  assert.ok(!/\(g\)/.test($("#mt-tbox").textContent), "calculator tiles: unit after the number only");
+  /* no food logged this week: the protein tile's "—" stays plain (no blue dash) */
+  M.reset(); setupNick(); show(M.ui.views.trends());
+  const pro0 = Array.prototype.find.call(document.querySelectorAll(".mt-card .stat"), s => /Protein a day/.test(s.textContent));
+  assert.ok(pro0 && /—/.test(pro0.querySelector(".v").textContent) && !pro0.classList.contains("pro"), "empty protein tile: " + (pro0 && pro0.outerHTML));
+  /* v17's date box had no iOS chrome (appearance none); keep it with the stronger selector */
+  const rule = (css.match(/input\.mini\.mt-date\{[^}]*\}/) || [""])[0];
+  assert.ok(/-webkit-appearance:none/.test(rule) && /(^|;|\{)appearance:none/.test(rule), "date rule: " + rule);
 });
 
 /* ======================================================================= */

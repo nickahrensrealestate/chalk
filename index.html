@@ -645,15 +645,23 @@ function regen(){ S.mix=S.mix||cp(PRESETS.nick.mix); S.goal=S.goal||{mode:"weigh
    never rides along in the other person's backup. */
 const PEOPLE_KEY="chalk.people", PLAN_KEYS=["program","mix","goal","block","cyc","next","plan","pick","absNext","lastSummary"];
 function peopleGet(){ try{ const o=JSON.parse(localStorage.getItem(PEOPLE_KEY)||"null"); return o&&typeof o==="object"&&!Array.isArray(o)?o:{}; }catch(e){ return {}; } }
-function stashPlan(pid){ if(!PRESETS[pid]) return true; const all=peopleGet(), st={}; PLAN_KEYS.forEach(k=>{ if(S[k]!==undefined) st[k]=S[k]; });
-  Object.keys(all).forEach(id=>{ if(!PRESETS[id]) delete all[id]; }); all[pid]=st;
+const plainObj=o=>!!o&&typeof o==="object"&&!Array.isArray(o);
+/* C6: a kept plan is used only when every day in it is whole. A damaged copy (a null exercise, a day missing) would
+   break Today for that person, so it falls back to their preset instead. */
+function planShapeOk(P){ return plainObj(P)&&plainObj(P.workouts)&&Array.isArray(P.order)&&P.order.length>0&&P.order.every(id=>typeof id==="string"&&plainObj(ownV(P.workouts,id)))
+  &&Object.keys(P.workouts).every(id=>{ const W=P.workouts[id]; return plainObj(W)&&Array.isArray(W.items)&&W.items.every(it=>plainObj(it)&&(it.t==="block"?Array.isArray(it.moves)&&it.moves.every(m=>plainObj(m)&&typeof m.ex==="string"):typeof it.ex==="string")); }); }
+function stashPlan(pid){ if(!ownV(PRESETS,pid)) return true; const all=peopleGet(), st={}; PLAN_KEYS.forEach(k=>{ if(S[k]!==undefined) st[k]=S[k]; });
+  Object.keys(all).forEach(id=>{ if(!ownV(PRESETS,id)) delete all[id]; }); all[pid]=st;
   try{ localStorage.setItem(PEOPLE_KEY,JSON.stringify(all)); return true; }catch(e){ return false; } }
-function restorePlan(pid){ const pr=PRESETS[pid], st=pr&&peopleGet()[pid], P=st&&st.program;
-  if(!P||typeof P!=="object"||!P.workouts||typeof P.workouts!=="object"||!Array.isArray(P.order)||!P.order.length||!P.order.every(id=>P.workouts[id]&&Array.isArray(P.workouts[id].items))) return false;
+function restorePlan(pid){ const pr=ownV(PRESETS,pid), st=pr?ownV(peopleGet(),pid):null, P=plainObj(st)?st.program:null;
+  if(!planShapeOk(P)) return false;
   PLAN_KEYS.forEach(k=>{ if(k in st) S[k]=st[k]; else if(k in S) S[k]=null; });
   /* only fills what a damaged copy lacks: a plan saved by this app passes through unchanged */
-  if(!S.mix||typeof S.mix!=="object") S.mix=cp(pr.mix); if(!S.goal||typeof S.goal!=="object") S.goal={mode:pr.goal,setAt:Date.now()};
-  if(!S.cyc||typeof S.cyc!=="object") S.cyc={}; if(S.block==null) S.block=0; if(S.absNext==null) S.absNext=true;
+  if(!plainObj(S.mix)) S.mix=cp(pr.mix); if(!plainObj(S.goal)) S.goal={mode:pr.goal,setAt:Date.now()};
+  if(!plainObj(S.cyc)) S.cyc={}; if(typeof S.block!=="number") S.block=0; if(typeof S.absNext!=="boolean") S.absNext=true;
+  if(S.plan!=null&&!(plainObj(S.plan)&&Array.isArray(S.plan.items)&&S.plan.items.every(plainObj))) S.plan=null;
+  if(S.lastSummary!=null&&!(plainObj(S.lastSummary)&&plainObj(S.lastSummary.rec))) S.lastSummary=null;
+  if(S.pick!=null&&typeof S.pick!=="string") S.pick=null;
   if(!S.program.order.includes(S.next)) S.next=S.program.order[0];
   return true; }
 function goalDaysLeft(){ if(!S.goal||!S.goal.setAt) return 0; return Math.min(45,45-Math.floor((Date.now()-S.goal.setAt)/86400000)); }

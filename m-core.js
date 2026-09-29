@@ -944,6 +944,8 @@ window.M = window.M || {};
     const c = {};
     Object.keys(o).forEach(k => { if (!STAMP_SKIP[k]) c[k] = o[k]; });
     if (noItemU && Array.isArray(c.items)) c.items = c.items.map(it => { if (!isObj(it) || !("u" in it)) return it; const x = Object.assign({}, it); delete x.u; return x; });
+    /* a meal's per is worked out from its items: a recount (v17 rounded it) is not an edit */
+    if (noItemU) delete c.per;
     try { return canon(c) || ""; } catch (e) { return ""; }
   }
   const stampOk = v => isNum(v) && v > 0;
@@ -1710,6 +1712,8 @@ window.M = window.M || {};
       const t = w[i];
       if (/^\d+(?:\.\d+)?$/.test(t) && !/%$/.test(w[i + 1] || "") ) {
         if (w[i + 1] === "%" ) continue;
+        /* a number in a food's name, not an amount: "21 whole grains", "12 grain bread" */
+        if (/^grains?$/.test(w[i + 1] === "whole" ? w[i + 2] || "" : w[i + 1] || "")) continue;
         qty = +t; at = i;
         if (w[i + 1] && /^\d+(?:\.\d+)?$/.test(w[i + 1]) && +t + +w[i + 1] === 100) { qty = null; at = -1; i++; continue; }   /* "90 10" */
         break;
@@ -1830,6 +1834,19 @@ window.M = window.M || {};
       hit: f => f.staple === true && hasW(f, "turkey") && (hasW(f, "slice") || hasW(f, "deli") || hasW(f, "lunch") || hasW(f, "hillshire")) }
   ];
   function stapleRule(toks) { const q = toks.join(" "); return STAPLE_WORDS.find(r => r.q.indexOf(q) >= 0) || null; }
+  /* a name as plain words, numbers kept ("Chicken & rice" → "chicken and rice") */
+  const fullCache = new Map();
+  function fullKey(s) {
+    s = String(s == null ? "" : s);
+    let k = fullCache.get(s);
+    if (k === undefined) {
+      k = lc(s).replace(/['’‘`]/g, "").replace(/&/g, " and ").split(/[^\p{L}\p{N}%/.]+/u).filter(Boolean).map(singular).join(" ");
+      if (fullCache.size > 5000) fullCache.clear();
+      fullCache.set(s, k);
+    }
+    return k;
+  }
+  const FULL = 200;      /* a saved item whose whole name was typed */
   const COOK_Q = new Set(["raw", "cooked", "uncooked", "dry"]);
   /* SD-08: the rule for these words, also with raw / cooked left out ("chicken cooked") */
   const ruleFor = pq => stapleRule(pq.req) || stapleRule(pq.all) || stapleRule(pq.req.filter(w => !COOK_Q.has(w))) || stapleRule(pq.all.filter(w => !COOK_Q.has(w)));
@@ -1921,8 +1938,9 @@ window.M = window.M || {};
     const cands = [];
     const cand = (r, bonus, extra, kw, own, gen) => cands.push({ r, bonus, extra, kw, own, gen });
     if (wantRecents) M.recents(pid, 40, slot).forEach((rc, i) => cand(recentResult(rc, pid), 25 + Math.max(0, 10 - i / 4), "", "", true));
-    /* L3: the person's own meals get a small plus over the other person's */
-    if (wantMeals) M.meals.list().forEach(m => { const r = mealResult(m, pid); cand(r, 15 + (slot && m.slot === slot ? 25 : m.slot === "Any" ? 6 : 0) + usesBonus(m) + (r.own ? 4 : 0), mealText(m), "", true); });
+    /* L3: the person's own meals get a small plus over the other person's (the other
+       person's meals drop 4, so own meals vs own foods rank as they did in v17) */
+    if (wantMeals) M.meals.list().forEach(m => { const r = mealResult(m, pid); cand(r, 15 + (slot && m.slot === slot ? 25 : m.slot === "Any" ? 6 : 0) + usesBonus(m) - (r.own ? 0 : 4), mealText(m), "", true); });
     /* SD-20: built-in foods' extra words count as weak extra words, not name words */
     M.foods.list().forEach(f => cand(foodResult("food", f), 10 + usesBonus(f), foodWords(f), cookWords(f), true));
     /* built-in foods: a food they named for these words first, then foods they buy,
@@ -1944,6 +1962,9 @@ window.M = window.M || {};
     const rqLetters = rq ? rq.all.join("") : "";
     /* MF-01: a typed ratio or % ("ground beef 90/10", "2% milk"): a saved item without it drops like one missing a word */
     const askedNum = !!pq.asked;
+    /* A saved item whose whole name is typed ("Chicken and rice", "Turkey") comes first,
+       even above the foods they buy for a plain word. Not another person's meal. */
+    const fullQ = fullKey(q);
     const pass = (pq, fuzzy) => {
       const qn = pq.req.join(" "), rule = ruleFor(pq), res = [];
       cands.forEach(c => {
@@ -1962,15 +1983,22 @@ window.M = window.M || {};
           if (rqLetters.length >= 2 && ni.words.join("") === rqLetters) { s2 = Math.max(s2, 50); exact = true; }
           if (s2 > s) { s = s2; weak = w2 && !exact; inside = false; }
         }
-        if (s < 0) { if (!named) return; s = 0; }
+        /* the whole name typed: a saved item of theirs, not another person's meal */
+        const full = !fuzzy && c.own && c.r.own !== false && fullQ.length >= 2 && fullKey(c.r.name) === fullQ;
+        if (s < 0) { if (!named && !full) return; s = 0; }
         /* SD-08: a saved item missing a word the query has ("turkey slices" → Turkey wrap)
            drops to the built-in foods' tier, without its own bonus */
         /* (the word must be in its own name: a meal's ingredients don't count here) */
-        const miss = c.own && !named && (pq.opt.some(o => !Q_MEASURE.has(o) && !optHit(o, c.r.name, c.r.brand, "", c.kw)) || (askedNum && !numHit(pq, c.r)));
-        const tier = named || (c.own && !weak && !miss) ? 0 : 1;
-        /* a saved item found only through its ingredients or brand ranks like a built-in food */
-        const bonus = c.own && (miss || weak) ? 0 : c.bonus;
-        res.push({ r: c.r, inside, tier: tier + (fuzzy ? 2 : 0), s: s + bonus + (named ? NAMED : 0) + (exact ? 40 : 0) + numHit(pq, c.r) });
+        const miss = c.own && !named && !full && (pq.opt.some(o => !Q_MEASURE.has(o) && !optHit(o, c.r.name, c.r.brand, "", c.kw)) || (askedNum && !numHit(pq, c.r)));
+        const tier = named || full || (c.own && !weak && !miss) ? 0 : 1;
+        /* a saved item found only through its ingredients or brand ranks like a built-in food;
+           a recent of a built-in food ranks just above that food, so its amount stays ("fried rice") */
+        let bonus = c.own && (miss || weak) && !full ? 0 : c.bonus;
+        if (!bonus && c.own && c.r.kind === "recent" && c.r.foodId && !ownRec(M.MS.foods, c.r.foodId)) {
+          const gf = genericById(c.r.foodId);
+          if (isObj(gf)) bonus = (gf.staple === true ? STAPLE : 0) + (M.cook.of(gf) ? 3 : 0) + 0.5;
+        }
+        res.push({ r: c.r, inside: inside && !full, tier: tier + (fuzzy ? 2 : 0), s: s + bonus + (named ? NAMED : 0) + (exact ? 40 : 0) + (full ? FULL : 0) + numHit(pq, c.r) });
       });
       /* letters inside a word ("apple" in Pineapple) only when no word matches whole or at its start */
       return res.some(x => !x.inside) ? res.filter(x => !x.inside) : res;
@@ -1987,7 +2015,10 @@ window.M = window.M || {};
     if (!scored.length && lq.req.length > 1) {
       /* MF-01: a describing word anywhere may go ("lean ground beef", "ground beef lean") */
       const keep = lq.req.filter(w => !Q_DESC.has(w)), drop = lq.req.filter(w => Q_DESC.has(w));
-      if (keep.length && drop.length) scored = pass({ req: keep, opt: drop.concat(lq.opt), all: lq.all, nums: lq.nums, asked: lq.asked }, true);
+      /* two food words kept, or only the words before the last one dropped (v17): "sweetgreen"
+         (sweet + green) finds nothing, as before, instead of "Onion, sweet" */
+      const front = lq.req.slice(0, -1).every(w => Q_DESC.has(w));
+      if (keep.length && drop.length && (keep.length >= 2 || front)) scored = pass({ req: keep, opt: drop.concat(lq.opt), all: lq.all, nums: lq.nums, asked: lq.asked }, true);
     }
     scored.sort((a, b) => a.tier - b.tier || b.s - a.s || lc(a.r.name).localeCompare(lc(b.r.name)));
     for (const x of scored) { if (out.length >= limit) break; push(x.r); }

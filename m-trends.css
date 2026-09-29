@@ -59,7 +59,7 @@
 /* log body sheet */
 .mt-form .entry{margin-top:2px}
 .mt-daterow{margin-top:10px}
-input.mini.mt-date{text-align:left;padding:0 12px}
+input.mini.mt-date{text-align:left;padding:0 12px;-webkit-appearance:none;appearance:none}
 input.mini.mt-date::-webkit-date-and-time-value{text-align:left}
 .mt-savebtn{margin-top:12px}
 .mt-list{display:flex;flex-direction:column;margin-top:4px}
@@ -220,3 +220,7 @@ input.mini.mt-date::-webkit-date-and-time-value{text-align:left}
 /* PL-09: "Type my own targets" switch: 44 px tall to tap; the track still looks 52 x 32 (a clear edge around it).
    #app so Chalk's dark-mode .toggle colors can't bring back the full-size track. */
 #app .mt-manrow .toggle{width:64px;height:44px;border:6px solid transparent;border-radius:22px;background-clip:padding-box;margin:0 -6px}
+
+/* ---- final check (CV) ---- */
+/* a unit under an uppercase tile label stays lowercase: "PROTEIN (g)", not "PROTEIN (G)" */
+.mt-card .stat .k .mt-lc{text-transform:none;letter-spacing:0}

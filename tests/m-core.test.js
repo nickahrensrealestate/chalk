@@ -1763,6 +1763,15 @@ t("L2 edit stamps: entries, meal items, foods and meals; untouched old records s
   M.reset(); global.S = { profile: "nick" };
   const T0 = NOW;
   const d0 = today;
+  /* C1r5: an old meal (per rounded by v17, no stamps) saved with no change gets no stamp */
+  M.MS.meals.old1 = { id: "old1", name: "Old bowl", desc: "", slot: "Lunch", servingsMade: 1, items: [{ id: "i1", name: "A", brand: "", servings: 1, servingLabel: "1 serving", g: null, per: { cal: 100, p: 1.25, c: 3.35, f: 1, fiber: 0, sugar: 0, sodium: 0 } }], per: { cal: 100, p: 1.3, c: 3.4, f: 1, fiber: 0, sugar: 0, sodium: 0 }, createdAt: 1, updatedAt: 1, uses: 0, lastUsed: 0, pid: "nick" };
+  const c1m = M.meals.update("old1", { name: "Old bowl" });
+  assert.ok(!("u" in c1m) && c1m.items.every(it => !("u" in it)), "a no-op save of an old meal is not an edit: " + JSON.stringify(c1m));
+  assert.ok(Math.abs(c1m.per.c - 3.35) < 1e-9, "per recounted unrounded (KJ-05)");
+  NOW += 1000;
+  const c1m2 = M.meals.update("old1", { servingsMade: 2 });
+  assert.strictEqual(c1m2.u, NOW, "a real change is stamped");
+  delete M.MS.meals.old1; NOW = T0;
   /* entries: made → stamped; a real change → new stamp; a no-op → same stamp */
   const e = M.log.add(d0, { slot: "Lunch", name: "Stamp test", servings: 1, per: { cal: 100 } });
   assert.strictEqual(e.u, T0, "new entry stamped");
@@ -1898,6 +1907,54 @@ t("round 5 search: ratios (MF-01), two people's meals (KJ-01/L3), named foods an
   });
 });
 
+t("C1r5: a saved item whose whole name is typed comes first, even above the named foods; own meals vs own foods rank as in v17", () => {
+  const foods = [
+    G("g_hill", "Turkey slices, oven roasted", { brand: "Hillshire Farm", staple: true }),
+    G("g_kb", "Chicken breast, organic", { brand: "Kirkland", staple: true, alwaysRaw: true, cook: { y: 0.75, word: "raw" } }),
+    G("g_rice", "White rice", { cook: { y: 2.8, word: "dry" } }), G("g_jam", "Strawberry jam / jelly", { brand: "Smucker's Natural", staple: true }),
+    G("g_yog2", "Greek yogurt, plain 2%", { staple: true }), G("g_onion_sw", "Onion, sweet"), G("g_onion", "Onion"),
+    G("g_gb93", "Ground beef 93/7", { cook: { y: 0.75, word: "raw" }, words: ["lean", "extra"] })
+  ];
+  withFakeDB(foods, null, () => {
+    const top = (q, o) => M.search(q, Object.assign({ pid: "nick", limit: 10 }, o || {})).map(r => r.id);
+    const first = (q, id, o) => assert.strictEqual(top(q, o)[0], id, q + " → " + top(q, o).join(","));
+    /* a describing word may go when two food words stay, or before the last word (v17); a
+       run-together name ("sweetgreen") finds nothing, as in v17 */
+    assert.deepStrictEqual(top("sweetgreen"), [], "sweetgreen → " + top("sweetgreen").join(","));
+    first("red onion", "g_onion"); first("lean ground beef", "g_gb93"); first("ground beef lean", "g_gb93");
+    /* a recent of a built-in food missing a typed word still stands in for that food (its amount stays) */
+    M.log.add(today, { slot: "Dinner", foodId: "g_rice", name: "White rice", servings: 2, per: { cal: 200 } });
+    const fr = M.search("fried rice", { pid: "nick", limit: 10 });
+    assert.ok(fr[0] && fr[0].kind === "recent" && fr[0].foodId === "g_rice", "fried rice → " + fr.map(r => r.kind + ":" + r.name).join(","));
+    M.MS.days = {};
+    const cr = M.meals.add({ name: "Chicken and rice", slot: "Lunch", items: [{ name: "Chicken breast, organic", foodId: "g_kb", per: { cal: 300 } }, { name: "White rice", foodId: "g_rice", per: { cal: 200 } }] });
+    const bowl = M.meals.add({ name: "Chicken rice bowl", slot: "Lunch", items: [{ name: "White rice", per: { cal: 200 } }] });
+    M.log.add(today, { slot: "Lunch", name: "Chicken rice bowl", mealId: bowl.id, per: { cal: 200 } });   /* a recent that shares the words */
+    ["Chicken and rice", "chicken and rice", "chicken & rice"].forEach(q => { first(q, cr.id); first(q, cr.id, { slot: "Lunch" }); first(q, cr.id, { slot: "Dinner" }); });
+    const ch = M.meals.add({ name: "Chicken", slot: "Dinner", items: [{ name: "Chicken breast, organic", foodId: "g_kb", per: { cal: 300 } }] });
+    const tk = M.foods.add({ name: "Turkey", per: { cal: 60 } });
+    const cb = M.foods.add({ name: "Chicken breast", brand: "Foster Farms", per: { cal: 120 } });
+    const sj = M.foods.add({ name: "Strawberry jam", brand: "Bonne Maman", per: { cal: 50 } });
+    first("chicken", ch.id); first("Turkey", tk.id); first("chicken breast", cb.id); first("strawberry jam", sj.id);
+    /* only the whole name: plain words still go to the food they buy */
+    first("turkey slices", "g_hill"); first("jam", "g_jam"); first("breast", "g_kb");
+    /* another person's meal with the typed name doesn't jump the named food */
+    M.meals.remove(ch.id);
+    global.S = { profile: "kat" };
+    const kch = M.meals.add({ name: "Chicken", slot: "Dinner", items: [{ name: "x", per: { cal: 300 } }] });
+    global.S = { profile: "nick" };
+    first("chicken", "g_kb");
+    first("chicken", kch.id, { pid: "kat" });
+    /* L3's own-meal plus doesn't reorder one person's meals and foods (v17 order) */
+    M.MS.days = {};
+    const yb = M.meals.add({ name: "Greek yogurt bowl", slot: "Snacks", items: [{ name: "Greek yogurt, plain 2%", per: { cal: 150 } }] });
+    const van = M.foods.add({ name: "Greek yogurt, vanilla", brand: "Chobani", per: { cal: 120 } });
+    first("greek yogurt bowl", yb.id);
+    assert.ok(top("greek yogurt").indexOf(van.id) < top("greek yogurt").indexOf(yb.id), "own food before own meal, as in v17: " + top("greek yogurt").join(","));
+    [cr, bowl, kch, yb].forEach(m => M.meals.remove(m.id)); [tk, cb, sj, van].forEach(f => M.foods.remove(f.id));
+  });
+});
+
 t("L1 M.searchAmount: the amount, unit and state typed in a Log food search", () => {
   const A = M.searchAmount;
   const cases = [["2 eggs", 2, "egg", null], ["2 large eggs", 2, "egg", null], ["eggs x2", 2, "egg", null], ["two eggs", 2, "egg", null],
@@ -1909,6 +1966,11 @@ t("L1 M.searchAmount: the amount, unit and state typed in a Log food search", ()
   cases.forEach(([q, qty, unit, state]) => assert.deepStrictEqual(A(q), { qty, unit, state }, q));
   ["banana", "chicken", "", null, "ground beef 90/10", "90 10 ground beef", "2% milk"].forEach(q => assert.strictEqual(A(q), null, String(q)));
   assert.deepStrictEqual(A("cooked rice"), { qty: null, unit: null, state: "cooked" });
+  /* C1r5: ratios, % and a number in a food's name are never amounts; the amount next to them still counts */
+  ["21 whole grains bread", "12 grain bread", "ground beef 90-10", "93/7 ground beef", "0% greek yogurt", "greek yogurt 0%", "5% greek yogurt", "ground beef 80/20"].forEach(q => assert.strictEqual(A(q), null, q));
+  [["2 slices 21 whole grains", 2, "slice", null], ["4 oz ground beef 90/10", 4, "oz", null], ["6 oz 93/7 ground beef", 6, "oz", null], ["150g 0% greek yogurt", 150, "g", null],
+    ["85/15 beef 4 oz", 4, "oz", null], ["2% milk 1 cup", 1, "cup", null], ["1 1/2 cups rice", 1.5, "cup", null], ["3/4 cup blueberries", 0.75, "cup", null], ["eggs x 3", 3, "egg", null],
+    ["uncooked rice 1/4 cup", 0.25, "cup", "raw"], ["12 shrimp", 12, "shrimp", null], ["2 links chicken sausage", 2, "link", null]].forEach(([q, qty, unit, state]) => assert.deepStrictEqual(A(q), { qty, unit, state }, q));
 });
 
 t("NJ-04: a recent logged as another food, or over 3,000 cal, starts at the food's own serving", () => {

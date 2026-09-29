@@ -1703,6 +1703,60 @@ t("F2a MF-03 (decision 7, L1): Log food opens the serving editor at the amount t
   } finally { if (real) M.searchAmount = real; else delete M.searchAmount; if (M.ui.sheetOpen()) M.ui.close(); }
 });
 
+t("C2a MF-03 follow-ups: a typed state never drops the count (2 cooked breasts = 2), pasta by weight is dry (MF-02), oz of a drink are fluid oz", async () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const real = M.searchAmount;
+  /* the answers F1's M.searchAmount gives for these notes (so this test stands alone) */
+  const A = { "2 cooked chicken breasts": { qty: 2, unit: "breast", state: "cooked" }, "4 oz pasta": { qty: 4, unit: "oz", state: null }, "4 oz cooked pasta": { qty: 4, unit: "oz", state: "cooked" }, "100 g rice": { qty: 100, unit: "g", state: null }, "8 oz milk": { qty: 8, unit: "oz", state: null } };
+  const open = async (qq, re) => { M.ui.openAdd({ slot: "Lunch", seg: "foods" }); input($("m-search"), qq); await sleep(220); const r = qa('#m-results [data-m="pick"]').find(x => re.test(x.textContent)); assert.ok(r, qq + ": a row for " + re); click(r); return [q('[data-m="det-unit"]') ? q('[data-m="det-unit"]').value : "", q('[data-m="det-qty"]').value, $("m-det-amt").textContent]; };
+  try {
+    M.searchAmount = qq => A[qq] || null;
+    let r = await open("2 cooked chicken breasts", /Chicken breast, organic/);
+    assert.deepStrictEqual(r, ["breast-raw", "2", "2 breasts · 350 g raw (254 g cooked)"], "2 breasts, not the 175 g default"); M.ui.close();
+    r = await open("4 oz pasta", /^Pasta/); assert.deepStrictEqual([r[0], r[1]], ["oz-raw", "4"], "4 oz off the box is dry: " + r[2]); assert.ok(/dry/.test(r[2]), r[2]); M.ui.close();
+    r = await open("4 oz cooked pasta", /^Pasta/); assert.deepStrictEqual([r[0], r[1]], ["oz-cooked", "4"]); M.ui.close();
+    r = await open("100 g rice", /White rice/); assert.deepStrictEqual([r[0], r[1]], ["g-cooked", "100"], "rice from 100 g up still reads cooked"); M.ui.close();
+    r = await open("8 oz milk", /Milk, 2%/); assert.deepStrictEqual([r[0], r[1]], ["g", "241"], "8 fl oz of a 1 cup (240 ml) = 244 g drink"); M.ui.close();
+  } finally { if (real) M.searchAmount = real; else delete M.searchAmount; if (M.ui.sheetOpen()) M.ui.close(); }
+});
+
+t("C2a: '+ Not here?' names the new food without the amount typed ('2 zzqxv bars' → 'zzqxv bars'; '7up' stays)", async () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const real = M.searchAmount;
+  const A = { "2 zzqxv bars": { qty: 2, unit: "bar", state: null }, "1 cup cooked zzqxv": { qty: 1, unit: "cup", state: "cooked" }, "zzqxv 6 oz": { qty: 6, unit: "oz", state: null }, "7up": { qty: 7, unit: "up", state: null } };
+  const name = async qq => { M.ui.openAdd({ slot: "Snacks" }); input($("m-search"), qq); await sleep(220); const b = q("#m-results .m-addnew"); assert.ok(b, qq + ": the add-new row"); const n = b.dataset.name; assert.ok(b.textContent.indexOf("“" + n + "”") >= 0, b.textContent); M.ui.close(); return n; };
+  try {
+    M.searchAmount = qq => A[qq] || null;
+    assert.strictEqual(await name("2 zzqxv bars"), "zzqxv bars");
+    assert.strictEqual(await name("1 cup cooked zzqxv"), "zzqxv");
+    assert.strictEqual(await name("zzqxv 6 oz"), "zzqxv");
+    assert.strictEqual(await name("7up"), "7up", "a number inside a name stays");
+    assert.strictEqual(await name("green zzqxv stew"), "green zzqxv stew", "no amount: the words as typed");
+  } finally { if (real) M.searchAmount = real; else delete M.searchAmount; if (M.ui.sheetOpen()) M.ui.close(); }
+});
+
+t("C2a KJ-03 via Recent: an old entry saved as '6 slices' × 1 reopens on one slice × 6, so typing 4 logs 4 slices (not 24)", async () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const real = M.searchAmount; delete M.searchAmount;
+  const hit = M.search("turkey slices", { pid: M.pid() }).find(r => /Turkey slices/.test(r.name) && r.kind !== "recent" && r.kind !== "meal");
+  const food = M.foods.get(hit.foodId || hit.id) || hit.ref;
+  const y = M.addDays(M.today(), -1);
+  const old = M.log.add(y, { slot: "Lunch", name: food.name, brand: food.brand, foodId: food.id, servings: 1, servingLabel: "6 slices (56 g)", g: 56, per: food.per });
+  const ids = [];
+  try {
+    M.ui.openAdd({ slot: "Lunch" }); input($("m-search"), "turkey"); await sleep(220);
+    const row = qa('#m-results [data-m="pick"]').find(x => /Turkey slices/.test(x.textContent));
+    click(row);
+    assert.ok(/^1 slice/.test(q('[data-m="det-unit"]').selectedOptions[0].textContent), "one slice: " + q('[data-m="det-unit"]').selectedOptions[0].textContent);
+    assert.deepStrictEqual([q('[data-m="det-qty"]').value, $("m-det-amt").textContent], ["6", "6 slices · 56 g"], "the same amount as before");
+    input(q('[data-m="det-qty"]'), "4");
+    click($("m-det-go"));
+    const e = M.log.slotEntries(M.today(), "Lunch").filter(x => /Turkey slices/.test(x.name)).pop(); ids.push(e.id);
+    near(e.servings * e.g, 37.2, 0.5, "4 slices, not 24");
+    near(M.foodMath.scale(e.per, e.servings).cal, 40, 1);
+  } finally { if (real) M.searchAmount = real; M.log.remove(y, old.id); ids.forEach(id => M.log.remove(M.today(), id)); if (M.ui.sheetOpen()) M.ui.close(); M.ui.render(); }
+});
+
 t("F2a KJ-03: a serving of several pieces opens on one piece (turkey 6 slices → 1 slice × 6), so typing 4 logs 4 slices", async () => {
   if (M.ui.sheetOpen()) M.ui.close();
   const real = M.searchAmount; delete M.searchAmount;

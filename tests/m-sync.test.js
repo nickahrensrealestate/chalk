@@ -2231,6 +2231,42 @@ t("S3-02 a day an older build stored with a row's delete list is not sent again 
   R.M.cloud.leave();
 });
 
+t("C5 a phone upgraded from v16/v17 that took a newer phone's day row whole sends nothing and drops the list from its diary", async () => {
+  const { P: N, code } = await household("c5gone-n");
+  N.M.cloud.configure({ delay: 1e9 });
+  const id = "nick|" + N.M.today(), key = "day|" + id;
+  assert.ok((await N.sync()).ok); await N.sync();
+  const names = P => P.M.MS.days[id].entries.map(e => e.name).sort().join(",");
+  const want = names(N);
+  /* what v16/v17 keep after taking a newer phone's row: the delete list inside the day, and a
+     hash that counts it; the overlap was read long ago (a real phone: the pull re-reads nothing) */
+  N.M.MS.days[id].gone = { ixyz: "abc" };
+  N.M.save();
+  const store = Object.fromEntries(N.store);
+  const o = JSON.parse(store["chalk.sync.v1"]);
+  o.hashes[key] = N.M.cloud._.hash(N.M.MS.days[id]);
+  o.ov = o.cursor;
+  store["chalk.sync.v1"] = JSON.stringify(o);
+  N.offline(true);
+  const R = phone("c5gone-r", { store, S: N.ctx.S });   /* the app opens again on the new build */
+  R.M.cloud.configure({ delay: 1e9 });
+  assert.ok(!("gone" in R.M.MS.days[id]), "the list left the diary on load");
+  assert.equal(R.M.cloud._.scan().changed.length, 0, "the day still counts as synced");
+  const rs = [];
+  for (let i = 0; i < 3; i++) rs.push(await R.sync());
+  assert.ok(rs.every(r => r.ok && !r.pushed), "nothing to send: " + JSON.stringify(rs));
+  assert.equal(names(R), want, "nothing lost");
+  assert.ok(!JSON.stringify(R.M.export()).includes('"gone"'), "not in the backup copy");
+  /* a merge built on a day that still holds a list never keeps it */
+  const e = (n, i) => ({ id: "e" + i, name: n, slot: "Lunch", servings: 1, per: { cal: 100, p: 1, c: 1, f: 1 } });
+  const mine = { id, pid: "nick", date: N.M.today(), entries: [e("A", 1)], water: 0, note: "", updatedAt: 5, gone: { ie9: "x" } };
+  const theirs = { id, pid: "nick", date: N.M.today(), entries: [e("B", 2)], water: 0, note: "", updatedAt: 6 };
+  const m = R.M.cloud._.mergeDay(null, null, mine, theirs, null, null);
+  assert.equal(m.entries.length, 2, "both entries kept");
+  assert.ok(!("gone" in m), "merged day has no list");
+  R.M.cloud.leave();
+});
+
 /* =================================================================== run */
 (async () => {
   SERVER = mockServer();
