@@ -1,0 +1,156 @@
+/* Chalk · Macros — styles (m-ui.js). Every class is prefixed m-; Chalk's own
+   classes (.card .btn .chip .seg .stepper .ex-row .opt .stats .tag …) are reused as-is. */
+:root{ --fat:#C8742A; --pro:var(--mus); --carb:var(--acc); --ring-bg:var(--sur2); }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --fat:#F0A25C; } }
+:root[data-theme="dark"]{ --fat:#F0A25C; }
+
+/* ---- mode bar (Train | Macros) ---- */
+.modebar{flex:none;z-index:5;display:grid;grid-template-columns:1fr 1fr;height:44px;background:var(--sur2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.modebar button{display:flex;align-items:center;justify-content:center;gap:8px;height:44px;font-family:"Barlow Condensed","Barlow",sans-serif;font-size:16px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);background:var(--sur2)}
+.modebar button+button{border-left:1px solid var(--line)}
+.modebar button svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.modebar button.on{background:var(--acc);color:var(--acc-ink)}
+
+/* ---- shared bits ---- */
+.m-row{width:100%;text-align:left;min-height:56px}
+.m-row:active{background:var(--sur2)}
+.m-kcal{font-family:"Barlow Condensed","Barlow",sans-serif;font-size:20px;font-weight:600;white-space:nowrap;flex:none;min-width:44px;text-align:right;font-variant-numeric:tabular-nums}
+.m-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.m-btnrow{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.m-btnrow .btn{flex:1;min-width:0;padding:0 10px}
+.m-btnrow.m-col{flex-direction:column}
+.m-btnrow.m-col .btn{width:100%}
+.m-armed{color:var(--warn) !important;border-color:var(--warn) !important}
+.m-search{width:100%;min-height:48px;border-radius:12px;border:1px solid var(--line);background:var(--sur2);color:var(--ink);padding:0 14px;font-size:17px;font-weight:500;-webkit-appearance:none;appearance:none}
+.m-search::-webkit-search-cancel-button{-webkit-appearance:none}
+.m-status{min-height:20px;margin:8px 0}
+.m-inner{margin:0}
+.m-file{position:relative;cursor:pointer}
+.m-file input{position:absolute;inset:0;opacity:0;width:0;height:0}
+.m-ta{font:16px/1.4 "Barlow",-apple-system,sans-serif;min-height:96px}
+.m-preview img{display:block;width:100%;max-height:220px;object-fit:cover;border-radius:12px;margin-top:10px}
+.stat.pro .v{color:var(--pro)}.stat.carb .v{color:var(--carb)}.stat.fat .v{color:var(--fat)}
+.stat.over .v{color:var(--warn)}
+.m-stats4{grid-template-columns:repeat(4,1fr);gap:6px}
+.m-stats4 .stat{padding:8px 6px}
+.m-stats4 .stat .v{font-size:22px}
+.m-stats4 .stat .k{font-size:10px}
+.m-danger{color:var(--warn)}
+.opt:disabled{opacity:.4}
+
+/* ---- diary: day card ---- */
+.m-day{padding-bottom:6px}
+.m-dayhd{display:flex;align-items:center;justify-content:space-between;padding:8px 8px 0}
+.m-dayhd .icon{width:44px;height:44px;font-size:30px;color:var(--ink)}
+.m-daylbl{font-size:22px;font-weight:600;min-height:44px;padding:0 12px;display:inline-flex;align-items:center;gap:8px}
+.m-dayrow{display:grid;grid-template-columns:120px 1fr;align-items:center;gap:14px;padding:4px 14px 0}
+.m-ring{display:block;width:120px;height:120px}
+.m-ring-bg{fill:none;stroke:var(--ring-bg);stroke-width:10}
+.m-ring-fg{fill:none;stroke:var(--acc);stroke-width:10;stroke-linecap:round;transition:stroke-dashoffset .35s ease-out}
+.m-ring.over .m-ring-fg{stroke:var(--warn)}
+.m-ring-n{font-family:"Barlow Condensed","Barlow",sans-serif;font-size:36px;font-weight:700;fill:var(--ink);font-variant-numeric:tabular-nums;dominant-baseline:middle}
+.m-ring.over .m-ring-n{fill:var(--warn)}
+.m-ring-l{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;fill:var(--mut)}
+.m-daynums{display:flex;flex-direction:column;gap:10px}
+.m-dn .v{display:block;font-family:"Barlow Condensed","Barlow",sans-serif;font-size:28px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.m-dn .k{display:block;font-size:12px;color:var(--mut);font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-top:3px}
+.m-bars{display:flex;flex-direction:column;gap:8px;padding:12px 14px 4px}
+.m-bar-h{display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:4px}
+.m-bar-h .num{color:var(--mut);font-variant-numeric:tabular-nums}
+.m-bar-t{height:8px;border-radius:4px;background:var(--sur2);overflow:hidden}
+.m-bar-t i{display:block;height:100%;border-radius:4px;transition:width .3s ease-out}
+.m-bar.pro .m-bar-t i{background:var(--pro)}.m-bar.carb .m-bar-t i{background:var(--carb)}.m-bar.fat .m-bar-t i{background:var(--fat)}
+.m-bar.over .m-bar-t i{background:var(--warn)}
+.m-bar.over .m-bar-h .num{color:var(--warn)}
+.m-morebtn{display:flex;justify-content:center;padding:2px 14px 0}
+.m-morebtn .btn{min-height:40px;border:0;color:var(--mut);font-size:14px}
+.m-more{padding:4px 14px 8px}
+.m-water{display:flex;justify-content:space-between;align-items:center;gap:10px;padding-top:6px;border-top:1px solid var(--line)}
+.m-water .l{font-weight:600}.m-water .s{font-size:13px;color:var(--mut);font-variant-numeric:tabular-nums}
+.m-water-b{display:flex;gap:6px}
+.m-water-b .btn{min-width:52px;padding:0 10px;font-variant-numeric:tabular-nums}
+
+/* ---- diary: slot cards ---- */
+.m-slot .hd{align-items:center;padding-bottom:0}
+.m-slot-r{display:flex;align-items:center;gap:6px}
+.m-slot-kcal{color:var(--mut);font-size:14px;font-weight:600}
+.m-slot .icon{width:44px;height:44px;font-size:24px;letter-spacing:.05em}
+.m-slot-add{padding:4px 8px 8px}
+.m-slot-add .btn{min-height:44px;border-style:dashed;color:var(--mut)}
+.m-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:2px 2px 8px;flex-wrap:wrap}
+.m-foot .chip{min-height:36px}
+
+/* ---- add sheet ---- */
+.m-pills{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.m-pills::-webkit-scrollbar{display:none}
+.m-pills .chip{flex:none;min-height:36px;cursor:pointer}
+.m-pills .chip.on{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+.m-tools{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:10px 0 8px}
+.m-tools button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:52px;border-radius:12px;background:var(--sur2);border:1px solid var(--line);font-size:11px;font-weight:600;color:var(--mut);letter-spacing:.02em;text-align:center;line-height:1.1;padding:4px 2px}
+.m-tools button span{font-size:18px;line-height:1;color:var(--ink)}
+.m-seg{margin:0 0 6px}
+.m-results{min-height:120px}
+.m-results .ex-row{padding-left:4px;padding-right:4px}
+.m-results .ex-div{padding-left:4px}
+.m-offstate{padding:12px 4px}
+.m-scan{width:100%;min-height:200px;background:#000;border-radius:12px;overflow:hidden;position:relative}
+.m-scan.off{min-height:0;background:transparent}
+.m-scan video{width:100% !important;display:block}
+.m-scan img{display:none}
+.m-coderow{display:flex;gap:8px;margin:4px 0 10px}
+.m-coderow .m-search{flex:1;min-width:0}
+.m-coderow .btn{flex:none}
+
+/* ---- detail sheet ---- */
+.m-det-name{font-family:"Barlow Condensed","Barlow",sans-serif;font-size:22px;font-weight:600;line-height:1.15;margin:0 0 10px}
+.m-det-name .mut{font-family:"Barlow",sans-serif;font-size:14px;font-weight:500}
+.m-det-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}
+.m-live{margin-top:12px;grid-template-columns:repeat(4,1fr);gap:6px}
+.m-live .stat{padding:8px 6px}
+.m-live .stat .v{font-size:22px}
+.m-live .stat .k{font-size:10px}
+.m-move{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+
+/* ---- forms (label / my foods / meal builder) ---- */
+.m-form{display:flex;flex-direction:column;gap:8px}
+.m-f{display:block}
+.m-f>span{display:block;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--mut);margin:0 0 3px 2px}
+.m-f>span em{font-style:normal;text-transform:none;letter-spacing:0;font-weight:500}
+.m-f input[type="text"],.m-f input[type="number"],.m-f input[type="search"]{width:100%;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--sur2);color:var(--ink);padding:0 12px;font-size:17px;font-weight:500;-moz-appearance:textfield}
+.m-f input::-webkit-outer-spin-button,.m-f input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.m-f input[type="number"]{font-variant-numeric:tabular-nums}
+.m-f .sel{min-height:44px}
+.m-f3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.m-fgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.m-badge{margin-bottom:2px}
+.m-itot{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 4px;border-top:1px solid var(--line);font-size:14px;color:var(--mut)}
+.m-itot b{color:var(--ink);font-size:18px;font-family:"Barlow Condensed","Barlow",sans-serif}
+.m-mbedit{background:var(--sur2);border-radius:12px;padding:10px 12px;margin-top:8px}
+.m-mbedit-n{font-weight:600;margin-bottom:6px}
+
+/* ---- items list (photo / describe) ---- */
+.m-item{padding-right:4px;gap:6px}
+.m-istep{width:128px;flex:none;background:var(--sur)}
+.m-istep input{font-size:20px}
+.m-item .icon{width:36px;height:44px}
+
+/* ---- suggest ---- */
+.m-sughd{margin-bottom:4px}
+.m-sughd .stats{margin:6px 0 10px}
+.m-sug{margin-bottom:10px}
+.m-sug .hd h3{font-size:20px}
+.m-sugtags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.m-sugdesc{margin:0 0 6px;font-size:15px;line-height:1.35}
+
+/* ---- foods tab ---- */
+.m-foodsbar{display:flex;gap:8px}
+.m-foodsbar .m-search{flex:1;min-width:0}
+.m-foodsbar .btn{flex:none;padding:0 14px}
+.m-mealitems .ex-row{padding:8px 4px}
+
+/* ---- narrow phones ---- */
+@media (max-width:360px){
+  .m-tools button{font-size:10px}
+  .m-dayrow{grid-template-columns:104px 1fr;gap:10px}
+  .m-ring{width:104px;height:104px}
+}

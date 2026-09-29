@@ -1,0 +1,94 @@
+/* Chalk · Macros — Trends + You + check-ins (classes prefixed mt-). Chalk tokens only. */
+
+/* cards + layout */
+.mt-card .hd{align-items:center}
+.mt-card .stats{margin:2px 0 8px;min-width:0;grid-template-columns:repeat(3,minmax(0,1fr))}
+.mt-card .stat{min-width:0;padding:10px 9px;overflow:hidden}
+.mt-card .stat .v{font-variant-numeric:tabular-nums;white-space:nowrap;font-size:26px}
+.mt-card .stat .v small{margin-left:2px}
+.mt-card .stats .stat .k{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;letter-spacing:.03em}
+.mt-card .stat .mt-sub{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums;margin-top:1px;white-space:nowrap}
+.mt-empty{padding:22px 8px;text-align:center;color:var(--mut);font-size:14px;line-height:1.4}
+.mt-empty b{color:var(--ink);font-weight:600}
+.mt-text{margin:0 0 10px;font-size:15px;line-height:1.4}
+.mt-row{display:flex;align-items:center;gap:8px}
+.mt-row .btn{flex:none}
+.mt-wrap{flex-wrap:wrap}
+.mt-wrap .btn{flex:1 1 auto;min-width:0}
+.mt-goalline{margin:0 0 6px}
+.mt-warn{color:var(--warn)}
+.mt-banner{border-color:var(--acc)}
+
+/* range chips inside the Weight header */
+.mt-range button{padding:6px 10px;font-size:13px;min-width:38px}
+
+/* charts (SVG; all colors from tokens; readable in both themes) */
+.mt-chart{width:100%;height:auto;display:block;margin-top:4px;font-variant-numeric:tabular-nums;overflow:visible}
+.mt-chart text{fill:var(--mut);font-size:11px;font-family:"Barlow",-apple-system,sans-serif;font-variant-numeric:tabular-nums}
+.mt-chart .g{stroke:var(--line);stroke-width:1}
+.mt-chart .ax{stroke:var(--line);stroke-width:1}
+.mt-chart .pt{fill:var(--acc);stroke:var(--sur);stroke-width:1.5;opacity:.55}
+.mt-chart .last{fill:var(--acc);stroke:var(--sur);stroke-width:2}
+.mt-chart .avg{fill:none;stroke:var(--acc);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.mt-chart .goal{stroke:var(--ok);stroke-width:1.5;stroke-dasharray:5 4}
+.mt-chart .tgt{stroke:var(--ok);stroke-width:1.5;stroke-dasharray:5 4}
+.mt-chart .gl{fill:var(--ok);font-weight:600}
+.mt-chart .ll{fill:var(--ink);font-weight:700;font-size:12px}
+.mt-chart .bar{fill:var(--acc)}
+.mt-chart .bar-e{fill:none;stroke:var(--line);stroke-width:1;stroke-dasharray:3 2}
+.mt-chart.mus .pt,.mt-chart.mus .last,.mt-chart.mus .bar{fill:var(--mus)}
+.mt-chart.mus .avg{stroke:var(--mus)}
+
+/* log body sheet */
+.mt-form .entry{margin-top:2px}
+.mt-daterow{margin-top:10px}
+.mt-date{text-align:left;padding:0 12px;font-family:"Barlow",sans-serif;font-size:17px;font-weight:600;-webkit-appearance:none;appearance:none}
+.mt-savebtn{margin-top:12px}
+.mt-list{display:flex;flex-direction:column;margin-top:4px}
+.mt-brow{display:grid;grid-template-columns:1fr auto auto 36px;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);min-height:44px}
+.mt-brow:first-child{border-top:0}
+.mt-brow .d{font-weight:600}
+.mt-brow .v{color:var(--mut);white-space:nowrap}
+.mt-x{width:36px;height:36px}
+.mt-x.mt-arm{width:auto;padding:0 10px;color:var(--warn);font-size:13px;font-weight:700;background:var(--warn-soft);border-radius:9px}
+
+/* You: numbers */
+.mt-ctl{display:inline-flex;align-items:center;gap:6px;flex:none}
+.mt-ctl input.mini{width:74px}
+.mt-hgt input.mini{width:56px}
+.mt-u{font-size:13px;color:var(--mut);font-weight:600}
+.mt-field{padding:8px 14px 4px}
+.mt-field .l{font-weight:500;margin-bottom:6px}
+.mt-field-flat{padding:10px 0 0}
+.mt-card .srow .seg{flex:none}
+@media (max-width:360px){.mt-ctl input.mini{width:64px}.mt-hgt input.mini{width:48px}}
+
+/* You: split options + custom % */
+.mt-opts{padding:0 14px}
+.mt-opt>span:first-child{display:flex;flex-direction:column;gap:2px;min-width:0}
+.mt-opt>span:first-child b{font-weight:600}
+.mt-opt .m{flex:none;font-size:18px;font-weight:700}
+.mt-custom{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:10px 14px 0}
+.mt-sumrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 14px 4px}
+.mt-tgrid{grid-template-columns:repeat(3,1fr);padding:0 14px;margin:8px 0 4px}
+.mt-tgrid .stat .v input.mini{height:36px;font-size:22px;width:100%}
+.mt-card>.hint{padding:0 14px 8px;margin:0}
+
+/* You: AI card */
+.mt-status{display:flex;align-items:flex-start;gap:8px;font-size:14px;line-height:1.35;margin:2px 0 10px}
+.mt-status i{width:10px;height:10px;border-radius:50%;background:var(--mut);flex:none;margin-top:5px}
+.mt-status.ok i{background:var(--ok)}
+.mt-key{display:flex;gap:8px;align-items:center}
+.mt-key input{flex:1;min-width:0;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--sur2);color:var(--ink);padding:0 12px;font-family:ui-monospace,Menlo,monospace;font-size:14px}
+.mt-key .btn{flex:none;padding:0 14px}
+.mt-row #mt-ai-msg{min-width:0}
+
+/* setup card + preview + 2-week check-in */
+.mt-setup .bd>.hint{margin:0}
+.mt-preview{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;background:var(--sur2);border-radius:12px;padding:10px 8px;text-align:center}
+.mt-preview>.small{grid-column:1/-1}
+.mt-pv{display:flex;flex-direction:column;align-items:center;gap:2px}
+.mt-pv b{font-family:"Barlow Condensed","Barlow",sans-serif;font-size:24px;font-weight:700;line-height:1}
+.mt-pv span{font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.mt-pvnote{grid-column:1/-1}
+.mt-b14{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 10px}

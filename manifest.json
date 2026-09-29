@@ -1,7 +1,7 @@
 {
   "name": "Chalk",
   "short_name": "Chalk",
-  "description": "Pull / Push / Legs gym log that sets your weights.",
+  "description": "Gym log and macro tracker.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -14,6 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="m.css">
+<link rel="stylesheet" href="m-trends.css">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#6B7079; --line:#DBD7CD;
@@ -64,6 +66,11 @@ input,select{font:inherit;color:inherit}
 .top{flex:none;z-index:5;background:var(--bg);padding:calc(10px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left));display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .top h1{margin:0;font-family:"Barlow Condensed","Barlow",sans-serif;font-weight:700;font-size:30px;line-height:1;letter-spacing:.01em}
 .top .sub{color:var(--mut);font-size:14px}
+/* mode bar fallback (m.css owns the real styles) */
+.modebar{flex:none;display:grid;grid-template-columns:1fr 1fr;background:var(--sur);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.modebar button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;font-family:"Barlow Condensed","Barlow",sans-serif;font-weight:700;font-size:17px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.modebar button.on{background:var(--acc);color:var(--acc-ink)}
+.modebar svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 
 .wrap{padding:0 max(12px,env(safe-area-inset-right)) 24px max(12px,env(safe-area-inset-left));display:flex;flex-direction:column;gap:12px;max-width:560px;margin:0 auto}
 
@@ -305,6 +312,10 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
 </head>
 <body>
 <div class="top"><h1 id="title">Chalk</h1><div class="sub" id="subtitle"></div></div>
+<div class="modebar" id="modebar">
+  <button data-m="mode" data-v="train" class="on"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h2M19 12h2M6 8v8M18 8v8M9 6v12M15 6v12M9 12h6"/></svg>Train</button>
+  <button data-m="mode" data-v="macros"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v6a3 3 0 0 0 6 0V3M8 3v18M5 3v6M11 3v6M18 3c-2 1.5-3 4-3 7 0 1.7 1.3 3 3 3v8"/></svg>Macros</button>
+</div>
 <div id="scroll"><div class="wrap" id="app"></div></div>
 <div class="cta" id="cta"></div>
 
@@ -328,6 +339,11 @@ h2.sec{margin:8px 2px 0;font-family:"Barlow Condensed","Barlow",sans-serif;font-
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetT"><div class="sh"><h3 id="sheetT"></h3><button class="icon" data-a="sheet-close" aria-label="Close">×</button></div><div class="sb" id="sheetB"></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="m-core.js"></script>
+<script src="m-data.js"></script>
+<script src="m-food.js"></script>
+<script src="m-ui.js"></script>
+<script src="m-trends.js"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -1267,6 +1283,7 @@ let CI=null; /* check-in draft: {mode,mix}; committed by ci-build / ci-apply, di
 function ciDraft(){ return CI=CI||{mode:(S.goal||{}).mode||"weights",mix:cp(S.mix||PRESETS.nick.mix)}; }
 function ciCommit(){ const D=ciDraft(); S.goal=S.goal||{mode:"weights",setAt:null}; S.goal.mode=D.mode; S.mix=D.mix; CI=null; }
 function render(){
+  if(window.M&&M.ui){ if(M.ui.chrome) M.ui.chrome(); if(M.mode()==="macros"){ M.ui.render(); return; } }
   document.querySelectorAll("#tabs button").forEach(b=>{ const on=b.dataset.tab===tab; b.classList.toggle("on",on); if(on) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current"); });
   const app=document.getElementById("app");
   const title=document.getElementById("title"), sub=document.getElementById("subtitle");
@@ -1282,7 +1299,7 @@ function render(){
 }
 let lastTab=null;
 function elapsed(start){ const m=Math.floor((Date.now()-start)/60000); return m<60?m+" min":Math.floor(m/60)+"h "+(m%60)+"m"; }
-setInterval(()=>{ if(tab==="today"&&S.active) document.getElementById("subtitle").textContent=elapsed(S.active.start); },30000);
+setInterval(()=>{ if(tab==="today"&&S.active&&!(window.M&&M.mode()==="macros")) document.getElementById("subtitle").textContent=elapsed(S.active.start); },30000);
 
 function wText(id){ const L=getEx(id), E=S.ex[id]; if(L.t==="band") return "band"; if(E&&E.w!=null) return NOLOAD(L.t)&&E.w===0?"BW":`${fmtW(E.w)} lb${L.t==="db"?" ea":""}`; return NOLOAD(L.t)?"BW":"set weight"; }
 function planRow(it,i,items){
@@ -1295,7 +1312,7 @@ function viewToday(){
   const wid=nextWorkoutId(), W=S.program.workouts[wid], P=planFor(wid);
   const last=S.log[0];
   const sum=S.lastSummary && (Date.now()-S.lastSummary.at<6*3600e3) ? S.lastSummary : null;
-  let h="";
+  let h=(window.M&&M.ui&&M.ui.bannerHTML?M.ui.bannerHTML():"");
   if(sum){
     const r=sum.rec; const ups=sum.results.filter(x=>x.kind==="up").length, prs=sum.results.filter(x=>x.pr).length;
     h+=`<div class="card"><div class="hd"><h3>${esc(r.name)} done</h3><span class="tag ok">Saved</span></div><div class="bd"><div class="stats">
@@ -1644,7 +1661,7 @@ function createCustom(){
   return id;
 }
 /* ================= EVENTS ================= */
-document.getElementById("tabs").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return; if(tab!==b.dataset.tab) histN=40; tab=b.dataset.tab; render(); });
+document.getElementById("tabs").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return; if(b.dataset.mtab){ if(window.M&&M.ui){ M.ui.tab=b.dataset.mtab; M.ui.render(); } return; } if(tab!==b.dataset.tab) histN=40; tab=b.dataset.tab; render(); });
 document.getElementById("sheetBg").addEventListener("click",closeSheet);
 /* iOS leaves the body offset after the keyboard closes; the only scroller is #scroll, so snap the page back */
 document.addEventListener("focusout",()=>setTimeout(()=>{ document.body.scrollTop=0; window.scrollTo(0,0); },60));
@@ -1724,12 +1741,12 @@ document.addEventListener("click",e=>{
     case "prog-up": case "prog-down": { const W=S.program.workouts[b.dataset.wid]; const j=a==="prog-up"?i-1:i+1; if(j<0||j>=W.items.length) break; [W.items[i],W.items[j]]=[W.items[j],W.items[i]]; bumpDay(b.dataset.wid); save(); render(); break; }
     case "prog-add": openAdd({where:"prog",wid:b.dataset.wid,i:b.dataset.i!=null?i:null}); break;
     case "prog-add-block": { S.program.workouts[b.dataset.wid].items.push(defaultBlock()); bumpDay(b.dataset.wid); save(); render(); toast("Block added — swap the moves as you like"); break; }
-    case "export": { const txt=JSON.stringify(S); const done=()=>toast("Copied. Paste it into Notes."); const show=()=>openSheet("Backup",`<textarea readonly>${esc(txt)}</textarea>`);
+    case "export": { const txt=JSON.stringify({...S, __macros:(window.M&&M.export)?M.export():undefined}); const done=()=>toast("Copied. Paste it into Notes."); const show=()=>openSheet("Backup",`<textarea readonly>${esc(txt)}</textarea>`);
       const copy=()=>{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done).catch(show); } else show(); };
       if(navigator.share){ try{ navigator.share({title:"Chalk backup",text:txt}).then(()=>toast("Backup shared")).catch(e=>{ if(e&&e.name==="AbortError") return; copy(); }); }catch(e){ copy(); } }
       else copy(); break; }
     case "import": openSheet("Restore",`<p class="hint">Paste a Chalk backup. It replaces what's on this phone.</p><textarea id="impT" placeholder="{...}" aria-label="Backup text"></textarea><button class="btn primary block" data-a="import-do" style="margin-top:10px">Restore</button>`); break;
-    case "import-do": { const prev=S; try{ const s=JSON.parse(document.getElementById("impT").value); if(s&&s.v===1&&s.program&&s.program.workouts&&Array.isArray(s.log)&&s.settings&&s.ex){ S=s; upgrade(S); save(); applyTheme(); closeSheet(); render(); toast("Restored"); } else toast("That's not a Chalk backup"); }catch(e){ S=prev; save(); applyTheme(); render(); toast("That's not a Chalk backup"); } break; }
+    case "import-do": { const prev=S; try{ const s=JSON.parse(document.getElementById("impT").value); const mac=s&&typeof s==="object"?s.__macros:null; if(s&&typeof s==="object") delete s.__macros; if(s&&s.v===1&&s.program&&s.program.workouts&&Array.isArray(s.log)&&s.settings&&s.ex){ if(mac&&window.M&&M.import) M.import(mac); S=s; upgrade(S); save(); applyTheme(); closeSheet(); render(); toast("Restored"); } else toast("That's not a Chalk backup"); }catch(e){ S=prev; save(); applyTheme(); render(); toast("That's not a Chalk backup"); } break; }
     case "reset-prog": regen(); bumpProg(); save(); render(); toast("Program rebuilt"); break;
     case "switch-profile": S.profile=null; S.lastSummary=null; tab="today"; save(); render(); break;
     case "pick-profile": { const k=b.dataset.v, pr=PRESETS[k]; S.profile=k; S.mix=cp(pr.mix); S.goal={mode:pr.goal,setAt:Date.now()}; S.block=0; S.cyc={}; regen(); save(); render(); break; }
@@ -1773,7 +1790,7 @@ document.addEventListener("click",e=>{
       A.items[bi].moves.push(newMove(id)); save(); closeSheet(); render(); break; }
     case "badd-block": { const d=defaultBlock(); const at=insertBeforeAbs(A.items,{...d,moves:d.moves.map(m=>newMove(m.ex)),done:0,status:"idle",skipped:false}); save(); render(); setTimeout(()=>{ const el=document.getElementById("blk"+at); el&&el.scrollIntoView({behavior:"smooth",block:"nearest"}); },50); break; }
     case "wipe": openSheet("Erase everything?",`<p class="hint">History, weights, program — all gone from this phone. Copy a backup first.</p><button class="btn block danger" data-a="wipe-do" style="margin-top:8px">Erase</button>`); break;
-    case "wipe-do": (S.log||[]).forEach(r=>dbDelete(r.id)); clearInterval(ctTick); CT=null; wakeOff(); S=fresh(); stopRest(); tab="today"; save(); applyTheme(); closeSheet(); render(); break;
+    case "wipe-do": (S.log||[]).forEach(r=>dbDelete(r.id)); clearInterval(ctTick); CT=null; wakeOff(); S=fresh(); stopRest(); tab="today"; save(); if(window.M&&M.reset) M.reset(); applyTheme(); closeSheet(); render(); break;
   }
 });
 let toastT=null;
@@ -1816,6 +1833,7 @@ function dbDelete(id){ if(!db) return; try{ db.doc("workouts/"+id).delete().catc
 })();
 
 /* ================= BOOT ================= */
+window.TRAIN_TABS=document.getElementById("tabs").innerHTML; if(window.M&&M.ui&&M.ui.bind) M.ui.bind(); if(window.M&&M.sync&&M.sync.init) M.sync.init();
 applyTheme(); render();
 if(S.active) wakeOn();
 if(S.flash){ const f=S.flash; delete S.flash; save(); setTimeout(()=>openSheet("Program updated",`<p class="hint" style="font-size:15px">${esc(f)}</p><button class="btn primary block" data-a="sheet-close" style="margin-top:12px">Got it</button>`),400); }

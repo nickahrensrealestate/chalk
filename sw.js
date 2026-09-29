@@ -1,5 +1,6 @@
-const CACHE = "chalk-v13";
-const CORE = ["./", "index.html", "manifest.json", "icon-180.png", "icon-192.png", "icon-512.png"];
+const CACHE = "chalk-v14";
+const CORE = ["./", "index.html", "manifest.json", "icon-180.png", "icon-192.png", "icon-512.png",
+  "m.css", "m-trends.css", "m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE.map(u => new Request(u, { cache: "reload" })))).then(() => self.skipWaiting()));
