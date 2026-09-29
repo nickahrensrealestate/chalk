@@ -28,9 +28,9 @@ t("namespace: M.DB.generic and M.DB.suggest are arrays", () => {
   assert.ok(Array.isArray(M.DB.suggest), "suggest not an array");
 });
 
-t("generic: at least 220 foods with unique g_ ids", () => {
+t("generic: 150–260 plain basics with unique g_ ids", () => {
   const G = M.DB.generic;
-  assert.ok(G.length >= 220, "only " + G.length + " foods");
+  assert.ok(G.length >= 150 && G.length <= 260, G.length + " foods (keep the list small and plain)");
   const seen = new Set();
   G.forEach(f => {
     assert.ok(/^g_[a-z0-9_]+$/.test(f.id), "bad id " + f.id);
@@ -103,32 +103,30 @@ t("generic: alcohol items are flagged and plausible (kcal ≥ macro kcal)", () =
   });
 });
 
-t("generic: required categories are covered", () => {
+t("generic: their staples and plain basics are covered", () => {
   const ids = new Set(M.DB.generic.map(f => f.id));
-  ["g_chicken_breast_cooked", "g_chicken_thigh_raw", "g_ground_beef_80_raw", "g_ground_beef_93_cooked", "g_sirloin_cooked", "g_ribeye_cooked",
-    "g_pork_chop_cooked", "g_pork_tenderloin_cooked", "g_bacon_cooked", "g_turkey_breast_cooked", "g_ground_turkey_93_raw", "g_salmon_cooked",
-    "g_tilapia_cooked", "g_cod_cooked", "g_tuna_canned_water", "g_shrimp_cooked", "g_egg_large", "g_egg_white", "g_fage_0", "g_greek_yogurt_2",
-    "g_greek_yogurt_5", "g_cottage_cheese_2", "g_cottage_cheese_4", "g_whey_protein", "g_casein_protein", "g_tofu_firm", "g_tempeh", "g_edamame",
-    "g_lentils_cooked", "g_black_beans_cooked", "g_chickpeas_canned", "g_deli_turkey", "g_deli_ham", "g_rotisserie_chicken_breast",
-    "g_kirkland_protein_bar", "g_fairlife_2", "g_core_power_26", "g_core_power_42", "g_premier_protein", "g_chobani_plain_nonfat",
-    "g_oikos_triple_zero", "g_kodiak_mix", "g_dkb_21_grains", "g_kirkland_peanut_butter", "g_kirkland_almonds", "g_kirkland_eggs",
-    "g_kirkland_chicken_breast", "g_kirkland_salmon_raw", "g_costco_muffin", "g_kroger_greek_yogurt",
-    "g_white_rice_cooked", "g_brown_rice_cooked", "g_jasmine_rice_cooked", "g_quinoa_cooked", "g_oats_dry", "g_oatmeal_cooked", "g_potato_baked",
-    "g_sweet_potato_baked", "g_white_bread", "g_bagel_plain", "g_tortilla_flour", "g_tortilla_corn", "g_pasta_cooked", "g_couscous_cooked",
-    "g_rice_cake", "g_cheerios", "g_granola",
-    "g_olive_oil", "g_avocado_oil", "g_butter", "g_avocado", "g_almonds", "g_walnuts", "g_cashews", "g_peanuts", "g_peanut_butter",
-    "g_almond_butter", "g_cheddar", "g_mozzarella", "g_feta", "g_parmesan", "g_string_cheese", "g_cream_cheese", "g_mayo", "g_ranch", "g_sour_cream",
-    "g_banana", "g_apple", "g_orange", "g_strawberries", "g_blueberries", "g_grapes", "g_watermelon", "g_pineapple", "g_mango", "g_dates",
-    "g_broccoli_cooked", "g_spinach_raw", "g_kale_raw", "g_lettuce_romaine", "g_tomato", "g_cucumber", "g_bell_pepper", "g_carrots", "g_onion",
-    "g_mushrooms", "g_green_beans", "g_asparagus", "g_corn", "g_peas", "g_zucchini", "g_cauliflower",
-    "g_milk_whole", "g_milk_2", "g_milk_skim", "g_almond_milk", "g_oat_milk", "g_coffee_black", "g_latte", "g_orange_juice", "g_beer", "g_wine_red",
-    "g_whiskey_shot", "g_seltzer",
-    "g_ketchup", "g_mustard", "g_hot_sauce", "g_soy_sauce", "g_bbq_sauce", "g_honey", "g_maple_syrup", "g_jam", "g_salsa", "g_guacamole", "g_hummus",
-    "g_burrito_chicken", "g_cheeseburger", "g_pizza_slice", "g_chicken_sandwich", "g_chipotle_chicken", "g_chipotle_white_rice", "g_california_roll",
-    "g_ramen_restaurant", "g_pho_beef", "g_taco_street", "g_caesar_salad", "g_protein_pancakes",
-    "g_quest_chips", "g_tortilla_chips", "g_popcorn_air", "g_pretzels", "g_dark_chocolate", "g_ice_cream", "g_chocolate_chip_cookie", "g_trail_mix",
-    "g_beef_jerky"
+  [ /* what Nick and Katerina actually buy */
+    "g_kirkland_organic_chicken", "g_pork_tenderloin_raw", "g_pork_tenderloin_cooked", "g_dkb_21_grains", "g_dkb_thin", "g_dkb_good_seed",
+    "g_zucchini_raw", "g_zucchini", "g_broccoli_raw", "g_broccoli_cooked", "g_carrots", "g_carrots_cooked", "g_roma_tomato", "g_onion", "g_sweet_onion",
+    /* plain basics */
+    "g_chicken_breast_raw", "g_chicken_breast_cooked", "g_chicken_thigh_raw", "g_ground_beef_93_cooked", "g_ground_turkey_93_raw", "g_salmon_cooked",
+    "g_salmon_raw", "g_tuna_canned_water", "g_shrimp_cooked", "g_egg_large", "g_egg_white", "g_greek_yogurt_0", "g_cottage_cheese_2", "g_whey_protein",
+    "g_white_rice_cooked", "g_brown_rice_cooked", "g_jasmine_rice_cooked", "g_potato_baked", "g_sweet_potato_baked", "g_white_bread", "g_pasta_cooked",
+    "g_tortilla_flour", "g_olive_oil", "g_butter", "g_avocado", "g_almonds", "g_peanut_butter", "g_banana", "g_apple", "g_strawberries", "g_blueberries",
+    "g_spinach_raw", "g_lettuce_romaine", "g_tomato", "g_bell_pepper", "g_mushrooms", "g_green_beans", "g_milk_2", "g_coffee_black", "g_water",
+    "g_mustard", "g_soy_sauce", "g_salsa", "g_hummus", "g_honey"
   ].forEach(id => assert.ok(ids.has(id), "missing " + id));
+});
+
+t("generic: nothing they said they never eat (cereal, oats, cheese, shakes, bars, restaurants, other brands)", () => {
+  const bad = /cereal|cheerios|granola|\boats\b|oatmeal|\bcheese\b(?!,? ?\d)|cheddar|mozzarella|parmesan|shake|\bbar\b|protein bar|restaurant|fast food|chipotle|food court|mcdonald|panda|starbucks|latte/i;
+  M.DB.generic.forEach(f => {
+    const n = f.name.replace(/^Cottage cheese/i, "Cottage");
+    assert.ok(!bad.test(n), "should not be built in: " + f.name);
+    assert.ok(!f.brand || f.brand === "Kirkland" || f.brand === "Dave's Killer Bread", "unexpected brand " + f.brand + " on " + f.name);
+  });
+  const casein = M.DB.generic.filter(f => /protein powder/i.test(f.name));
+  assert.strictEqual(casein.length, 1, "one plain whey scoop only");
 });
 
 t("generic: no duplicate names (case-insensitive)", () => {
@@ -140,9 +138,9 @@ t("generic: no duplicate names (case-insensitive)", () => {
   });
 });
 
-t("suggest: at least 40, ≥9 per slot, valid store and shape", () => {
+t("suggest: 20+ ideas, ≥5 per slot, valid store and shape", () => {
   const S = M.DB.suggest;
-  assert.ok(S.length >= 40, "only " + S.length + " suggestions");
+  assert.ok(S.length >= 20, "only " + S.length + " suggestions");
   const bySlot = {};
   const ids = new Set();
   S.forEach(s => {
@@ -163,7 +161,11 @@ t("suggest: at least 40, ≥9 per slot, valid store and shape", () => {
     });
     bySlot[s.slot] = (bySlot[s.slot] || 0) + 1;
   });
-  SLOTS.forEach(sl => assert.ok((bySlot[sl] || 0) >= 9, sl + " has only " + (bySlot[sl] || 0)));
+  SLOTS.forEach(sl => assert.ok((bySlot[sl] || 0) >= 5, sl + " has only " + (bySlot[sl] || 0)));
+  /* built from what they actually buy */
+  const staple = /Kirkland organic|Pork tenderloin|Dave's Killer Bread|Zucchini|Broccoli|Carrots|Roma|Onion/i;
+  const usesStaple = S.filter(s => s.items.some(i => staple.test(i.name))).length;
+  assert.ok(usesStaple >= Math.ceil(S.length * 0.7), "most ideas use their staples (" + usesStaple + "/" + S.length + ")");
 });
 
 t("suggest: per equals the sum of items (1 kcal / 0.5 g)", () => {
