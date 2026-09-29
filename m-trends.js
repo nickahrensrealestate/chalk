@@ -51,12 +51,14 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
 
   const fmtN = n => String(Math.round(num(n))).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   /* Rounds first, so a tiny change never reads "−0.0". */
-  const signed = (v, dp) => { const f = Math.pow(10, dp), x = Math.round(num(v) * f) / f; return (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x).toFixed(dp); };
+  const signed = (v, dp) => { const f = Math.pow(10, dp), n = num(v), x = Math.sign(n) * Math.round(Math.abs(n) * f + 1e-9) / f; return (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x).toFixed(dp); };   /* halves away from zero, like r1 */
   function keyDate(key) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key || "")); return m ? new Date(+m[1], +m[2] - 1, +m[3], 12) : null; }
   const fmtShort = key => { const d = keyDate(key); return d ? MON[d.getMonth()] + " " + d.getDate() : String(key || ""); };
   /* "Jun '25" style, for charts that span more than one year */
   const fmtMonYr = key => { const d = keyDate(key); return d ? MON[d.getMonth()] + " '" + String(d.getFullYear()).slice(2) : String(key || ""); };
   const fmtTs = ts => { const d = new Date(num(ts)); return isNum(d.getTime()) && ts ? MON[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear() : "—"; };
+  /* "Oct 12"; the year only when it isn't this year */
+  const fmtDay = ts => { const d = new Date(num(ts)); return isNum(d.getTime()) && ts ? MON[d.getMonth()] + " " + d.getDate() + (d.getFullYear() !== new Date(now()).getFullYear() ? ", " + d.getFullYear() : "") : "—"; };
   const dow = key => { const d = keyDate(key); return d ? DOW[d.getDay()] : ""; };
 
   /* Stamp a person's numbers as edited now (the cloud sync keeps the newer edit). */
@@ -336,6 +338,13 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   /* kg always with one decimal; lb as typed (185, 185.5) */
   const dispW = (lb, u) => (!isNum(lb) ? "—" : u === "metric" ? M.units.lb2kg(lb).toFixed(1) : String(r1(lb)));
   const tile = (v, k, small, sub) => `<div class="stat"><div class="v num">${v}${small ? `<small>${small}</small>` : ""}</div><div class="k">${k}</div>${sub ? `<div class="mt-sub">${sub}</div>` : ""}</div>`;
+  /* what the weekly rate covers: M.body.ratePerWeek looks at up to 4 weeks before the latest weigh-in */
+  function rateSpan(all) {
+    const end = all[all.length - 1].date, start = M.addDays(end, -27);
+    const f = all.find(x => x.date >= start);
+    const wk = f ? clamp(Math.round((M.daysBetween(f.date, end) + 1) / 7), 2, 4) : 4;
+    return "last " + wk + " weeks";
+  }
   /* the chart window: the chosen range, but never before the first point (short history fills the width) */
   function chartFrom(all, range) {
     if (!(range > 0)) return all[0].date;
@@ -360,7 +369,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       const stats = `<div class="stats">
         ${tile(dispW(latest.v, u), "Latest", wUnit(u), esc(fmtShort(latest.date)))}
         ${tile(dispW(a7, u), "7-day average", wUnit(u), "latest " + signed(conv1(latest.v - a7), 1))}
-        ${tile(rate == null ? "—" : steady ? "Steady" : signed(conv1(rate), u === "metric" ? 2 : 1), "Per week", rate == null || steady ? "" : wUnit(u), rate == null ? "needs 2 weeks" : "trend")}
+        ${tile(rate == null ? "—" : steady ? "Steady" : signed(conv1(rate), u === "metric" ? 2 : 1), "Per week", rate == null || steady ? "" : wUnit(u), rate == null ? "needs 2 weeks" : rateSpan(all))}
       </div>`;
       let goalLine;
       if (goal == null) goalLine = `<p class="hint">Set a goal weight in <b>You</b> to see how far you are.</p>`;
@@ -492,18 +501,31 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       <div class="mt-daterow"><label class="lbl" for="mt-date">Date</label><input class="mini mt-date" id="mt-date" type="date" value="${today}" max="${today}"></div>
       <p class="mt-msg" id="mt-body-msg" role="status" hidden></p>
       <button class="btn primary block mt-savebtn" data-m="t-save-body">Save</button>
-      <p class="hint">Weigh in first thing in the morning, before you eat. The same time each day keeps the line true. Heart rate is in beats a minute.</p>
+      <p class="hint">Weigh in first thing in the morning, before you eat. Same time each day works best. Heart rate is in beats a minute.</p>
       <h2 class="sec">Recent</h2>
       <div class="mt-list" id="mt-body-list">${bodyListHTML(id, u)}</div>
     </div>`;
   }
+  /* True when the targets were worked out for a weight within 2 lb of today's: day-to-day
+     wobble on the scale doesn't move them (UX2-21). Any other change to the numbers does. */
+  function targetsHold(p) {
+    try {
+      if (p.targetsManual || !M.calc.complete(p)) return false;
+      const w = num(p.weightLb), t = p.targets || {};
+      const at = x => M.calc.targets(Object.assign({}, p, { weightLb: x }));
+      const a = at(w - 2), b = at(w + 2);
+      return ["cal", "p", "c", "f"].every(k => { const v = num(t[k], NaN); return isNum(v) && v >= Math.min(a[k], b[k]) - 0.5 && v <= Math.max(a[k], b[k]) + 0.5; });
+    } catch (e) { return false; }
+  }
+  M.trends.targetsHold = targetsHold;
   /* The profile weight follows the latest weigh-in that is left, and the targets follow it
-     (F1's M.body.remove does this too once it lands; doing it again changes nothing). */
-  function followLatest(id, weighed) {
+     (F1's M.body.remove does this too once it lands; doing it again changes nothing).
+     fresh: a new weigh-in, which moves the targets only on a change of 2 lb or more. */
+  function followLatest(id, weighed, fresh) {
     const p = person(id), lw = M.body.latest(id, "w");
     let moved = !!weighed;
     if (lw && isNum(lw.value) && p.weightLb !== lw.value) { p.weightLb = lw.value; touchP(p); moved = true; }
-    if (moved && !p.targetsManual) { M.calc.applyTargets(p); return; }
+    if (moved && !p.targetsManual && !(fresh && targetsHold(p))) { M.calc.applyTargets(p); return; }
     M.save();
   }
   /* Delete one value of a day (its weight or its heart rate), keeping the other.
@@ -636,7 +658,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     return `<div class="card mt-card"><div class="hd"><h3>Macro targets</h3></div>
       ${splits}
       <div class="mt-tbox" id="mt-tbox">${targetsBoxHTML(p)}</div>
-      <div class="srow mt-manrow"><div><div class="l" id="mt-man-l">Type my own targets</div><div class="s">Turn off to go back to the calculator.</div></div><button class="toggle ${manual ? "on" : ""}" data-m="t-manual" role="switch" aria-checked="${manual}" aria-labelledby="mt-man-l"><i></i></button></div>
+      <div class="srow mt-manrow"><div><div class="l" id="mt-man-l">Type my own targets</div><div class="s">Turn off to go back to the calculator.</div></div><button class="toggle ${manual ? "on" : ""}" data-m="t-manual" role="switch" aria-checked="${manual}" aria-labelledby="mt-man-l" aria-label="Type my own targets"><i></i></button></div>
     </div>`;
   }
   const sumText = sum => (sum === 100 ? "Adds up to 100%" : "Adds up to " + sum + "%. It must be 100%.");
@@ -667,8 +689,8 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const sn = num(p.snooze && p.snooze.refresh60);
     if (!p.setupAt) return "Not set yet.";
     const age = Math.floor((now() - num(p.setupAt)) / DAY);
-    const when = age <= 0 ? "Set today." : "Set " + esc(fmtTs(p.setupAt)) + " (" + age + " day" + (age === 1 ? "" : "s") + " ago).";
-    const next = sn > now() ? " Skipped until " + esc(fmtTs(sn)) + "." : age >= 60 ? ' <span class="tag warn">Time to check</span>' : " We'll ask again in " + (60 - age) + " day" + (60 - age === 1 ? "" : "s") + ".";
+    const when = age <= 0 ? "Set today." : "Set " + esc(fmtDay(p.setupAt)) + " (" + age + " day" + (age === 1 ? "" : "s") + " ago).";
+    const next = sn > now() ? " Skipped until " + esc(fmtDay(sn)) + "." : age >= 60 ? ' <span class="tag warn">Time to check</span>' : " We'll ask again in " + (60 - age) + " day" + (60 - age === 1 ? "" : "s") + ".";
     return when + next;
   }
   function ciBodyHTML(id, p) {
@@ -676,10 +698,10 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const lastBody = Math.max(num(p.lastBody), num(p.setupAt));
     const lw = M.body.latest(id, "w");
     const sn = num(p.snooze && p.snooze.body14);
-    if (!lastBody && !lw) return "No weigh-in yet. Every 2 weeks.";
+    if (!lastBody && !lw) return "No weigh-in yet. We ask every 2 weeks.";
     const due = lastBody + 14 * DAY;
-    const next = sn > t ? "skipped until " + esc(fmtTs(sn)) : due <= t ? '<span class="tag warn">due now</span>' : "next " + esc(fmtTs(due));
-    return (lw ? "Last weigh-in " + esc(fmtShort(lw.date)) : "Last check-in " + esc(fmtTs(lastBody))) + " · " + next + ". Every 2 weeks.";
+    const next = sn > t ? "Skipped until " + esc(fmtDay(sn)) + "." : due <= t ? '<span class="tag warn">Due now</span>' : "Next one " + esc(fmtDay(due)) + ".";
+    return (lw ? "Last weigh-in " + esc(fmtShort(lw.date)) : "Last check-in " + esc(fmtDay(lastBody))) + ". " + next;
   }
   function checkinsCard(id, p) {
     return `<div class="card mt-card"><div class="hd"><h3>Check-ins</h3></div>
@@ -732,7 +754,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     if (d < 90e3) return "1 min ago";
     if (d < 3600e3) return Math.round(d / 60e3) + " min ago";
     if (d < 86400e3) return Math.round(d / 3600e3) + " hr ago";
-    return "on " + fmtTs(ts);
+    return "on " + fmtDay(ts);
   }
   function syncLine(s) {
     if (s.busy) return { cls: "", text: "Syncing…" };
@@ -766,11 +788,11 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const n = tr.n + " workout" + (tr.n === 1 ? "" : "s");
     const lead = tr.missing > 0
       ? `<b>${tr.missing} workout${tr.missing === 1 ? "" : "s"}</b> in the cloud ${tr.missing === 1 ? "isn't" : "aren't"} on this phone.`
-      : `Training backup: ${esc(n)}${tr.t ? ", saved " + esc(fmtTs(tr.t)) : ""}.`;
+      : `Training backup: ${esc(n)}${tr.t ? ", saved " + esc(fmtDay(tr.t)) : ""}.`;
     return `<div class="mt-restore" id="mt-restore">
       <p class="mt-text">${lead}</p>
       <button class="btn block" data-m="t-sync-restore"${tr.busy ? " disabled" : ""}>Restore training backup</button>
-      <p class="hint">${tr.busy ? "Finish today's workout first. " : ""}This replaces the training history on this phone with the backup (${esc(n)}).</p>
+      <p class="hint">${tr.busy ? "Finish today's workout first. " : ""}This replaces the workouts on this phone with the backup (${esc(n)}).</p>
     </div>`;
   }
   /* After a training restore: Undo puts back the training it replaced (m-sync keeps it for a week). */
@@ -782,19 +804,29 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const busy = trainBusy();
     const n = num(u.n) + " workout" + (num(u.n) === 1 ? "" : "s");
     return `<div class="mt-restore mt-undo" id="mt-undo">
-      <p class="mt-text">Training was restored${u.at ? " on " + esc(fmtTs(u.at)) : ""}. Undo puts back the ${esc(n)} this phone had before.</p>
+      <p class="mt-text">Training was restored${u.at ? " on " + esc(fmtDay(u.at)) : ""}. Undo puts back the ${esc(n)} this phone had before.</p>
       <button class="btn block" data-m="t-sync-undo"${busy ? " disabled" : ""}>Undo restore</button>
       ${busy ? `<p class="hint">Finish today's workout first.</p>` : ""}
     </div>`;
   }
   /* The code on the card: hidden behind Show (m-sync's M.cloud.codeMasked), except right after
      it was made, when it has to be typed on the other phone. */
-  let trainCheckAt = 0, justOnAt = 0, codeShown = false, wantJoin = false;
-  /* a code made in the last 10 minutes shows in full, with the next step */
+  let trainCheckAt = 0, justOnAt = 0, joinedAt = 0, codeShown = false, wantJoin = false, moreOpen = false;
+  /* a code made in the last 10 minutes shows in full, with the steps for the other phone */
   const justOn = () => justOnAt > 0 && now() - justOnAt < 10 * 60e3;
+  const justJoined = () => joinedAt > 0 && now() - joinedAt < 10 * 60e3;
   const canMask = C => !!(C && typeof C.codeMasked === "function");
   const isShown = C => !canMask(C) || codeShown || justOn();
   function codeText(C, s) { return isShown(C) ? C.fmtCode(s.code) : (C.codeMasked() || C.fmtCode(s.code)); }
+  /* Rarely needed: Turn off, Change code, Delete cloud copy. Folded away under "More options". */
+  function syncMoreHTML(C) {
+    const item = (btn, hint) => `<div class="mt-moreitem">${btn}<p class="hint">${hint}</p></div>`;
+    return `<details class="mt-more"${moreOpen ? " open" : ""}><summary data-m="t-sync-more">More options</summary>
+      ${item(`<button class="btn block ghost danger mt-off" data-m="t-sync-off">Turn off sync</button>`, "This phone stops syncing. Nothing is deleted.")}
+      ${typeof C.changeCode === "function" ? item(`<button class="btn block ghost" data-m="t-sync-newcode">Change code</button>`, "Use this if someone else saw your code. The other phone then has to join again with the new code.") : ""}
+      ${typeof C.deleteCloud === "function" ? item(`<button class="btn block ghost danger" data-m="t-sync-delete">Delete cloud copy</button>`, "Deletes the backup in the cloud and turns sync off. Both phones keep their data.") : ""}
+    </details>`;
+  }
   function syncCardHTML() {
     const head = `<div class="hd"><h3>Sync &amp; backup</h3></div>`;
     const C = cloud();
@@ -802,14 +834,16 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     if (!C || !C.configured()) return `<div class="card mt-card mt-sync" id="mt-sync">${head}<div class="bd"><p class="mt-text mt-quiet">Cloud sync isn't set up yet.</p></div></div>`;
     const s = C.status();
     if (!s.on) {
-      justOnAt = 0; codeShown = false;
+      justOnAt = 0; joinedAt = 0; codeShown = false; moreOpen = false;
       const note = s.note ? `<p class="mt-next">${esc(s.note)}</p>` : "";
       return `<div class="card mt-card mt-sync" id="mt-sync" data-on="0">${head}<div class="bd">
-        ${note}<p class="mt-text">Share foods and meals between your phones and keep a backup.</p>
-        <div class="mt-syncbtns"><button class="btn primary block" data-m="t-sync-on">First phone: start sync</button><button class="btn block" data-m="t-sync-joinshow"${join ? " hidden" : ""}>Other phone: join with code</button></div>
+        ${note}<p class="mt-text">Share foods and meals between your phones. Food logs, weight and workouts are backed up too.</p>
+        <p class="hint mt-synchow">Start on one phone. Then join on the other phone with the code it shows.</p>
+        <div class="mt-syncbtns"><button class="btn${join ? "" : " primary"} block" data-m="t-sync-on">First phone: start sync</button><button class="btn block" data-m="t-sync-joinshow"${join ? " hidden" : ""}>Other phone: join with code</button></div>
         <div class="mt-join" id="mt-join"${join ? "" : " hidden"}>
-          <p class="hint">Type or paste the code from the first phone. Codes never use the letters I or O, or the numbers 0 or 1.</p>
-          <div class="mt-joinrow"><input id="mt-join-code" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go" placeholder="20 letters and numbers" aria-label="Code from the first phone"><button class="btn primary" data-m="t-sync-join">Join</button></div>
+          <label class="lbl" for="mt-join-code">Code from the first phone</label>
+          <p class="hint">It's on the first phone under You → Sync &amp; backup. Codes never use the letters I or O, or the numbers 0 or 1.</p>
+          <div class="mt-joinrow"><input id="mt-join-code" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go" placeholder="20 letters and numbers"><button class="btn primary" data-m="t-sync-join">Join</button></div>
           <p class="small mt-warn" id="mt-join-msg" role="status" hidden></p>
         </div>
         ${undoHTML()}
@@ -821,24 +855,26 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       setTimeout(() => { try { Promise.resolve(C.hasTrainingBackup()).then(patchSync, () => {}); } catch (e) {} }, 0);
     }
     const line = syncLine(s);
-    const next = justOn() ? `<p class="mt-next"><b>Next:</b> on the other phone, open Macros → You and tap <b>Other phone: join with code</b>. Then type this code.</p>` : "";
+    const fresh = justOn();
     const shown = isShown(C);
     const showBtn = canMask(C) ? `<button class="btn" data-m="t-sync-show" aria-controls="mt-code" aria-pressed="${shown}">${shown ? "Hide" : "Show"}</button>` : "";
-    const more = typeof C.changeCode === "function" || typeof C.deleteCloud === "function"
-      ? `<div class="mt-more2">${typeof C.changeCode === "function" ? `<button class="btn ghost" data-m="t-sync-newcode">Change code</button>` : ""}${typeof C.deleteCloud === "function" ? `<button class="btn ghost danger" data-m="t-sync-delete">Delete cloud copy</button>` : ""}</div>
-      <p class="hint">If someone else saw the code, change it. The other phone then needs the new code. Deleting the cloud copy keeps everything on your phones.</p>`
-      : "";
-    return `<div class="card mt-card mt-sync" id="mt-sync" data-on="1">${head}<div class="bd">
-      <div class="mt-code" id="mt-code" aria-label="Sync code">${esc(codeText(C, s))}</div>
-      ${next}
+    const status = `<div class="mt-syncrow"><div class="mt-status ${line.cls}" id="mt-sync-status" role="status"><i aria-hidden="true"></i><span>${esc(line.text)}</span></div><button class="btn" data-m="t-sync-now">Sync now</button></div>`;
+    const shared = `<p class="hint">Foods and saved meals are shared. Food logs, weight and workouts are backed up.</p>`;
+    /* right after Start: the steps for the other phone come first, then the code */
+    const steps = fresh ? `<div class="mt-next mt-steps"><p><b>Sync is on.</b> Now add the other phone:</p><ol>
+        <li>On the other phone, open Chalk. Tap <b>Macros</b>, then <b>You</b>.</li>
+        <li>Scroll down to <b>Sync &amp; backup</b>. Tap <b>Other phone: join with code</b>.</li>
+        <li>Type this code:</li></ol></div>` : "";
+    const joined = !fresh && justJoined() ? `<p class="mt-next"><b>This phone is joined.</b> It now syncs with your other phone.</p>` : "";
+    const code = `${fresh ? "" : `<div class="lbl mt-codelbl" id="mt-code-l">Your sync code</div>`}
+      <div class="mt-code" id="mt-code" role="group" aria-label="Sync code">${esc(codeText(C, s))}</div>
       <div class="mt-codebtns">${showBtn}<button class="btn" data-m="t-sync-copy">Copy</button></div>
-      <p class="hint mt-codehint">Type this code on the other phone. Keep a copy in Notes: a new phone needs it to get your data back.</p>
-      <div class="mt-syncrow"><div class="mt-status ${line.cls}" id="mt-sync-status" role="status"><i aria-hidden="true"></i><span>${esc(line.text)}</span></div><button class="btn" data-m="t-sync-now">Sync now</button></div>
-      <p class="hint">Foods and saved meals are shared. Food logs, weight and training are backed up.</p>
-      ${restoreHTML()}
+      <p class="hint mt-codehint">${fresh ? "Keep a copy in Notes too. A new phone needs it to get your data back." : "Both phones use this code. Keep a copy in Notes. A new phone needs it to get your data back."}</p>`;
+    return `<div class="card mt-card mt-sync" id="mt-sync" data-on="1">${head}<div class="bd">
+      ${fresh ? steps + code + status + shared : joined + status + shared + code}
+      <i id="mt-restore-at" hidden></i>${restoreHTML()}
       ${undoHTML()}
-      <button class="btn block ghost danger mt-off" data-m="t-sync-off">Turn off sync</button>
-      ${more}
+      ${syncMoreHTML(C)}
     </div></div>`;
   }
   /* Refresh the status line and the restore part in place (no full re-render: nobody loses their keyboard).
@@ -861,7 +897,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const html = restoreHTML();
     if (cur && !html) cur.remove();
     else if (cur) cur.outerHTML = html;
-    else if (html) { const off = box.querySelector(".mt-off"); if (off) off.insertAdjacentHTML("beforebegin", html); }
+    else if (html) { const at = $("mt-restore-at"); if (at) at.insertAdjacentHTML("afterend", html); }
   }
   M.trends.syncCardHTML = syncCardHTML;
   M.trends.patchSync = patchSync;
@@ -891,7 +927,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const busy = trainBusy();
     const who = `<div class="card mt-card"><div class="hd"><h3>Person</h3></div><div class="srow"><div><div class="l">Now: ${esc(p.name || id)}</div><div class="s">${busy ? "Finish your workout first. Then you can switch." : "Switching also changes the workout plan on this phone."}</div></div>${busy ? "" : `<button class="btn" data-a="switch-profile">Switch</button>`}</div></div>`;
     const data = `<div class="card mt-card"><div class="hd"><h3>Data</h3></div><div class="bd"><p class="hint">To save a backup file of everything, go to Train → Settings. It has your food logs too.</p></div></div>`;
-    return numbers + targetsCard(p) + checkinsCard(id, p) + aiCard(p) + syncCardHTML() + who + data;
+    return numbers + targetsCard(p) + checkinsCard(id, p) + syncCardHTML() + aiCard(p) + who + data;   /* sync above the optional AI key: both phones need it */
   };
 
   /* ============================================================== check-ins */
@@ -956,7 +992,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   }
   /* Train → Today before first-day setup: a small card that opens Macros. */
   function setupNoteHTML() {
-    return `<div class="card mt-card mt-banner mt-setnote"><div class="bd"><p class="mt-text"><b>Set your food targets.</b> It takes 30 seconds.</p><button class="btn primary block" data-m="mode" data-v="macros" data-tab="diary">Set my targets</button></div></div>`;
+    return `<div class="card mt-card mt-banner mt-setnote"><div class="bd"><p class="mt-text"><b>Set your food targets.</b> It takes 30 seconds.</p><button class="btn block" data-m="mode" data-v="macros" data-tab="diary">Set my targets</button></div></div>`;
   }
   M.ui.bannerHTML = function () {
     const id = pid(); if (!id) return "";
@@ -1021,7 +1057,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     let date = dEl && dEl.value ? dEl.value : M.today();
     if (!keyDate(date) || date > M.today()) date = M.today();
     M.body.add({ date, w: r.w, rhr: r.rhr, pid: id });
-    if (r.w != null) followLatest(id, true);
+    if (r.w != null) followLatest(id, true, true);
     blurActive();   /* keyboard away with the sheet */
     toast("Saved");
     closeSheet();
@@ -1190,7 +1226,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     say("mt-b14-msg", "");
     M.body.add({ date: M.today(), w: r.w, rhr: r.rhr, pid: id });
     M.checkins.done(id, "body14");
-    if (r.w != null) followLatest(id, true);
+    if (r.w != null) followLatest(id, true, true);
     blurActive();
     toast("Saved");
     rerender();
@@ -1246,14 +1282,18 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const Cl = cloud();
     if (!Cl || !Cl.configured()) { toast("Cloud sync isn't set up yet"); return; }
     if (!Cl.create()) { toast("Couldn't turn on sync. Try again."); return; }
-    justOnAt = now();
+    justOnAt = now(); joinedAt = 0; moreOpen = false;
     toast("Sync is on");
     rerender();
   };
+  /* "More options" opens and closes on its own (a <details>); remember it across redraws */
+  A["t-sync-more"] = el => { const d = el && el.closest ? el.closest("details") : null; moreOpen = d ? !d.open : false; };
   A["t-sync-joinshow"] = el => {
     const box = $("mt-join"); if (!box) return;
     box.hidden = false;
     if (el && el.dataset) el.hidden = true;
+    const on = $("mt-sync") ? $("mt-sync").querySelector('[data-m="t-sync-on"]') : null;
+    if (on) on.classList.remove("primary");   /* Join is the next step now */
     const inp = $("mt-join-code"); if (inp) { try { inp.focus(); } catch (e) {} }
   };
   A["t-sync-join"] = el => {
@@ -1269,7 +1309,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     let pr;
     try { pr = Cl.join(code); } catch (e) { pr = null; }
     return Promise.resolve(pr).then(r => {
-      if (r && r.ok) { toast("Joined. Your data is syncing."); rerender(); return; }
+      if (r && r.ok) { joinedAt = now(); justOnAt = 0; toast("Joined. Your data is syncing."); rerender(); return; }
       reset(); joinMsg((r && r.error) || "That didn't work. Try again.");
     }, () => { reset(); joinMsg("That didn't work. Try again."); });
   };
@@ -1315,7 +1355,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const Cl = cloud(); if (!Cl || !Cl.status().on) return;
     if (!armTap(el, "Tap again to turn off")) return;
     Cl.leave();
-    justOnAt = 0; codeShown = false;
+    justOnAt = 0; joinedAt = 0; codeShown = false; moreOpen = false;
     toast("Sync is off. Your data stays on this phone.");
     rerender();
   };
@@ -1342,14 +1382,19 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     const Cl = cloud(); if (!Cl || typeof Cl.changeCode !== "function" || !Cl.status().on) return;
     if (!armTap(el, "Tap again to change")) return;
     if (el && el.dataset) { el.disabled = true; el.textContent = "Changing…"; }
+    const old = Cl.status().code;
     let pr;
     try { pr = Cl.changeCode(); } catch (e) { pr = null; }
-    justOnAt = now();   /* the new code shows in full, with the next step */
-    rerender();
+    /* only once there is a new code: it shows in full, with the steps (never the old one) */
+    const after = () => {
+      let s = null; try { s = Cl.status(); } catch (e) { s = null; }
+      if (s && s.on && s.code && s.code !== old) { justOnAt = now(); joinedAt = 0; codeShown = false; moreOpen = false; }
+      rerender();
+    };
     return Promise.resolve(pr).then(r => {
       toast(r && r.ok ? "New code made. Type it on the other phone." : (r && r.error) || "Couldn't change the code. Try again.");
-      rerender();
-    }, () => { toast("Couldn't change the code. Try again."); rerender(); });
+      after();
+    }, () => { toast("Couldn't change the code. Try again."); after(); });
   };
   A["t-sync-delete"] = el => {
     const Cl = cloud(); if (!Cl || typeof Cl.deleteCloud !== "function" || !Cl.status().on) return;
@@ -1357,7 +1402,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     if (el && el.dataset) { el.disabled = true; el.textContent = "Deleting…"; }
     let pr;
     try { pr = Cl.deleteCloud(); } catch (e) { pr = null; }
-    justOnAt = 0; codeShown = false;
+    justOnAt = 0; joinedAt = 0; codeShown = false; moreOpen = false;
     return Promise.resolve(pr).then(r => {
       toast(r && r.ok ? "Cloud copy deleted. Everything is still on this phone." : (r && r.error) || "Couldn't delete. Try again.");
       rerender();

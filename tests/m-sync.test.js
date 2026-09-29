@@ -12,8 +12,14 @@ const http = require("http");
 const assert = require("assert");
 
 const ROOT = path.join(__dirname, "..");
-const SRC = { core: fs.readFileSync(path.join(ROOT, "m-core.js"), "utf8"), sync: fs.readFileSync(path.join(ROOT, "m-sync.js"), "utf8") };
-const KEY = "test-publishable-key", JWT_KEY = "eyJhbGciOiJIUzI1NiJ9.test.sig";
+/* Tests always start from an empty config line (sync off) and point M.cloud at the mock with
+   configure(); the shipped line may hold the real project URL + publishable key. */
+const SB_LINE = /const SB_URL = "([^"]*)";(\s*)const SB_KEY = "([^"]*)";/;
+const SYNC_SHIPPED = fs.readFileSync(path.join(ROOT, "m-sync.js"), "utf8");
+const SRC = { core: fs.readFileSync(path.join(ROOT, "m-core.js"), "utf8"),
+  sync: SYNC_SHIPPED.replace(SB_LINE, (all, u, sp) => 'const SB_URL = "";' + sp + 'const SB_KEY = "";') };
+/* a new-style publishable key (not a JWT: apikey header only) and an old-style JWT anon key */
+const KEY = "sb_publishable_T3stK3y_0123456789abcdefGHIJ", JWT_KEY = "eyJhbGciOiJIUzI1NiJ9.test.sig";
 const DAY = 864e5;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const J = o => JSON.parse(JSON.stringify(o));      /* move values out of a phone's realm */
@@ -37,11 +43,51 @@ function jsonb(v) {   /* jsonb stores object keys sorted by length, then bytewis
   if (v && typeof v === "object") { const o = {}; Object.keys(v).sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0)).forEach(k => { o[k] = jsonb(v[k]); }); return o; }
   return v;
 }
+/* The mock is the Supabase gateway + PostgREST 12 in front of public.chalk_sync, as
+   supabase/chalk_sync.sql sets it up. What it does like the real thing:
+   - apikey header required (401 {message, hint}); a publishable key is not a JWT, so
+     "Authorization: Bearer <non-JWT>" is refused (401 PGRST301). Old JWT keys may send Bearer.
+   - CORS: OPTIONS preflights answered like the gateway (echoes the asked-for headers);
+     every response carries Access-Control-Allow-Origin and PostgREST's exposed headers.
+   - Row-level security by the x-household header for select / insert / update (no delete
+     grant: DELETE → 401 42501). An insert for another household → 401 42501 (anon role).
+   - Columns, types and checks from the SQL file: household format, kind list, id length,
+     data jsonb not null and < 3 MB as jsonb text, deleted boolean, client_updated bigint,
+     device ≤ 64. Errors come back in PostgREST's shape {code, details, hint, message}.
+   - Upsert: POST ?on_conflict=household,kind,id + Prefer resolution=merge-duplicates.
+     One statement: all rows or none. Only the columns sent are updated.
+   - updated_at: the BEFORE INSERT OR UPDATE trigger stamps now() — ONE time per request
+     (a transaction). srv.trigger = false simulates a table without the trigger.
+   - Reads: select / eq / neq / gt / gte / lt / lte / like / in / is filters, order,
+     limit / offset and the Range header, max rows 1000, Content-Range, jsonb key order. */
+const COLS = ["household", "kind", "id", "data", "deleted", "client_updated", "device", "updated_at"];
+const EXPOSE = "Content-Encoding, Content-Location, Content-Range, Content-Type, Date, Location, Server, Transfer-Encoding, Range-Unit";
+const pgErr = (code, message, details, hint) => ({ code, details: details === undefined ? null : details, hint: hint === undefined ? null : hint, message });
+const jsonbKeyCmp = (a, b) => Buffer.byteLength(a) - Buffer.byteLength(b) || Buffer.compare(Buffer.from(a), Buffer.from(b));
+function jsonbText(v) {   /* jsonb's text output: ", " and ": " separators, keys by length then bytes */
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "[" + v.map(jsonbText).join(", ") + "]";
+  if (typeof v === "object") return "{" + Object.keys(v).sort(jsonbKeyCmp).map(k => JSON.stringify(k) + ": " + jsonbText(v[k])).join(", ") + "}";
+  return JSON.stringify(v);
+}
+function badText(s) {
+  if (s.indexOf("\u0000") >= 0) return pgErr("22P05", "unsupported Unicode escape sequence", "\\u0000 cannot be converted to text.");
+  if (/[\ud800-\udbff](?![\udc00-\udfff])|(?:^|[^\ud800-\udbff])[\udc00-\udfff]/.test(s)) return pgErr("22P02", "invalid input syntax for type json", "Unicode low surrogate must follow a high surrogate.");
+  return null;
+}
+function badJson(v, d) {
+  if (typeof v === "string") return badText(v);
+  if (!v || typeof v !== "object" || d > 200) return null;
+  for (const k of Object.keys(v)) { const e = (Array.isArray(v) ? null : badText(k)) || badJson(v[k], (d || 0) + 1); if (e) return e; }
+  return null;
+}
+const coll = new Intl.Collator("en-US");   /* en_US.UTF-8-like text order, bytes break ties */
+const textCmp = (a, b) => coll.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0);
 function mockServer() {
-  const rows = new Map();          /* household|kind|id → row */
+  const rows = new Map();          /* household|kind|id → row (data kept as JSON text) */
   const log = [];
   let lastUs = 0;
-  const srv = { rows, log, reject: null, failNext: 0,
+  const srv = { rows, log, reject: null, failNext: 0, retryAfter: 0, hook: null, mutate: null, trigger: true, maxRows: 1000, preflightFail: false,
     clock() { let us = Date.now() * 1000; if (us <= lastUs) us = lastUs + 1; lastUs = us; return us; },
     all(hh) { return [...rows.values()].filter(r => !hh || r.household === hh); },
     get(hh, kind, id) { return rows.get(hh + "|" + kind + "|" + id) || null; },
@@ -50,71 +96,249 @@ function mockServer() {
     /* a row written by someone else (another app version, a script): stamped now */
     put(row) { const us = srv.clock(); rows.set(row.household + "|" + row.kind + "|" + row.id, Object.assign({ deleted: false, client_updated: 0, device: "x" }, row, { data: typeof row.data === "string" ? row.data : JSON.stringify(row.data), _us: us, updated_at: pgTs(us) })); }
   };
-  const send = (res, code, body) => { res.writeHead(code, { "content-type": "application/json" }); res.end(body == null ? "" : JSON.stringify(body)); };
+  const send = (res, code, body, hdrs) => {
+    res.writeHead(code, Object.assign({ "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*", "access-control-expose-headers": EXPOSE }, hdrs || {}));
+    res.end(body == null ? "" : typeof body === "string" ? body : JSON.stringify(body));
+  };
+  const failing = r => "Failing row contains (" + [r.household, r.kind, r.id, r.data === null ? null : jsonbText(r.data), r.deleted === null ? null : r.deleted ? "t" : "f", r.client_updated, r.device, r.updated_at].map(v => (v === null || v === undefined ? "null" : String(v))).join(", ") + ").";
+  /* a value for a column, the way json_to_recordset reads it */
+  function coerce(col, v) {
+    if (v === null || v === undefined) return null;
+    const raw = typeof v === "string" ? v : JSON.stringify(v);
+    if (col === "data") return v;
+    if (col === "deleted") {
+      if (typeof v === "boolean") return v;
+      const s = raw.trim().toLowerCase();
+      if (["t", "true", "y", "yes", "on", "1"].includes(s)) return true;
+      if (["f", "false", "n", "no", "off", "0"].includes(s)) return false;
+      throw pgErr("22P02", 'invalid input syntax for type boolean: "' + raw + '"');
+    }
+    if (col === "client_updated") {
+      const s = raw.trim();
+      if (typeof v === "object" || !/^[+-]?\d+$/.test(s)) throw pgErr("22P02", 'invalid input syntax for type bigint: "' + raw + '"');
+      const n = Number(s);
+      if (Math.abs(n) > 9223372036854775807) throw pgErr("22003", 'value "' + s + '" is out of range for type bigint');
+      return n;
+    }
+    if (col === "updated_at") { const t = tsVal(raw); if (!isFinite(t)) throw pgErr("22007", 'invalid input syntax for type timestamp with time zone: "' + raw + '"'); return t; }
+    const e = badText(raw); if (e) throw e;
+    return raw;                                   /* text columns: strings as-is, anything else as its JSON text */
+  }
+  /* a filter value typed like its column; throws PostgREST / Postgres errors */
+  function typed(col, s) {
+    if (col === "updated_at") { const t = tsVal(s); if (!isFinite(t)) throw pgErr("22007", 'invalid input syntax for type timestamp with time zone: "' + s + '"'); return t; }
+    if (col === "client_updated") { if (!/^[+-]?\d+$/.test(s.trim())) throw pgErr("22P02", 'invalid input syntax for type bigint: "' + s + '"'); return Number(s); }
+    if (col === "deleted") return coerce("deleted", s);
+    if (col === "data") throw pgErr("42883", "operator does not exist: jsonb = unknown", null, "No operator matches the given name and argument types. You might need to add explicit type casts.");
+    return s;
+  }
+  const colVal = (r, c) => (c === "updated_at" ? r._us : c === "data" ? r.data : r[c]);
+  const cmp = (c, a, b) => (a === b ? 0 : a === null || a === undefined ? 1 : b === null || b === undefined ? -1 : typeof a === "string" && c !== "data" ? textCmp(a, b) : a < b ? -1 : 1);
+  const parseErr = (what, s) => pgErr("PGRST100", '"failed to parse ' + what + " (" + s + ')" (line 1, column 1)', "unexpected end of input", null);
+  function filterRows(out, q) {
+    for (const [k, v] of q) {
+      if (["select", "order", "limit", "offset", "on_conflict", "columns"].includes(k)) continue;
+      if (!COLS.includes(k)) throw pgErr("42703", "column chalk_sync." + k + " does not exist");
+      const m = /^(not\.)?(eq|neq|gt|gte|lt|lte|like|ilike|in|is)\.([\s\S]*)$/.exec(v);
+      if (!m) throw parseErr("filter", v);
+      const [, neg, op, arg] = m;
+      let test;
+      if (op === "in") {
+        if (!/^\(.*\)$/.test(arg)) throw parseErr("filter", v);
+        const list = arg.slice(1, -1).split(",").map(x => typed(k, x.replace(/^"(.*)"$/, "$1")));
+        test = r => list.some(x => cmp(k, colVal(r, k), x) === 0);
+      } else if (op === "is") {
+        if (!/^(null|true|false|unknown)$/.test(arg)) throw parseErr("filter", v);
+        test = r => (arg === "null" ? colVal(r, k) == null : colVal(r, k) === (arg === "true"));
+      } else if (op === "like" || op === "ilike") {
+        const re = new RegExp("^" + arg.split("").map(ch => (ch === "*" || ch === "%" ? ".*" : ch === "_" ? "." : ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))).join("") + "$", op === "ilike" ? "is" : "s");
+        test = r => colVal(r, k) != null && re.test(String(colVal(r, k)));
+      } else {
+        const x = typed(k, arg);
+        test = r => { const c = cmp(k, colVal(r, k), x); return op === "eq" ? c === 0 : op === "neq" ? c !== 0 : op === "gt" ? c > 0 : op === "gte" ? c >= 0 : op === "lt" ? c < 0 : c <= 0; };
+      }
+      out = out.filter(r => (neg ? !test(r) : test(r)));
+    }
+    return out;
+  }
   srv.server = http.createServer((req, res) => {
     let body = "";
     req.on("data", c => { body += c; });
     req.on("end", () => {
       const u = new URL(req.url, "http://x");
       const hh = req.headers["x-household"] || "";
-      const entry = { method: req.method, path: u.pathname, query: u.search, hh, apikey: req.headers.apikey, auth: req.headers.authorization || "", prefer: req.headers.prefer || "", n: 0 };
+      const entry = { method: req.method, path: u.pathname, query: u.search, hh, probe: !!req.headers["x-test-probe"], apikey: req.headers.apikey, auth: req.headers.authorization || "", prefer: req.headers.prefer || "", n: 0,
+        hdrs: Object.keys(req.headers).filter(h => !["host", "connection", "content-length", "accept", "accept-encoding", "accept-language", "sec-fetch-mode", "user-agent", "origin", "pragma", "cache-control"].includes(h)).sort() };
       log.push(entry);
-      if (u.pathname !== "/rest/v1/chalk_sync") return send(res, 404, { message: "not found" });
-      if (req.headers.apikey !== KEY && req.headers.apikey !== JWT_KEY) return send(res, 401, { message: "Invalid API key" });
-      if (req.headers.apikey === JWT_KEY && req.headers.authorization !== "Bearer " + JWT_KEY) return send(res, 401, { message: "JWT missing" });
-      if (srv.failNext) { const s = srv.failNext; srv.failNext = 0; if (srv.retryAfter) res.setHeader("retry-after", String(srv.retryAfter)); return send(res, s, { message: "boom" }); }
-      if (srv.hook) { const h = srv.hook(req, entry, body); if (h) return send(res, h.status, h.body || { message: "hook" }); }
+      /* the gateway answers CORS preflights itself: any origin, the headers that were asked for */
+      if (req.method === "OPTIONS") {
+        if (srv.preflightFail) { res.writeHead(403, { "content-type": "text/plain" }); res.end("blocked"); return; }
+        res.writeHead(200, { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS,TRACE,CONNECT",
+          "access-control-allow-headers": req.headers["access-control-request-headers"] || "", "access-control-max-age": "3600", "content-length": "0" });
+        res.end(); return;
+      }
+      if (!/^\/rest\/v1\//.test(u.pathname)) return send(res, 404, { message: "no Route matched with those values" });
+      /* the gateway: a known apikey, and a Bearer token only if it's a JWT */
+      if (!req.headers.apikey) return send(res, 401, { message: "No API key found in request", hint: "No `apikey` request header or url param was found." });
+      if (req.headers.apikey !== KEY && req.headers.apikey !== JWT_KEY) return send(res, 401, { message: "Invalid API key", hint: "Double check your Supabase `anon` or `service_role` API key." });
+      const auth = req.headers.authorization;
+      if (auth != null) {
+        const tok = /^Bearer (.+)$/i.exec(auth);
+        const parts = tok ? tok[1].split(".").length : 0;
+        if (!tok || parts !== 3) return send(res, 401, pgErr("PGRST301", "Expected 3 parts in JWT; got " + parts));
+        if (tok[1] !== JWT_KEY) return send(res, 401, pgErr("PGRST301", "JWSError JWSInvalidSignature"));
+      }
+      if (u.pathname !== "/rest/v1/chalk_sync") return send(res, 404, pgErr("PGRST205", "Could not find the table 'public." + u.pathname.slice(9) + "' in the schema cache", null, "Perhaps you meant the table 'public.chalk_sync'"));
+      if (srv.failNext) { const s = srv.failNext; srv.failNext = 0; return send(res, s, s === 429 ? { message: "API rate limit exceeded" } : pgErr("PGRST001", "Database client error. Retrying the connection.", "boom"),
+        srv.retryAfter ? Object.assign({ "retry-after": String(srv.retryAfter) }, srv.exposeRetryAfter ? { "access-control-expose-headers": EXPOSE + ", Retry-After" } : {}) : null); }
+      if (srv.hook) { const h = srv.hook(req, entry, body); if (h) return send(res, h.status, h.body || pgErr("XX000", "hook")); }
       const q = u.searchParams;
-      if (req.method === "GET") {
-        let out = srv.all().filter(r => srv.noRLS || r.household === hh);   /* RLS: only your own household */
-        for (const [k, v] of q) {
-          if (k === "select" || k === "order" || k === "limit" || k === "offset") continue;
-          const m = /^(eq|gt|in|like)\.(.*)$/.exec(v); if (!m) return send(res, 400, { message: "bad filter " + k });
-          if (k === "updated_at") { const t = tsVal(m[2]); if (!isFinite(t)) return send(res, 400, { message: "bad ts " + m[2] }); out = out.filter(r => (m[1] === "gt" ? r._us > t : r._us === t)); }
-          else if (m[1] === "in") { const list = m[2].replace(/^\(|\)$/g, "").split(","); out = out.filter(r => list.includes(String(r[k]))); }
-          else if (m[1] === "like") { const re = new RegExp("^" + m[2].split("*").map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$"); out = out.filter(r => re.test(String(r[k]))); }
-          else if (m[1] === "gt") out = out.filter(r => String(r[k]) > m[2]);
-          else out = out.filter(r => String(r[k]) === m[2]);
+      try {
+        if (req.method === "GET" || req.method === "HEAD") {
+          const cols = (q.get("select") || "*") === "*" ? COLS : q.get("select").split(",");
+          cols.forEach(c => { if (!COLS.includes(c)) throw pgErr("42703", "column chalk_sync." + c + " does not exist"); });
+          let out = filterRows(srv.all().filter(r => r.household === hh), q);   /* RLS: only your own household */
+          if (q.get("order")) {
+            const keys = q.get("order").split(",").map(s => {
+              const m = /^([a-z_]+)(?:\.(asc|desc))?(?:\.(nullsfirst|nullslast))?$/.exec(s);
+              if (!m) throw parseErr("order", s);
+              if (!COLS.includes(m[1])) throw pgErr("42703", "column chalk_sync." + m[1] + " does not exist");
+              return { c: m[1], dir: m[2] === "desc" ? -1 : 1 };
+            });
+            out.sort((a, b) => { for (const k of keys) { const c = cmp(k.c, colVal(a, k.c), colVal(b, k.c)); if (c) return c * k.dir; } return 0; });
+          }
+          let off = 0, lim = Infinity;
+          const rg = /^(\d+)-(\d*)$/.exec(req.headers.range || "");
+          if (rg) { off = +rg[1]; if (rg[2] !== "") lim = +rg[2] - off + 1; }
+          if (q.has("offset")) { if (!/^\d+$/.test(q.get("offset"))) throw parseErr("offset parameter", q.get("offset")); off = +q.get("offset"); }
+          if (q.has("limit")) { if (!/^\d+$/.test(q.get("limit"))) throw parseErr("limit parameter", q.get("limit")); lim = Math.min(lim, +q.get("limit")); }
+          out = out.slice(off, off + Math.min(lim, srv.maxRows));
+          entry.n = out.length; entry.ts = out.map(r => r.updated_at);
+          const result = out.map(r => { const o = {}; cols.forEach(c => { o[c] = c === "data" ? jsonb(JSON.parse(r.data)) : r[c]; }); return o; });
+          const range = { "content-range": out.length ? off + "-" + (off + out.length - 1) + "/*" : "*/*" };
+          /* srv.mutate(rows, entry) may return raw JSON text (to send keys like "__proto__" as-is) */
+          const m = srv.mutate ? srv.mutate(result, entry) : result;
+          return send(res, 200, req.method === "HEAD" ? null : m, range);
         }
-        if (q.get("order")) {
-          const keys = q.get("order").split(",").map(s => s.split(".")[0]);
-          const val = (r, k) => (k === "updated_at" ? r._us : String(r[k]));
-          out.sort((a, b) => { for (const k of keys) { const x = val(a, k), y = val(b, k); if (x < y) return -1; if (x > y) return 1; } return 0; });
+        if (req.method === "POST" || req.method === "PATCH") {
+          const ct = req.headers["content-type"] || "application/json";
+          if (!/^application\/json\b/i.test(ct)) return send(res, 415, pgErr("PGRST107", "The request's Content-Type is not supported"));
+          let arr; try { arr = JSON.parse(body); } catch (e) { return send(res, 400, pgErr("PGRST102", "Empty or invalid json")); }
+          if (req.method === "PATCH" && (!arr || typeof arr !== "object" || Array.isArray(arr))) return send(res, 400, pgErr("PGRST102", "Empty or invalid json"));
+          if (!Array.isArray(arr)) arr = [arr];
+          if (arr.some(r => !r || typeof r !== "object" || Array.isArray(r))) return send(res, 400, pgErr("PGRST102", "All object keys must match"));
+          const keys = JSON.stringify(Object.keys(arr[0] || {}).sort());
+          if (arr.some(r => JSON.stringify(Object.keys(r).sort()) !== keys)) return send(res, 400, pgErr("PGRST102", "All object keys must match"));
+          const sent = JSON.parse(keys);
+          const unknown = sent.find(k => !COLS.includes(k));
+          if (unknown) return send(res, 400, pgErr("PGRST204", "Could not find the '" + unknown + "' column of 'chalk_sync' in the schema cache"));
+          const us = srv.clock();                       /* ONE now() for the whole request (one transaction) */
+          const stamp = { _us: us, updated_at: pgTs(us) };
+          const wrote = [];
+          const store = (r, old) => {
+            const t = srv.trigger ? stamp : old ? { _us: old._us, updated_at: old.updated_at } : stamp;   /* no trigger: an update keeps the old time */
+            const v = Object.assign({}, old || {}, r, t);
+            if (!old && r.data === undefined) v.data = {};
+            if (!old && r.deleted === undefined) v.deleted = false;
+            if (!old && r.client_updated === undefined) v.client_updated = 0;
+            if (!old && r.device === undefined) v.device = "";
+            return v;
+          };
+          const check = v => {   /* RLS WITH CHECK first, then NOT NULL and CHECK constraints */
+            if (v.household !== hh) throw Object.assign(pgErr("42501", 'new row violates row-level security policy for table "chalk_sync"'), { status: 401 });
+            for (const c of ["household", "kind", "id", "data", "deleted", "client_updated", "device"]) if (v[c] === null || v[c] === undefined) throw pgErr("23502", 'null value in column "' + c + '" of relation "chalk_sync" violates not-null constraint', failing(v));
+            const bad = n => pgErr("23514", 'new row for relation "chalk_sync" violates check constraint "chalk_sync_' + n + '_check"', failing(v));
+            if (!/^[A-HJ-NP-Z2-9]{20}$/.test(v.household)) throw bad("household");
+            if (!["food", "meal", "day", "body", "profile", "train", "meta"].includes(v.kind)) throw bad("kind");
+            if ([...v.id].length < 1 || [...v.id].length > 200) throw bad("id");
+            if (Buffer.byteLength(jsonbText(v.data)) >= 3000000) throw bad("data");
+            if ([...v.device].length > 64) throw bad("device");
+            if (srv.reject && srv.reject(v)) throw bad("test");
+          };
+          if (req.method === "PATCH") {
+            const r = {}; sent.forEach(c => { r[c] = coerce(c, arr[0][c]); });
+            if (r.data !== undefined) { const e = badJson(r.data); if (e) throw e; }
+            const hit = filterRows(srv.all().filter(x => x.household === hh), q);   /* RLS USING */
+            const next = hit.map(old => { const v = store(r, Object.assign({}, old, { data: JSON.parse(old.data) })); check(v); return v; });
+            next.forEach(v => { rows.set(v.household + "|" + v.kind + "|" + v.id, Object.assign(v, { data: JSON.stringify(v.data) })); });
+            return send(res, 204, null);
+          }
+          const pref = entry.prefer;
+          const merge = /resolution=merge-duplicates/.test(pref), ignore = /resolution=ignore-duplicates/.test(pref);
+          if ((merge || ignore) && q.has("on_conflict") && q.get("on_conflict") !== "household,kind,id") return send(res, 400, pgErr("42P10", "there is no unique or exclusion constraint matching the ON CONFLICT specification"));
+          entry.n = arr.length; entry.rows = arr.map(r => r.kind + "|" + r.id);
+          const seen = new Set();
+          for (const src of arr) {
+            const r = {}; sent.forEach(c => { r[c] = coerce(c, src[c]); });
+            if (r.data !== undefined && r.data !== null) { const e = badJson(r.data); if (e) throw e; }
+            const pk = r.household + "|" + r.kind + "|" + r.id;
+            const cur = rows.get(pk);
+            const old = seen.has(pk) ? wrote.find(w => w.pk === pk).v : cur ? Object.assign({}, cur, { data: JSON.parse(cur.data) }) : null;
+            if (old && !merge && !ignore) throw Object.assign(pgErr("23505", 'duplicate key value violates unique constraint "chalk_sync_pkey"', "Key (household, kind, id)=(" + r.household + ", " + r.kind + ", " + r.id + ") already exists."), { status: 409 });
+            if (seen.has(pk) && merge) throw pgErr("21000", "ON CONFLICT DO UPDATE command cannot affect row a second time", null, "Ensure that no rows proposed for insertion within the same command have duplicate constrained values.");
+            check(store(r, null));                     /* the proposed row: INSERT policy + checks */
+            if (old && ignore) continue;
+            const v = store(r, old);
+            check(v);                                  /* after ON CONFLICT DO UPDATE: UPDATE policy + checks */
+            seen.add(pk); wrote.push({ pk, v });
+          }
+          wrote.forEach(({ pk, v }) => rows.set(pk, Object.assign(v, { data: JSON.stringify(v.data) })));
+          if (/return=representation/.test(pref)) {
+            const cols = (q.get("select") || "*") === "*" ? COLS : q.get("select").split(",");
+            return send(res, 201, wrote.map(({ v }) => { const o = {}; cols.forEach(c => { o[c] = c === "data" ? jsonb(JSON.parse(v.data)) : v[c]; }); return o; }), { "content-range": "*/*" });
+          }
+          return send(res, 201, null, { "content-range": "*/*" });
         }
-        if (q.get("offset")) out = out.slice(+q.get("offset"));
-        if (q.get("limit")) out = out.slice(0, +q.get("limit"));
-        const cols = (q.get("select") || "*").split(",");
-        entry.n = out.length; entry.ts = out.map(r => r.updated_at);
-        const result = out.map(r => { const o = {}; cols.forEach(c => { o[c] = c === "data" ? jsonb(JSON.parse(r.data)) : r[c]; }); return o; });
-        /* srv.mutate(rows, entry) may return raw JSON text (to send keys like "__proto__" as-is) */
-        const m = srv.mutate ? srv.mutate(result, entry) : result;
-        if (typeof m === "string") { res.writeHead(200, { "content-type": "application/json" }); res.end(m); return; }
-        return send(res, 200, m);
+        if (req.method === "DELETE") return send(res, 401, pgErr("42501", "permission denied for table chalk_sync"));
+        return send(res, 405, pgErr("PGRST117", "Unsupported HTTP method: " + req.method));
+      } catch (e) {
+        if (e && e.code && e.message) { const st = e.status || (e.code === "42883" ? 404 : 400); delete e.status; return send(res, st, e); }
+        return send(res, 500, pgErr("XX000", String(e && e.message || e)));
       }
-      if (req.method === "POST") {
-        if (q.get("on_conflict") !== "household,kind,id" || !/resolution=merge-duplicates/.test(entry.prefer)) return send(res, 400, { message: "not an upsert" });
-        let arr; try { arr = JSON.parse(body); } catch (e) { return send(res, 400, { message: "bad json" }); }
-        if (!Array.isArray(arr)) arr = [arr];
-        entry.n = arr.length; entry.rows = arr.map(r => r.kind + "|" + r.id);
-        const keys = JSON.stringify(Object.keys(arr[0] || {}).sort());
-        if (arr.some(r => JSON.stringify(Object.keys(r).sort()) !== keys)) return send(res, 400, { code: "PGRST102", message: "All object keys must match" });
-        for (const r of arr) {
-          if (r.household !== hh) return send(res, 403, { message: "new row violates row-level security policy" });
-          if (!["food", "meal", "day", "body", "profile", "train", "meta"].includes(r.kind)) return send(res, 400, { message: "check constraint" });
-          if (typeof r.device !== "string" || r.device.length > 64) return send(res, 400, { message: "device" });
-          if (!Number.isInteger(r.client_updated)) return send(res, 400, { message: "client_updated must be bigint" });
-          if (typeof r.deleted !== "boolean" || !r.data || typeof r.data !== "object") return send(res, 400, { message: "shape" });
-          if (Buffer.byteLength(JSON.stringify(r.data)) >= 3e6) return send(res, 413, { message: "too big" });
-          if (srv.reject && srv.reject(r)) return send(res, 400, { message: "rejected row" });
-        }
-        const us = srv.clock();                       /* one now() for the whole request */
-        arr.forEach(r => rows.set(r.household + "|" + r.kind + "|" + r.id, { household: r.household, kind: r.kind, id: r.id, data: JSON.stringify(r.data), deleted: r.deleted, client_updated: r.client_updated, device: r.device, _us: us, updated_at: pgTs(us) }));
-        return send(res, 201, null);
-      }
-      return send(res, 405, { message: "no" });
     });
   });
   return srv;
+}
+
+/* ======================================================= a browser's fetch */
+/* The app runs on its own origin, so every request to Supabase is cross-origin. Like a browser:
+   a request with headers beyond the CORS-safelisted ones (apikey, x-household, Prefer,
+   content-type: application/json, Authorization) first sends an OPTIONS preflight; a preflight
+   that fails, or a response without Access-Control-Allow-Origin, rejects with
+   TypeError("Failed to fetch"); the page can read only the headers the server exposes. */
+const ORIGIN = "https://chalk.example";
+function corsUnsafe(h) {
+  const out = [];
+  Object.keys(h || {}).forEach(k => {
+    const n = k.toLowerCase(), v = String(h[k]);
+    if (n === "accept" || n === "accept-language" || n === "content-language") return;
+    if (n === "content-type" && /^(application\/x-www-form-urlencoded|multipart\/form-data|text\/plain)\s*(;|$)/i.test(v)) return;
+    out.push(n);
+  });
+  return out.sort();
+}
+async function browserFetch(url, opt, preflights) {
+  opt = opt || {};
+  const method = String(opt.method || "GET").toUpperCase(), unsafe = corsUnsafe(opt.headers);
+  const fail = () => { throw new TypeError("Failed to fetch"); };
+  if (unsafe.length || !["GET", "HEAD", "POST"].includes(method)) {
+    let pre = null;
+    try { pre = await fetch(url, { method: "OPTIONS", headers: { origin: ORIGIN, "access-control-request-method": method, "access-control-request-headers": unsafe.join(",") } }); } catch (e) { pre = null; }
+    preflights.push({ url: String(url), method, asked: unsafe.join(","), status: pre ? pre.status : 0 });
+    if (!pre || !pre.ok) fail();
+    const ao = pre.headers.get("access-control-allow-origin");
+    const ah = (pre.headers.get("access-control-allow-headers") || "").toLowerCase().split(",").map(x => x.trim());
+    const am = (pre.headers.get("access-control-allow-methods") || "").toUpperCase().split(",").map(x => x.trim());
+    if ((ao !== "*" && ao !== ORIGIN) || unsafe.some(x => !ah.includes(x)) || (!["GET", "HEAD", "POST"].includes(method) && !am.includes(method))) fail();
+  }
+  let res;
+  try { res = await fetch(url, Object.assign({}, opt, { headers: Object.assign({ origin: ORIGIN }, opt.headers) })); }
+  catch (e) { if (e && e.name === "AbortError") throw e; fail(); }
+  const ao = res.headers.get("access-control-allow-origin");
+  if (ao !== "*" && ao !== ORIGIN) fail();
+  const exposed = new Set(["cache-control", "content-language", "content-length", "content-type", "expires", "last-modified", "pragma"]
+    .concat((res.headers.get("access-control-expose-headers") || "").toLowerCase().split(",").map(x => x.trim())));
+  return { ok: res.ok, status: res.status, statusText: res.statusText, headers: { get: n => (exposed.has(String(n).toLowerCase()) ? res.headers.get(n) : null) }, json: () => res.json(), text: () => res.text() };
 }
 
 /* ============================================================== phones */
@@ -127,9 +351,10 @@ function trainState(pid, ids, extra) {
 function phone(name, o) {
   o = o || {};
   const store = new Map(Object.entries(o.store || {}));
-  const reqs = [];
+  const reqs = [], preflights = [];
   const full = new Set();     /* keys whose writes fail like a full phone */
   let offline = false;
+  const nav = { onLine: true };
   const winL = {}, docL = {};
   const doc = {
     visibilityState: "visible", activeElement: null, body: {}, _app: null,
@@ -144,10 +369,11 @@ function phone(name, o) {
       setItem: (k, v) => { if (full.has(k)) { const e = new Error("The quota has been exceeded."); e.name = "QuotaExceededError"; throw e; } store.set(k, String(v)); },
       removeItem: k => { store.delete(k); }
     },
+    navigator: nav,
     fetch: (url, opt) => {
       reqs.push({ url: String(url), method: (opt && opt.method) || "GET", headers: Object.assign({}, opt && opt.headers), body: opt && opt.body });
       if (offline) return Promise.reject(new TypeError("Failed to fetch"));
-      return fetch(url, opt);
+      return browserFetch(url, opt, preflights);
     },
     location: { reloads: 0, reload() { this.reloads++; } },
     document: doc,
@@ -166,8 +392,8 @@ function phone(name, o) {
   if (o.config !== false) M.cloud.configure({ url: URLBASE, key: o.key || KEY });
   if (o.train) store.set("chalk.v1", JSON.stringify(o.train));
   return {
-    name, M, ctx, store, reqs, winL, docL,
-    offline(v) { offline = v; },
+    name, M, ctx, store, reqs, preflights, winL, docL,
+    offline(v) { offline = v; nav.onLine = !v; },
     storageFull(k, v) { if (v) full.add(k); else full.delete(k); },
     fire(t) { (winL[t] || []).forEach(fn => fn({ type: t })); },
     visibility(v) { doc.visibilityState = v; (docL.visibilitychange || []).forEach(fn => fn()); },
@@ -251,6 +477,13 @@ t("turn on: 20-letter code, everything goes up in chunks, headers right, nothing
   assert.strictEqual(post.headers.Prefer, "resolution=merge-duplicates,return=minimal");
   assert.strictEqual(post.headers.apikey, KEY); assert.strictEqual(post.headers["x-household"], code); assert.strictEqual(post.headers["content-type"], "application/json");
   assert.ok(!("Authorization" in post.headers), "no Bearer for a non-JWT key");
+  /* the publishable key goes in apikey only; a read is apikey + x-household, a write adds
+     content-type and Prefer: the browser's CORS check (preflight) only ever sees these two shapes */
+  assert.ok(A.reqs.every(r => !Object.keys(r.headers).some(h => h.toLowerCase() === "authorization")), "never Authorization with a publishable key");
+  assert.deepStrictEqual(Object.keys(A.gets()[0].headers).sort(), ["apikey", "x-household"], "a read: apikey + x-household only");
+  assert.deepStrictEqual(Object.keys(post.headers).sort(), ["Prefer", "apikey", "content-type", "x-household"], "a write adds content-type and Prefer");
+  assert.deepStrictEqual([...new Set(A.preflights.map(p => p.method + " " + p.asked))].sort(), ["GET apikey,x-household", "POST apikey,content-type,prefer,x-household"], "two request shapes, nothing extra");
+  assert.ok(A.preflights.length > 0 && A.preflights.every(p => p.status === 200), "every preflight passed");
   /* self-test first: our household row goes up alone (twice: the server must stamp a newer time
      on the second write), comes back with our code, and another code sees none of it */
   assert.deepStrictEqual(JSON.parse(post.body).map(r => r.kind + "|" + r.id), ["meta|household"], "first request writes only the household row");
@@ -378,13 +611,14 @@ t("a wrong household code sees nothing", async () => {
   assert.strictEqual(r.ok, false); assert.match(r.error, /No one is using that code/);
   assert.strictEqual(C.M.cloud.status().on, false, "not joined");
   /* even asking for Nick's rows by name returns nothing with the wrong header */
-  const res = await fetch(URLBASE + "/rest/v1/chalk_sync?select=kind,id,data&household=eq." + CODE, { headers: { apikey: KEY, "x-household": other } });
+  const res = await fetch(URLBASE + "/rest/v1/chalk_sync?select=kind,id,data&household=eq." + CODE, { headers: { apikey: KEY, "x-household": other, "x-test-probe": "1" } });
   assert.deepStrictEqual(await res.json(), []);
   /* and writing into Nick's household with the wrong header is refused */
   const before = SERVER.all(CODE).length;
-  const w = await fetch(URLBASE + "/rest/v1/chalk_sync?on_conflict=household,kind,id", { method: "POST", headers: { apikey: KEY, "x-household": other, "content-type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
+  const w = await fetch(URLBASE + "/rest/v1/chalk_sync?on_conflict=household,kind,id", { method: "POST", headers: { apikey: KEY, "x-household": other, "content-type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal", "x-test-probe": "1" },
     body: JSON.stringify([{ household: CODE, kind: "food", id: "evil", data: {}, deleted: false, client_updated: 1, device: "x" }]) });
-  assert.strictEqual(w.status, 403);
+  assert.strictEqual(w.status, 401, "row-level security refuses it (anon role: 401)");
+  assert.deepStrictEqual(await w.json(), { code: "42501", details: null, hint: null, message: 'new row violates row-level security policy for table "chalk_sync"' });
   assert.strictEqual(SERVER.all(CODE).length, before);
 });
 
@@ -777,6 +1011,51 @@ t("JWT keys also send Authorization; a bad key reads plainly", async () => {
   P.M.cloud.leave();
 });
 
+t("a blocked CORS check (preflight) reads plainly and never leaves the card on Syncing…", async () => {
+  SERVER.preflightFail = true;
+  A.M.foods.add({ name: "Preflight food" });
+  const r = await A.sync();
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.error, "Couldn't reach the cloud. We'll try again soon.", "online but no answer: not blamed on their connection");
+  const s = A.M.cloud.status();
+  assert.strictEqual(s.busy, false, "not stuck on Syncing…");
+  assert.ok(s.pending >= 1, "the change waits");
+  assert.ok(foodNames(A).includes("Preflight food"), "kept on the phone");
+  /* joining fails plainly too, and says what to do */
+  const P = phone("preflight-join", { S: { profile: "kat", active: null } });
+  const j = await P.M.cloud.join(CODE);
+  assert.strictEqual(j.ok, false);
+  assert.strictEqual(j.error, "Couldn't reach the cloud. Try again in a minute.");
+  assert.strictEqual(P.M.cloud.status().on, false); assert.strictEqual(P.M.cloud.status().busy, false);
+  /* the check passes again: the next sync sends it */
+  SERVER.preflightFail = false;
+  assert.ok((await A.sync()).ok);
+  assert.ok(SERVER.all(CODE).some(x => /Preflight food/.test(x.data)));
+  assert.strictEqual(A.M.cloud.status().lastError, "");
+});
+
+t("a secret key is never used, and the Anthropic key never leaves the phone", async () => {
+  const P = phone("secret", { key: "sb_secret_abcdefghijklmnopqrstuvwxyz0123", S: { profile: "kat", active: null } });
+  assert.strictEqual(P.M.cloud.configured(), false, "sync stays off with a secret key");
+  assert.match((await P.M.cloud.join(CODE)).error, /isn't set up/);
+  assert.strictEqual(P.M.cloud.create(), null);
+  assert.strictEqual(P.reqs.length, 0, "no request with it");
+  /* the Claude key lives in its own localStorage entry: not in sync, not in the export */
+  const AI = "sk-ant-api03-SECRETsecretSECRET0123456789-abcdefABCDEF_xyz";
+  const Q = phone("aikey", { S: { profile: "kat", active: null }, train: trainState("kat", ["q1"]) });
+  Q.store.set("chalk.ai.key", AI);
+  Q.M.foods.add({ name: "Greek yogurt 2%" });
+  assert.ok((await Q.M.cloud.join(CODE)).ok);
+  assert.ok(JSON.stringify(Q.M.export()).indexOf(AI) < 0, "not in M.export()");
+  /* even pasted into a food name by mistake, it isn't sent */
+  Q.M.foods.add({ name: "Oops " + AI });
+  assert.ok((await Q.sync()).ok);
+  const seen = JSON.stringify(Q.reqs) + JSON.stringify(SERVER.log) + JSON.stringify(SERVER.all(CODE));
+  assert.ok(seen.indexOf("sk-ant-") < 0 && seen.indexOf(AI) < 0, "no request and no cloud row holds the key");
+  assert.ok(SERVER.all(CODE).some(x => x.kind === "food" && /"Oops /.test(x.data)), "the food itself went up");
+  Q.M.cloud.leave();
+});
+
 t("Erase everything (M.reset) leaves the household and keeps the cloud copy", async () => {
   const P = phone("wiper", { S: { profile: "kat", active: null } });
   assert.ok((await P.M.cloud.join(CODE)).ok);
@@ -1016,20 +1295,69 @@ t("the SQL file sets the table up safely (BES-09)", () => {
   assert.ok(/grant select, insert, update on table public\.chalk_sync to anon;/.test(flat), "grants");
 });
 
+t("the mock answers like Supabase + PostgREST for this table (so green here means the real thing works)", async () => {
+  const U = URLBASE + "/rest/v1/chalk_sync", HH = "MQCKCHECKAAAAAAAAAAA";
+  const hdr = x => Object.assign({ apikey: KEY, "x-household": HH, "x-test-probe": "1" }, x || {});
+  const post = (rows, x) => fetch(U + "?on_conflict=household,kind,id", { method: "POST", headers: hdr(Object.assign({ "content-type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }, x)), body: JSON.stringify(rows) });
+  const row = (id, extra) => Object.assign({ household: HH, kind: "food", id, data: { name: id }, deleted: false, client_updated: 1, device: "t" }, extra || {});
+  const err = async (res, status, code) => {
+    assert.strictEqual(res.status, status, code);
+    const j = await res.json();
+    assert.deepStrictEqual(Object.keys(j).sort(), ["code", "details", "hint", "message"], "PostgREST error shape");
+    assert.strictEqual(j.code, code); return j;
+  };
+  /* the gateway: apikey required; a publishable key is not a JWT */
+  let r = await fetch(U + "?select=id", { headers: { "x-household": HH } });
+  assert.strictEqual(r.status, 401); assert.deepStrictEqual(await r.json(), { message: "No API key found in request", hint: "No `apikey` request header or url param was found." });
+  r = await fetch(U + "?select=id", { headers: { apikey: "nope", "x-household": HH } });
+  assert.strictEqual(r.status, 401); assert.strictEqual((await r.json()).message, "Invalid API key");
+  await err(await fetch(U + "?select=id", { headers: hdr({ Authorization: "Bearer " + KEY }) }), 401, "PGRST301");
+  /* upsert: one server time per request, stamped again on update, only the sent columns change */
+  assert.strictEqual((await post([row("a"), row("b")])).status, 201);
+  const a1 = SERVER.get(HH, "food", "a");
+  assert.strictEqual(a1.updated_at, SERVER.get(HH, "food", "b").updated_at, "one now() per request");
+  assert.strictEqual((await post([row("a", { data: { name: "a2" } })])).status, 201);
+  assert.ok(tsVal(SERVER.get(HH, "food", "a").updated_at) > tsVal(a1.updated_at), "an update is stamped again (trigger)");
+  /* the table's checks and types, in PostgREST's error shape; a failed request writes nothing */
+  await err(await post([row("c", { kind: "nope" })]), 400, "23514");
+  await err(await post([row("c", { client_updated: 1.5 })]), 400, "22P02");
+  await err(await post([row("c", { data: null })]), 400, "23502");
+  await err(await post([row("c", { data: { name: "nul\u0000" } })]), 400, "22P05");
+  await err(await post([row("c"), { household: HH, kind: "food", id: "d" }]), 400, "PGRST102");
+  await err(await post([Object.assign(row("c"), { color: "red" })]), 400, "PGRST204");
+  await err(await post([row("c", { device: "x".repeat(65) })]), 400, "23514");
+  await err(await post([row("big", { data: { s: "x".repeat(3e6) } })]), 400, "23514");
+  await err(await post([row("c"), row("c")]), 400, "21000");
+  await err(await post([row("c", { household: "ABCDEFGHJKLMNPQRSTUV" })]), 401, "42501");
+  assert.ok(!SERVER.get(HH, "food", "c") && !SERVER.get("ABCDEFGHJKLMNPQRSTUV", "food", "c"), "nothing written");
+  /* no delete, ever */
+  await err(await fetch(U + "?id=eq.a", { method: "DELETE", headers: hdr() }), 401, "42501");
+  assert.ok(SERVER.get(HH, "food", "a"), "still there");
+  await err(await fetch(U + "?select=nope", { headers: hdr() }), 400, "42703");
+  await err(await fetch(U + "?select=id&updated_at=gt.yesterday", { headers: hdr() }), 400, "22007");
+  /* reads: own household only, limit / offset, Range, max rows 1000, Content-Range */
+  const many = Array.from({ length: 1200 }, (_, i) => row("m" + String(i).padStart(4, "0")));
+  for (let i = 0; i < many.length; i += 400) assert.strictEqual((await post(many.slice(i, i + 400))).status, 201);
+  r = await fetch(U + "?select=id&order=id.asc&limit=5000", { headers: hdr() });
+  assert.strictEqual((await r.json()).length, 1000, "max rows 1000");
+  r = await fetch(U + "?select=id&order=id.asc&limit=2&offset=3", { headers: hdr() });
+  assert.strictEqual(r.headers.get("content-range"), "3-4/*"); assert.deepStrictEqual((await r.json()).map(x => x.id), ["m0001", "m0002"]);
+  r = await fetch(U + "?select=id&order=id.asc", { headers: hdr({ "Range-Unit": "items", Range: "0-1" }) });
+  assert.deepStrictEqual((await r.json()).map(x => x.id), ["a", "b"]);
+  r = await fetch(U + "?select=id", { headers: hdr({ "x-household": "ABCDEFGHJKLMNPQRSTUV" }) });
+  assert.ok(!(await r.json()).some(x => /^m\d/.test(x.id)), "another household sees none of them");
+  r = await fetch(U + "?select=id", { headers: { apikey: KEY, "x-test-probe": "1" } });
+  assert.deepStrictEqual(await r.json(), [], "no header, no rows");
+  for (const k of [...SERVER.rows.keys()]) if (k.startsWith(HH + "|")) SERVER.rows.delete(k);
+});
+
 t("turn on checks the server stamps every write (BES-09)", async () => {
   const P = phone("bes09", {}); seedNick(P);
-  /* a table with updated_at only as a column default: an update keeps the old time */
-  SERVER.hook = (req, e, body) => {
-    if (req.method !== "POST" || !/"kind":"meta"/.test(body)) return null;
-    const hh = req.headers["x-household"], old = SERVER.get(hh, "meta", "household");
-    if (!old) return null;
-    const keep = { _us: old._us, updated_at: old.updated_at };
-    setTimeout(() => Object.assign(SERVER.get(hh, "meta", "household"), keep), 0);
-    return null;
-  };
+  /* a table with updated_at only as a column default (the trigger missing): an update keeps the old time */
+  SERVER.trigger = false;
   const code = P.M.cloud.create();
   const r = await P.sync();
-  SERVER.hook = null;
+  SERVER.trigger = true;
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.error, "The cloud isn't set up right yet. We'll try again.");
   assert.ok(!SERVER.all(code).some(x => x.kind === "food"), "nothing else went up");
@@ -1072,10 +1400,11 @@ t("Delete my cloud data, Change code, and the code stays out of URLs (SEC-03)", 
   assert.strictEqual(Object.keys(N.M.MS.foods).length, 3, "this phone keeps everything");
   assert.strictEqual((await K.sync()).ok, false, "the other phone stops");
   assert.strictEqual(K.M.cloud.status().on, false);
-  /* the household code never travelled in a URL, in any request of this whole run */
+  /* the household code never travelled in a URL, in any request the app made in this whole run
+     (the test's own raw probes, marked x-test-probe, put one there on purpose) */
   const codes = new Set(SERVER.log.map(e => e.hh).filter(h => CODE_RE.test(h)));
   assert.ok(codes.size > 3);
-  SERVER.log.forEach(e => codes.forEach(h => assert.ok(e.query.indexOf(h) < 0, "code in a URL: " + e.query)));
+  SERVER.log.filter(e => !e.probe).forEach(e => codes.forEach(h => assert.ok(e.query.indexOf(h) < 0, "code in a URL: " + e.query)));
 });
 
 t("smaller fixes: field merge, use counts, clock skew, Retry-After, duplicates on first join (P3)", async () => {
@@ -1091,6 +1420,16 @@ t("smaller fixes: field merge, use counts, clock skew, Retry-After, duplicates o
   N.offline(false); K.offline(false);
   await N.sync(); await K.sync(); await N.sync();
   [N, K].forEach(P => { assert.strictEqual(P.M.MS.foods[fid].name, "Zucchini (Nick renamed)"); assert.strictEqual(P.M.MS.foods[fid].per.cal, 30); });
+  /* BES-10: two pushes that race (neither phone pulled the other's first) still keep both edits */
+  const mid = Object.values(N.M.MS.meals).find(m => m.name === "Chicken toast").id;
+  N.M.meals.update(mid, { name: "Chicken toast (big)" });
+  K.M.meals.update(mid, { desc: "Kat: use the thin bread." });
+  assert.ok((await N.M.cloud._.cycle({ reason: "manual", manual: true, pull: false })).ok);
+  assert.ok((await K.M.cloud._.cycle({ reason: "manual", manual: true, pull: false })).ok);
+  assert.strictEqual(JSON.parse(SERVER.get(code, "meal", mid).data).name, "Chicken toast", "(her push overwrote his in the cloud)");
+  await N.sync(); await K.sync(); await N.sync();
+  [N, K].forEach(P => { const m = P.M.MS.meals[mid]; assert.strictEqual(m.name, "Chicken toast (big)", P.name); assert.strictEqual(m.desc, "Kat: use the thin bread.", P.name); });
+  assert.strictEqual(JSON.parse(SERVER.get(code, "meal", mid).data).name, "Chicken toast (big)");
   /* BES-12: logging a food isn't an edit: it isn't sent, and it doesn't bring back a food the other phone deleted */
   const dup = N.M.foods.add({ name: "Old duplicate food", per: { cal: 50 } });
   await N.sync(); await K.sync();
@@ -1108,16 +1447,22 @@ t("smaller fixes: field merge, use counts, clock skew, Retry-After, duplicates o
   K.M.now = () => real() + 3600e3;
   K.offline(true);
   K.M.foods.update(fid, { name: "Zucchini (Kat, earlier)" });
-  await sleep(20);
+  await sleep(1500);   /* the server's Date header has whole seconds: edits under ~1 s apart are a tie */
   N.M.foods.update(fid, { name: "Zucchini (Nick, later)" });
   await N.sync(); K.offline(false); await K.sync(); await N.sync();
   assert.strictEqual(N.M.MS.foods[fid].name, "Zucchini (Nick, later)", "the later real edit wins on Nick's phone");
   assert.strictEqual(K.M.MS.foods[fid].name, "Zucchini (Nick, later)", "and on Kat's");
   K.M.now = () => Date.now();
   /* BES-13: Retry-After is respected; background syncs wait, Sync now doesn't */
+  /* a browser reads Retry-After only when the server exposes it (Supabase's list doesn't) */
   SERVER.failNext = 429; SERVER.retryAfter = 120;
-  const r = await N.sync();
-  SERVER.retryAfter = 0;
+  let r = await N.sync();
+  assert.strictEqual(r.error, "The cloud is busy. We'll try again soon.");
+  assert.ok(N.M.cloud._.state().retryAt >= Date.now() + 55e3, "hidden Retry-After: a 429 still waits at least a minute");
+  assert.ok((await N.sync()).ok);
+  SERVER.failNext = 429; SERVER.exposeRetryAfter = true;
+  r = await N.sync();
+  SERVER.retryAfter = 0; SERVER.exposeRetryAfter = false;
   assert.strictEqual(r.error, "The cloud is busy. We'll try again soon.");
   assert.ok(N.M.cloud._.state().retryAt >= Date.now() + 110e3, "waits as long as the server asked");
   const n = N.reqs.length;

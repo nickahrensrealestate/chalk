@@ -599,7 +599,8 @@ window.M = window.M || {};
     slow: "Open Food Facts is slow right now. Try again in a minute, or scan the label.",
     notFound: "This barcode isn't in Open Food Facts yet. Scan the label to add it.",
     store: "This is a store price sticker. Scan the label or type it in once. After that, this sticker finds it.",
-    noNutrition: "Open Food Facts knows this item but has no nutrition numbers for it. Scan the label to add them."
+    noNutrition: "Open Food Facts knows this item but has no nutrition numbers for it. Scan the label to add them.",
+    noMacros: "Open Food Facts has calories but no protein, carbs or fat for this. Check them against the label."
   };
   /* GET from Open Food Facts. When OFF is overloaded it answers 503 without CORS headers, which
      the browser reports as a network error. So while the phone is online, a failed request or a
@@ -789,11 +790,14 @@ window.M = window.M || {};
     const pg = packageGrams(product.quantity);
     if (pg && per100g && pg <= 1000 && !(serving.g > 0 && (Math.abs(pg - serving.g) <= 5 || pg > serving.g * 8))) alts.push({ label: "1 package", g: r1(pg) });
     const t = now();
-    return {
+    const food = {
       id: code ? "off_" + code : uid(), name, brand, barcode: code, source: "off",
       serving, per, per100g, alts, quantity: tidyText(product.quantity),
       createdAt: t, updatedAt: t, uses: 0, lastUsed: 0, pid: null
     };
+    /* BEF-11: calories but no protein, carbs or fat means Open Food Facts is missing numbers */
+    if (num(per.cal) >= 20 && num(per.p) + num(per.c) + num(per.f) < 1) food.warning = OFF_MSG.noMacros;
+    return food;
   };
 
   function localByCode(code) {
@@ -835,7 +839,11 @@ window.M = window.M || {};
     if (rule) {
       let slug = rule[1];
       if (slug === "ground_beef") { const m = /\b(\d{2})\s*(%|\/)/.exec(name); const lean = m ? num(m[1]) : 80; slug = lean >= 93 ? "ground_beef_93" : lean >= 90 ? "ground_beef_90" : lean >= 85 ? "ground_beef_85" : "ground_beef_80"; }
-      const hit = foods.find(f => f.id === "g_" + slug);
+      /* ids m-data merged away (the plain chicken breast → the Kirkland breast) resolve
+         through M.DB.alias; the chicken breast also by its alwaysRaw flag */
+      const id = "g_" + slug, al = M.DB && isObj(M.DB.alias) ? M.DB.alias[id] : null;
+      const hit = foods.find(f => f.id === id) || (isObj(al) && al.id ? foods.find(f => f.id === al.id) : null) ||
+        (slug === "chicken_breast" ? foods.find(f => f === chickenBreast()) : null);
       if (hit) return hit;
     }
     const have = new Set(wordsOf(name));
@@ -871,6 +879,9 @@ window.M = window.M || {};
   function saveFound(f) {
     try {
       if (!f.cook) { const c = cookFor(f); if (c) f.cook = c; }
+      /* Nick's rule: a scanned raw chicken breast (their Kirkland pack) is weighed raw, like the
+         built-in breast (alwaysRaw: the servings screen, meals and recents read it raw) */
+      if (isObj(f.cook) && f.cook.word === "raw" && /\bchicken\b/i.test(f.name) && /\bbreasts?\b/i.test(f.name)) f.alwaysRaw = true;
       if (!M.foods || typeof M.foods.add !== "function") return f;
       const have = f.barcode ? localByCode(f.barcode) : null;
       if (have) return have;
@@ -916,7 +927,10 @@ window.M = window.M || {};
         const f = M.food.fromOFF(p);
         if (f) {
           if (!f.barcode) { f.barcode = v; f.id = "off_" + v; }
-          return (M.food.lastLookup = { status: "found", code: raw, food: saveFound(f), saved: false });
+          const warning = f.warning; delete f.warning;
+          const out = { status: "found", code: raw, food: saveFound(f), saved: false };
+          if (warning) out.warning = warning;
+          return (M.food.lastLookup = out);
         }
         if (!noNut) { const brand = offBrand(p); noNut = { name: offName(p, brand), brand, barcode: digitsOf(p.code) || v, quantity: tidyText(p.quantity) }; }
       }
@@ -950,7 +964,10 @@ window.M = window.M || {};
         if (seen.has(k)) return;
         seen.add(k); out.push(f);
       });
-      return out;
+      /* BEF-11: entries missing their macros go last; the flag isn't kept on a saved food */
+      const good = out.filter(f => !f.warning), weak = out.filter(f => f.warning);
+      weak.forEach(f => { delete f.warning; });
+      return good.concat(weak);
     });
   };
 
@@ -1762,6 +1779,12 @@ window.M = window.M || {};
   /* why the reader couldn't load, in words that fit this phone right now */
   const ocrLoadMsg = () => (isOffline() ? OCR_MSG.offline : M.ai.ready() ? OCR_MSG.load : OCR_MSG.loadNoAI);
   const tessReady = () => !!(win().Tesseract && typeof win().Tesseract.createWorker === "function");
+  /* Nick's rule: chicken breast is always Kirkland organic, weighed raw (one breast ≈ 175 g raw).
+     Every Claude prompt (label, photo, describe, suggest) says so. */
+  const CHICKEN_NOTE = "Chicken breast is always Kirkland organic chicken breast (Costco). Give chicken breast in RAW (uncooked) grams and say raw in its serving, like \"1 breast (175 g raw)\": one breast is about 175 g raw.";
+  /* ...and the three products Nick named: these win over any generic entry. */
+  const PRODUCT_NAMES = "Daisy 2% cottage cheese; Smucker's Natural strawberry jam (they also call it jelly); Hillshire Farm oven roasted turkey breast, thin lunch-meat slices (just the slices, no sandwich)";
+  const FOOD_NOTE = CHICKEN_NOTE + " They also buy: " + PRODUCT_NAMES + ". When one of these fits, use it with the numbers on its package.";
   const LABEL_PROMPT = "This photo shows a Nutrition Facts label from a food package. Copy the numbers exactly as printed. Do not estimate, round or convert.\n" +
     "Reply with ONLY this JSON, no prose, no code fences:\n" +
     "{\"found\": true, \"name\": string (product name if printed on the photo, else \"\"), \"brand\": string (\"\" if not shown), " +
@@ -1774,7 +1797,8 @@ window.M = window.M || {};
     "cal = Calories; f = Total Fat grams; sodium_mg = Sodium in milligrams; c = Total Carbohydrate grams; fiber = Dietary Fiber grams; " +
     "sugar = Total Sugars grams (not Added Sugars); p = Protein grams. \"<1g\" or \"less than 1g\" = 0.5. Use 0 for anything not printed. " +
     "If the label only lists values per 100 g or 100 mL, copy those and set \"basis\" to \"100g\". " +
-    "If no nutrition label is visible, reply {\"found\": false}.";
+    "If no nutrition label is visible, reply {\"found\": false}.\n" +
+    "If the package is one of the foods they buy (Kirkland organic chicken breast; " + PRODUCT_NAMES + "), use that name. Chicken breast labels are for raw meat (one breast is about 175 g raw). Still copy only the numbers printed.";
 
   /* One reader (a Tesseract worker) is kept while labels are being read, so a second photo
      doesn't download and start it again. M.food.label.release() closes it (when the label
@@ -1927,11 +1951,11 @@ window.M = window.M || {};
   const ITEMS_SHAPE = "{\"items\":[{\"name\": string, \"servingLabel\": string like \"1 cup (240 g)\" or \"4 oz (113 g)\", \"g\": number (grams of this portion) or null, " +
     "\"per\": {\"cal\": number, \"p\": number, \"c\": number, \"f\": number, \"fiber\": number, \"sugar\": number, \"sodium_mg\": number}}], \"note\": string (one short plain sentence about how sure you are)}";
   const ITEMS_RULES = "Rules: \"per\" is for the WHOLE portion in servingLabel (one line per food). Calories in kcal; p c f fiber sugar in grams; sodium_mg in milligrams. " +
-    "Use realistic US home portions. Numbers only, no units, no ranges. Reply with ONLY the JSON, no prose, no code fences.";
+    "Use realistic US home portions. Numbers only, no units, no ranges. " + FOOD_NOTE + " Reply with ONLY the JSON, no prose, no code fences.";
   const slotHint = slot => (slot ? " This is for " + slot + "." : "");
   function itemsFromAI(j, source) {
     const arr = isObj(j) && Array.isArray(j.items) ? j.items : Array.isArray(j) ? j : [];
-    const items = arr.filter(isObj).map(it => itemFromAI(it, source)).filter(it => it.name);
+    const items = arr.filter(isObj).map(it => snapToOwn(itemFromAI(it, source))).filter(it => it.name);
     return { items, note: isObj(j) && j.note ? cap(j.note, 240) : "" };
   }
 
@@ -1971,7 +1995,9 @@ window.M = window.M || {};
     const raw = s;
     let qty = null, unit = null;
     s = s.replace(/(\d)\s*-\s*(?=(oz|ounce|g|gram|lb|cup|tbsp|tsp|ml)\b)/i, "$1 ");          /* "5-oz" → "5 oz" */
-    const m = /^(\d+\s*[½¼¾⅓⅔⅛]|[½¼¾⅓⅔⅛])\s*/.exec(s)
+    /* "2% cottage cheese" and "80/20 ground beef" name the food; they aren't amounts */
+    const partOfName = /^\d+(?:[.,]\d+)?\s*%/.test(s) || /^\d{2,}\s*\/\s*\d{1,2}\b/.test(s);
+    const m = partOfName ? null : /^(\d+\s*[½¼¾⅓⅔⅛]|[½¼¾⅓⅔⅛])\s*/.exec(s)
       || /^(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?|a\s+half|half\s+an?|half|a\s+quarter|quarter|a\s+couple\s+of|a\s+couple|couple\s+of|couple|a\s+few|few|a\s+dozen|dozen|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|an|a)\b\s*/i.exec(s);
     if (m) {
       const q = lc(m[1]).replace(/\s+/g, " ");
@@ -2065,7 +2091,18 @@ window.M = window.M || {};
       if (r) return r;
       if (unitMatches(u, svUnit)) return own(q.qty / svQty);
     }
-    if (unitMatches(u, svUnit)) return own(q.qty / svQty);               /* "1.5 cups rice" on a "1 cup" food */
+    if (unitMatches(u, svUnit)) {                                         /* "1.5 cups rice" on a "1 cup" food */
+      /* When the food's own size isn't one unit, a size that reads better: "1 cup" on a "1/2 cup"
+         food → 1 × 1 cup (not 2 × 1/2 cup); "4 slices" on a "6 slices" food → 4 × 1 slice */
+      if (Math.abs(svQty - 1) > 1e-6 && Math.abs(svQty - q.qty) > 1e-6) {
+        const sized = k => alts.find(a => { const p = M.parseServing ? M.parseServing(a.label) : null; return p && unitMatches(u, p.unit) && Math.abs((p.qty || 1) - k) < 1e-6; });
+        const same = !COUNTISH.test(unitBase(u)) && sized(q.qty);
+        if (same) { const r = altRow(same, 1); if (r) return r; }
+        const one = sized(1);
+        if (one) { const r = altRow(one, q.qty); if (r) return r; }
+      }
+      return own(q.qty / svQty);
+    }
     const alt = alts.find(a => { const p = M.parseServing ? M.parseServing(a.label) : null; return p && unitMatches(u, p.unit); });
     if (alt) { const p = M.parseServing(alt.label); const r = altRow(alt, q.qty / (p.qty || 1)); if (r) return r; }
     if (GRAMS_PER[u]) { const r = exact(q.qty * GRAMS_PER[u], q.qty, u); if (r) return r; }
@@ -2250,17 +2287,122 @@ window.M = window.M || {};
      scanned meat / rice from before cook info existed borrows it here (cookFor). */
   const SAYS_RAW = /\b(raw|uncooked|dry)\b/i;
   const SAYS_COOKED = /\b(cooked|grilled|baked|roasted|boiled|steamed|fried|sauteed|sautéed|seared|broiled|poached|smoked|leftovers?)\b/i;
-  function plateView(food, part) {
+  /* rawFirst (chicken breast, Nick's rule): the grams are raw unless the words say "cooked" */
+  const saysCookedWord = part => /\bcooked\b/i.test(part) && !/\b(raw|uncooked)\b/i.test(part);
+  function plateView(food, part, rawFirst) {
     let c = null;
     try { c = M.cook && typeof M.cook.of === "function" ? M.cook.of(food) : null; } catch (e) { c = null; }
     if (!c && M.cook && typeof M.cook.of === "function") { const cf = cookFor(food); if (cf) { food = Object.assign({}, food, { cook: cf }); c = cf; } }
     if (!c) return { food, extra: null };
     const cook = { y: num(c.y), word: c.word === "dry" ? "dry" : "raw" };
-    if (SAYS_RAW.test(part) && !SAYS_COOKED.test(part)) return { food, extra: { state: "raw", cook } };
+    if ((SAYS_RAW.test(part) && !SAYS_COOKED.test(part)) || (rawFirst && !saysCookedWord(part))) return { food, extra: { state: "raw", cook } };
     let v = null;
     try { v = typeof M.cook.view === "function" ? M.cook.view(food, "cooked") : null; } catch (e) { v = null; }
     if (!v || v === food) return { food, extra: null };
     return { food: v, extra: { state: "cooked", cook } };
+  }
+  /* Nick's rule: chicken breast is always the Kirkland organic breast, and the grams they type
+     are RAW grams; one breast is about 175 g raw. m-data marks that food `alwaysRaw` (before
+     that: the Kirkland food, or the plain breast id through M.DB.alias). "chicken", "chicken
+     breast", "2 chicken breasts", "200 g chicken" → that food, raw. Typed grams are cooked only
+     when the words say "cooked". Their own saved chicken breast food still wins. */
+  const BREAST_G = 175;
+  const BREAST_IDS = /^g_(chicken_breast(_raw|_cooked)?|kirkland_organic_chicken)$/;
+  function chickenBreast() {
+    const foods = builtInFoods();
+    const byId = id => foods.find(f => f.id === id) || null;
+    const flagged = foods.find(f => f.alwaysRaw === true && /\bchicken\b/i.test(f.name) && /\bbreast/i.test(f.name));
+    if (flagged) return flagged;
+    let a = null;
+    try { a = M.DB && M.DB.alias ? M.DB.alias.g_chicken_breast : null; } catch (e) { a = null; }
+    return (isObj(a) && a.id && byId(a.id)) || byId("g_kirkland_organic_chicken") || byId("g_chicken_breast") || null;
+  }
+  const builtIn = f => !!(f && (f.source === "generic" || /^g_/.test(String(f.id || ""))));
+  const isBreastFood = f => !!(f && builtIn(f) && (BREAST_IDS.test(String(f.id || "")) || (f.alwaysRaw === true && /\bchicken\b/i.test(f.name))));
+  const BREAST_WORD = /^(chicken|breast|kirkland|organic|boneless|skinless|frozen|fresh|plain|raw|uncooked|cooked|grilled|baked|roasted|seared|leftover)$/;
+  const saysChicken = words => { const w = toks(words); return w.indexOf("chicken") >= 0 && w.every(x => BREAST_WORD.test(x)); };
+  /* the breast's own "1 breast" serving (m-data), else 1 breast = 175 g */
+  function breastServing(food) {
+    const sv = isObj(food.serving) ? food.serving : null;
+    if (sv && /breast/i.test(String(sv.unit)) && num(sv.g) > 0) return { g: num(sv.g) / (num(sv.qty, 1) || 1) };
+    const alt = (Array.isArray(food.alts) ? food.alts : []).find(a => a && /^1\s+breast\b/i.test(String(a.label)) && num(a.g) > 0);
+    return { g: alt ? num(alt.g) : BREAST_G };
+  }
+  /* → a raw describe item for the breast, or null to let the cooked view handle it
+     (only typed weights with the word "cooked") */
+  function breastItem(food, q, part) {
+    const weight = !!q.unit && (q.unit === "g" || q.unit === "oz" || q.unit === "lb");
+    if (weight && saysCookedWord(part)) return null;
+    let c = null;
+    try { c = M.cook && typeof M.cook.of === "function" ? M.cook.of(food) : null; } catch (e) { c = null; }
+    if (!c && isObj(food.cook)) c = food.cook;
+    let sc;
+    if (!q.unit || /^(piece|serving|large|medium|small)$/.test(q.unit)) {
+      const one = breastServing(food).g, n = q.explicitQty ? q.qty : 1;
+      const r = scaleToQuantity(food, { qty: one, unit: "g", explicitQty: true, words: "" });
+      sc = { servings: n, servingLabel: fmtLabel(1, "breast", r0(one)), g: one * n, per: r.per };
+    } else sc = scaleToQuantity(food, q);
+    const per = M.foodMath ? M.foodMath.scale(sc.per || food.per, 1) : (sc.per || food.per);
+    const it = { name: food.name, brand: food.brand || "", servings: Math.max(0.05, r2(num(sc.servings, 1))), servingLabel: sc.servingLabel, g: sc.g != null ? r1(sc.g) : null, per, foodId: food.id, source: "generic", text: part };
+    if (c && num(c.y) > 0) Object.assign(it, { state: "raw", cook: { y: num(c.y), word: "raw" } });
+    return it;
+  }
+  /* Nick's named products: the words they use → the product they buy. Found by name / brand /
+     `staple` (m-data may still rename ids), else the plain built-in food. Their own saved food
+     with that word in its name still wins. "turkey" / "4 slices turkey" / "deli turkey" /
+     "lunch meat" → Hillshire Farm slices; "jam" / "jelly" → Smucker's Natural strawberry;
+     "cottage cheese" → Daisy 2%. */
+  const nameBrand = f => f.name + " " + (f.brand || "");
+  const NAMED = [
+    { word: /\b(turkey|lunch ?meat)\b/i,
+      say: w => (w.indexOf("turkey") >= 0 || w.indexOf("lunchmeat") >= 0 || (w.indexOf("lunch") >= 0 && w.indexOf("meat") >= 0)) &&
+        w.every(x => /^(turkey|slice|sliced|thin|thinly|shaved|deli|lunch|meat|lunchmeat|oven|roasted|hillshire|farm|ultra|breast)$/.test(x)) &&
+        (w.indexOf("breast") < 0 || w.some(x => /^(slice|sliced|thin|thinly|shaved|deli|lunch|hillshire)$/.test(x))),
+      find: fs => fs.find(f => /hillshire/i.test(nameBrand(f)) && /turkey/i.test(f.name)) || fs.find(f => f.staple === true && /\bturkey\b/i.test(f.name) && /slice|deli|lunch/i.test(f.name)) || fs.find(f => /^deli turkey/i.test(f.name)) },
+    { word: /\b(jam|jelly|preserves?)\b/i,
+      say: w => w.some(x => /^(jam|jelly|preserve)$/.test(x)) && w.every(x => /^(jam|jelly|preserve|strawberry|smucker|natural|fruit|spread)$/.test(x)),
+      find: fs => fs.find(f => /smucker/i.test(nameBrand(f))) || fs.find(f => f.staple === true && /\b(jam|jelly|preserves|fruit spread)\b/i.test(f.name)) || fs.find(f => /^(jam|jelly)\b/i.test(f.name)) },
+    { word: /\bcottage\b/i,
+      say: w => w.indexOf("cottage") >= 0 && w.every(x => /^(cottage|cheese|daisy|2%|2|low|fat|lowfat|reduced|small|curd)$/.test(x)),
+      find: fs => fs.find(f => /daisy/i.test(nameBrand(f)) && /cottage/i.test(f.name)) || fs.find(f => f.staple === true && /cottage cheese/i.test(f.name)) || fs.find(f => /^cottage cheese,? 2%/i.test(f.name)) }
+  ];
+  /* → {food, word} for the words they said, or null */
+  function namedProduct(words) {
+    const w = toks(words);
+    if (!w.length) return null;
+    for (const p of NAMED) {
+      if (!p.say(w)) continue;
+      const food = p.find(builtInFoods());
+      return food ? { food, word: p.word } : null;
+    }
+    return null;
+  }
+  /* Claude's answers follow the same rule: an item that is chicken breast or one of their named
+     products takes the app's own numbers for its grams (the Kirkland breast raw, unless its words
+     say "cooked"). Anything else, or an item without grams, stays as Claude gave it. */
+  function snapToOwn(it) {
+    try {
+      if (!isObj(it) || !(num(it.g) > 0)) return it;
+      const words = String(it.name || "");
+      let food = null, chicken = false;
+      if (saysChicken(words)) { food = chickenBreast(); chicken = !!food; }
+      else { const np = namedProduct(words); if (np) food = np.food; }
+      if (!food || !isObj(food.per100g) || !(num(food.per100g.cal) > 0) || !M.foodMath || typeof M.foodMath.fromPer100 !== "function") return it;
+      let p100 = food.per100g, extra = null;
+      if (chicken) {
+        let c = null;
+        try { c = M.cook && typeof M.cook.of === "function" ? M.cook.of(food) : null; } catch (e) { c = null; }
+        if (!c && isObj(food.cook)) c = food.cook;
+        if (c && num(c.y) > 0) {
+          const cooked = saysCookedWord(words + " " + String(it.servingLabel || "")) && isObj(c.per100gCooked);
+          if (cooked) p100 = c.per100gCooked;
+          extra = { state: cooked ? "cooked" : "raw", cook: { y: num(c.y), word: "raw" } };
+        }
+      }
+      const per = M.foodMath.fromPer100(p100, num(it.g));
+      if (!isObj(per)) return it;
+      return Object.assign({}, it, { name: food.name, brand: food.brand || "", per, foodId: food.id }, extra || {});
+    } catch (e) { return it; }
   }
   M.food.describeLocal = function (text) {
     const items = [], unmatched = [];
@@ -2289,8 +2431,19 @@ window.M = window.M || {};
       if (!food && words) food = M.food.matchLocal(part);
       /* toast is bread ("2 slices of toast", "sourdough toast") */
       if (!food && /\btoast\b/i.test(words || part)) food = M.food.matchLocal(String(words || part).replace(/\btoast\b/gi, "bread"));
+      /* chicken breast = the Kirkland breast, raw (Nick's rule) */
+      if (saysChicken(words || part) && (!food || builtIn(food) || !/\bbreast/i.test(food.name))) { const b = chickenBreast(); if (b) food = b; }
+      if (food && isBreastFood(food)) {
+        const b = chickenBreast() || food;
+        const it = breastItem(b, q, part);
+        if (it) { items.push(it); return; }
+        food = b;
+      }
+      /* turkey slices, jam / jelly, cottage cheese = the products they buy (Nick's rule) */
+      const np = namedProduct(words || part);
+      if (np && (!food || builtIn(food) || !np.word.test(nameBrand(food)))) food = np.food;
       if (!food) { unmatched.push(part); return; }
-      const pv = plateView(food, part);
+      const pv = plateView(food, part, /\bchicken\b/i.test(food.name) && /\bbreast/i.test(food.name) && saysChicken(words || part));
       const sc = scaleToQuantity(pv.food, q);
       const per = M.foodMath ? M.foodMath.scale(sc.per || pv.food.per, 1) : (sc.per || pv.food.per);
       const servings = Math.max(0.05, r2(num(sc.servings, 1)));
@@ -2360,7 +2513,7 @@ window.M = window.M || {};
       const prompt = "Estimate the nutrition of this food: \"" + s.replace(/"/g, "'").slice(0, 300) + "\". Use its typical single serving in the US (the label serving for packaged foods, a normal portion otherwise).\n" +
         "Reply with ONLY this JSON, no prose, no code fences:\n{\"name\": string (clean name), \"brand\": string (\"\" if generic), \"serving\": {\"qty\": number, \"unit\": string, \"g\": number or null}, " +
         "\"per\": {\"cal\": number, \"p\": number, \"c\": number, \"f\": number, \"fiber\": number, \"sugar\": number, \"sodium_mg\": number}, \"alts\": [{\"label\": string like \"1 oz\", \"g\": number}]}\n" +
-        "per is for ONE serving. Calories kcal; p c f fiber sugar grams; sodium_mg milligrams. Numbers only. If this is not a food, reply {\"name\":\"\"}.";
+        "per is for ONE serving. Calories kcal; p c f fiber sugar grams; sodium_mg milligrams. Numbers only. If this is not a food, reply {\"name\":\"\"}.\n" + FOOD_NOTE;
       const j = await M.ai.json(prompt, { tier: "quick" });
       if (!isObj(j) || !String(j.name || "").trim()) return null;
       const per = perFromAI(j.per);
@@ -2552,13 +2705,20 @@ window.M = window.M || {};
     try { (M.recents ? M.recents(M.pid ? M.pid() : null, 40) : []).forEach(r => { if (!r.mealId) add(r.name, r.brand, r.servingLabel); }); } catch (e) {}
     return lines;
   }
+  /* What Nick and Katerina actually buy, and what they never eat (Claude's ideas follow this). */
+  const STAPLES = "Kirkland organic chicken breast (Costco), pork tenderloin (King Soopers), Dave's Killer Bread, cod, shrimp, scallops, Greek yogurt 2%, Daisy 2% cottage cheese, " +
+    "Hillshire Farm oven roasted turkey slices, Smucker's Natural strawberry jam, quinoa, zucchini, broccoli, carrots, Roma tomatoes, white onion, sweet onion, bell pepper, " +
+    "asparagus, cucumber, corn on the cob, banana, blueberries, strawberries, lemon, lime, agave syrup";
+  const NEVER_EAT = "other cheese (Daisy cottage cheese is fine), oats, cereal, protein shakes, protein bars, protein powder, or restaurant food";
   const SUGGEST_PROMPT = (slot, rem, prefs, foods) =>
     "Suggest 3 " + (slot ? slot.toLowerCase() + " " : "") + "meals for someone in Denver who shops at King Soopers and Costco.\n" +
     "They have about " + r0(rem.cal) + " kcal, " + r0(rem.p) + " g protein, " + r0(rem.c) + " g carbs and " + r0(rem.f) + " g fat left today. " +
     "Each meal must be high in protein, use a good share of the protein that's left, and stay under the calories left." +
     (prefs && prefs.noCook ? " No cooking." : "") + (prefs && prefs.lowCarb ? " Keep carbs low." : "") + (prefs && prefs.quick ? " Under 10 minutes." : "") + "\n" +
     (foods.length ? "Build the meals mostly from foods they already eat (their pantry):\n" + foods.join("\n") + "\nYou may add simple King Soopers or Costco staples.\n" : "Use simple whole foods from King Soopers or Costco.\n") +
-    "Skip cereal, oats, cheese, protein shakes, protein bars and restaurant food. Name and describe each meal in plain words a middle-schooler understands.\n" +
+    "Foods they buy (use these most): " + STAPLES + ". Olive oil, garlic, spices, soy sauce and rice are fine as small add-ons.\n" +
+    "They never eat: " + NEVER_EAT + ". Use agave, not honey.\n" + FOOD_NOTE + "\n" +
+    "Name and describe each meal in plain words a middle-schooler understands.\n" +
     "Reply with ONLY this JSON, no prose, no code fences:\n{\"suggestions\":[{\"name\": string, \"desc\": string (one plain sentence), \"store\": \"King Soopers\" or \"Costco\" or \"Either\", \"prepMin\": number, " +
     "\"items\":[{\"name\": string, \"servingLabel\": string like \"6 oz (170 g)\", \"g\": number or null, \"per\": {\"cal\": number, \"p\": number, \"c\": number, \"f\": number, \"fiber\": number, \"sugar\": number, \"sodium_mg\": number}}]}]}\n" +
     "per is for that item's whole portion. Calories kcal; p c f fiber sugar grams; sodium_mg milligrams. Numbers only.";
@@ -2571,7 +2731,7 @@ window.M = window.M || {};
       const j = await M.ai.json(SUGGEST_PROMPT(opt.slot, remainingOf(opt), opt.prefs, pantry()), { tier: "quick", cache: false, signal: opt.signal });
       const arr = isObj(j) && Array.isArray(j.suggestions) ? j.suggestions : Array.isArray(j) ? j : [];
       return arr.filter(isObj).map(sg => {
-        const items = (Array.isArray(sg.items) ? sg.items : []).filter(isObj).map(it => itemFromAI(it, "ai"));
+        const items = (Array.isArray(sg.items) ? sg.items : []).filter(isObj).map(it => snapToOwn(itemFromAI(it, "ai")));
         if (!items.length || !String(sg.name || "").trim()) return null;
         return { id: "ai_" + uid(), name: cap(sg.name), desc: cap(sg.desc, 240), slot: opt.slot || "Any", store: /costco/i.test(sg.store) ? "Costco" : /soopers|kroger/i.test(sg.store) ? "King Soopers" : "Either", prepMin: r0(num(sg.prepMin)), items, per: sumPer(items), tags: ["high-protein"], source: "claude" };
       }).filter(Boolean).slice(0, 3);

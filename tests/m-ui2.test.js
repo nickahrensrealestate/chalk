@@ -624,6 +624,18 @@ t("CPY-09/UID-27 describe / meal rows show the whole amount ('2 large eggs (100 
   assert.strictEqual(wa({ servings: 2, servingLabel: "1 cup, chopped (160 g)" }), "2 cups, chopped (320 g)");
 });
 
+t("describe rows wrap only after a '·' (never 'P 13' / '· C 1' split across lines)", async () => {
+  reset();
+  click(q('#cta [data-m="add"]'));
+  click(q('[data-m="open-describe"]'));
+  $("m-desc").value = "2 eggs";
+  click(q('[data-m="describe-go"]'));
+  await sleep(30);
+  const t = q("#m-items .m-item .t").textContent.split(String.fromCharCode(160)).join("_");   /* no-break spaces shown as _ */
+  assert.ok(/^2 large eggs \(100 g\)_· P_\d+_· C_\d+_· F_\d+_· \d+_kcal$/.test(t), t);
+  M.ui.close();
+});
+
 t("UIF-21 Foods search matches item names; search box has no autocorrect; UIF-16 cleared after saving a meal", () => {
   reset();
   M.meals.add({ name: "Morning bowl", slot: "Breakfast", servingsMade: 1, items: [{ name: "Blueberries", servings: 1, servingLabel: "1 cup (148 g)", per: { cal: 84, p: 1, c: 21, f: 0.5 } }] });
@@ -679,6 +691,140 @@ t("OFL-04 camera up but the reader still loading: 'Loading the scanner…'", asy
     await sleep(900);
     assert.strictEqual($("m-scan-status").textContent, "Loading the scanner…");
   } finally { M.food.scanner.start = sc; M.food.scanner.engine = en; M.ui.close(); }
+});
+
+t("UIF-15 Add item for a meal has no meal pills; Log food keeps them", () => {
+  reset(); newMeal("Pill test");
+  click(q('[data-m="mb-add"]'));
+  assert.strictEqual($("sheetT").textContent, "Add item");
+  assert.ok(!q('[data-m="add-slot"]'), "no Breakfast / Lunch pills while picking for a meal");
+  M.ui.close(); reset();
+  click(q('#cta [data-m="add"]'));
+  assert.ok(qa('[data-m="add-slot"]').length >= 4, "Log food still has the meal pills");
+  M.ui.close();
+});
+
+/* ================================================================ Nick's chicken rule (RESUME2) */
+/* The Kirkland breast carries alwaysRaw: true (F7). Until that lands, the test sets it itself. */
+const withAlwaysRaw = async fn => {
+  const f = M.foods.get("g_kirkland_organic_chicken"); assert.ok(f && M.cook.of(f), "Kirkland chicken is a raw/cooked food");
+  const had = Object.prototype.hasOwnProperty.call(f, "alwaysRaw"), was = f.alwaysRaw;
+  f.alwaysRaw = true;
+  try { await fn(f); } finally { if (had) f.alwaysRaw = was; else delete f.alwaysRaw; }
+};
+const pickFood = async (f, text) => {
+  input($("m-search"), text);
+  let i = -1;
+  for (let n = 0; n < 40 && i < 0; n++) { await sleep(50); i = M.ui._.state().add.list.findIndex(r => r.id === f.id || r.foodId === f.id); }
+  assert.ok(i >= 0, "the chicken is in the results");
+  click(q('[data-m="pick"][data-i="' + i + '"]'));
+};
+
+t("alwaysRaw: chicken added to a saved meal or a batch opens in raw grams (US units too)", async () => {
+  await withAlwaysRaw(async f => {
+    for (const batch of [false, true]) {
+      reset(); newMeal(batch ? "Chicken prep" : "Chicken bowl");
+      if (batch) click(q('[data-m="mb-batch"]'));
+      click(q('[data-m="mb-add"]'));
+      await pickFood(f, "chicken");
+      assert.strictEqual(q('[data-m="det-unit"]').value, "g-raw", "opens in g raw, not oz");
+      assert.strictEqual(q('[data-m="det-qty"]').value, String(Math.round(f.serving.g)), "one serving, in raw grams");
+      assert.ok(/raw/.test($("m-det-amt").textContent), $("m-det-amt").textContent);
+      click($("m-det-go"));
+      assert.ok(sheetOn() && $("sheetT").textContent === "New meal", "back in the builder");
+      const it = M.ui.draft.items[0];
+      assert.strictEqual(it.state, "raw"); assert.strictEqual(it.servingLabel, "1 g raw");
+      near(it.servings, f.serving.g, 0.5, "raw grams");
+      assert.strictEqual(M.ui.draft.batch && M.ui.draft.batch.on, batch ? true : M.ui.draft.batch && M.ui.draft.batch.on, "batch switch kept");
+    }
+    /* Log food (not a meal) is F2a's: no change there */
+    reset(); click(q('#cta [data-m="add"]'));
+    await pickFood(f, "chicken");
+    assert.notStrictEqual(M.ui._.state().det.mode, "pick");
+    M.ui.close();
+  });
+});
+
+t("alwaysRaw: cooked or oz chicken from describe / photo / ideas lands in the meal as raw grams; other foods untouched", async () => {
+  await withAlwaysRaw(async f => {
+    reset(); newMeal("Chicken bowl");
+    click(q('[data-m="mb-add"]'));
+    const y = M.cook.of(f).y, us = M.cook.unitsFor(f, "us");
+    const one = k => us.find(o => o.key === k);
+    const rice = M.foods.get("g_white_rice"), rOpt = rice && M.cook.of(rice) ? M.cook.unitsFor(rice, "us").find(o => o.state === "cooked") : null;
+    const list = [
+      { name: f.name, foodId: f.id, state: "cooked", cook: { y, word: "raw" }, servingLabel: "1 g cooked", g: 1, per: one("g-cooked").per, servings: 150 },
+      { name: f.name, foodId: f.id, state: "raw", cook: { y, word: "raw" }, servingLabel: "1 oz raw", g: one("oz-raw").g, per: one("oz-raw").per, servings: 6 }
+    ];
+    if (rOpt) list.push({ name: rice.name, foodId: rice.id, state: "cooked", cook: { y: M.cook.of(rice).y, word: M.cook.of(rice).word }, servingLabel: "1 " + rOpt.label, g: rOpt.g, per: rOpt.per, servings: 1 });
+    M.ui._.state().add.onPick.many(list);
+    const its = M.ui.draft.items;
+    assert.strictEqual(its[0].servingLabel, "1 g raw"); assert.strictEqual(its[0].state, "raw");
+    assert.strictEqual(its[0].servings, Math.round(150 / y), "150 g cooked → raw grams");
+    near(M.foodMath.scale(its[0].per, its[0].servings).p, M.foodMath.scale(list[0].per, 150).p, 1, "same protein either way");
+    assert.strictEqual(its[1].servingLabel, "1 g raw"); assert.strictEqual(its[1].servings, Math.round(6 * OZ), "6 oz raw → 170 g raw");
+    if (rOpt) same(its[2], list[2], "rice (not alwaysRaw) is left as it was");
+    assert.ok(/g raw/.test(qa('[data-m="mb-item"]')[0].textContent), qa('[data-m="mb-item"]')[0].textContent);
+    M.ui.close();
+  });
+});
+
+t("batch meal sheet: the portion reads cooked only ('4 oz cooked'), never a raw weight", () => {
+  reset();
+  const m = M.meals.add({ name: "Chili pot", slot: "Dinner", servingsMade: 1, batch: { cookedG: 80 * OZ }, items: [
+    { name: "Ground beef 90/10", servings: 32, servingLabel: "1 oz raw", g: OZ, per: { cal: 49.9, p: 5.7, c: 0, f: 2.8 }, state: "raw", cook: { y: 0.74, word: "raw" } },
+    { name: "Black beans", servings: 4, servingLabel: "1 cup (172 g)", g: 172, per: { cal: 227, p: 15, c: 41, f: 1 } }] });
+  M.ui.tab = "foods"; M.ui.foodsSeg = "meals"; M.ui.render();
+  click(q('[data-m="meal"][data-id="' + m.id + '"]'));
+  input(q('[data-m="det-qty"]'), "4");
+  assert.strictEqual($("m-det-amt").textContent, "4 oz cooked");
+  click(q('[data-m="det-useg"][data-v="g-cooked"]'));
+  assert.ok(/^\d+ g cooked$/.test($("m-det-amt").textContent), $("m-det-amt").textContent);
+  assert.ok(!/raw/.test($("sheetB").querySelector("#m-det-box").textContent), "no raw weight on a batch portion");
+  M.ui.close(); M.meals.remove(m.id);
+});
+
+t("alwaysRaw: 'Save as meal' on an idea saves the chicken in raw grams", async () => {
+  await withAlwaysRaw(async f => {
+    reset();
+    click(q('[data-m="suggest"]'));
+    click(q('[data-m="sug-slot"][data-v="Dinner"]'));
+    await sleep(30);
+    const btn = q('[data-m="sug-save"][data-i="0"]'); assert.ok(btn, "first idea has Save as meal");
+    const y = M.cook.of(f).y, oz = M.cook.unitsFor(f, "us").find(o => o.key === "oz-raw");
+    M.ui._.state().sug.list[0] = { name: "Chicken plate", desc: "", source: "idea", items: [
+      { name: f.name, foodId: f.id, state: "raw", cook: { y, word: "raw" }, servingLabel: "1 oz raw", g: oz.g, per: oz.per, servings: 6 },
+      { name: "Broccoli", servingLabel: "1 cup (91 g)", g: 91, per: { cal: 31, p: 2.5, c: 6, f: 0.3 }, servings: 1 }] };
+    click(btn);
+    const m = M.meals.list().find(x => x.name === "Chicken plate"); assert.ok(m, "saved");
+    assert.strictEqual(m.items[0].servingLabel, "1 g raw"); assert.strictEqual(m.items[0].servings, Math.round(6 * OZ));
+    assert.strictEqual(m.items[1].servingLabel, "1 cup (91 g)", "other foods untouched");
+    M.ui.close();
+  });
+});
+
+t("alwaysRaw: ideas, saved meals and the builder show the chicken in raw grams, even in US units", async () => {
+  await withAlwaysRaw(async f => {
+    reset();
+    const wa = M.ui._.wholeAmount, c = M.cook.of(f), ck = { y: c.y, word: c.word };
+    const oz = M.cook.unitsFor(f, "us").find(o => o.key === "oz-raw");
+    const it = (label, g, servings, state) => ({ name: f.name, foodId: f.id, servingLabel: label, g, per: { cal: 1, p: 0, c: 0, f: 0 }, state: state || "raw", cook: ck, servings });
+    assert.strictEqual(wa(it("1 breast (175 g raw)", 175)), "1 breast (175 g raw)");
+    assert.strictEqual(wa(it("1/2 breast (88 g raw)", 88)), "½ breast (88 g raw)");
+    assert.strictEqual(wa(it("1 breast (175 g raw)", 175, 2)), "2 breasts (350 g raw)");
+    assert.ok(/^170 g raw \(\d+ g cooked\)$/.test(wa(it("1 oz raw", oz.g, 6))), wa(it("1 oz raw", oz.g, 6)));
+    assert.ok(/^\d+ g raw \(150 g cooked\)$/.test(wa(it("1 g cooked", 1, 150, "cooked"))), wa(it("1 g cooked", 1, 150, "cooked")));
+    assert.ok(/oz raw/.test(wa(it("1 oz raw", oz.g, 6), true)), "describe rows keep the unit their stepper counts in");
+    /* a meal saved before tonight with "6 oz raw" chicken reads in raw grams on its sheet */
+    const m = M.meals.add({ name: "Old chicken bowl", slot: "Lunch", servingsMade: 1, items: [it("1 oz raw", oz.g, 6)] });
+    M.ui.tab = "foods"; M.ui.foodsSeg = "meals"; M.ui.render();
+    click(q('[data-m="meal"][data-id="' + m.id + '"]'));
+    assert.ok(/170 g raw/.test($("sheetB").textContent), $("sheetB").textContent);
+    M.ui.close(); M.meals.remove(m.id);
+    /* other cook foods keep the person's units */
+    const beef = { name: "Ground beef", servingLabel: "1 oz raw", g: OZ, per: { cal: 50 }, state: "raw", cook: { y: 0.74, word: "raw" }, servings: 6 };
+    assert.ok(/^6 oz raw/.test(wa(beef)), wa(beef));
+  });
 });
 
 (async () => {

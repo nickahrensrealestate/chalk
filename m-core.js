@@ -184,39 +184,24 @@ window.M = window.M || {};
   const isQuota = e => !!e && (e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED" || e.code === 22 || /quota|full/i.test(String(e.message || "")));
 
   /* ---------------------------------------------------------- storage safety */
-  /* On disk (format 2):
-       M.KEY                  {v:1, fmt:2, updatedAt, profiles, foods, meals, months:["2026-09", …]}
-       M.KEY + ".d.YYYY-MM"   {v:1, d:{dayId: packed day}}   one key per month of logged days
-       M.KEY + ".body"        {v:1, b:{id: [w, rhr, at]}}    weigh-ins and resting heart rate
-       M.UI_KEY               {mode, person, tab, date}      Train | Macros taps only write this
-       M.KEY + ".bak"         a daily copy of the last good save (only recent months when big)
-       M.KEY + ".damaged…"    a copy of anything that couldn't be read, made before any save
-     A save writes the main key plus only the months (and body) that changed.
-     Entries are packed small on disk (short keys, nutrients as a list, no empty
-     fields) and unpacked on load, so M.MS looks exactly like it always did. The
-     old one-key format (everything under M.KEY) still loads and moves over on
-     the next save; if that doesn't fit, the old key stays as it was.
+  /* On disk:
+       M.KEY               everything, in one key, the same format as always
+       M.UI_KEY            {mode, person, tab, date}: Train | Macros taps write only this small key
+       M.KEY + ".bak"      a daily copy of the last good save (the last 60 days only, when it's big)
+       M.KEY + ".damaged"  a copy of a main copy that couldn't be read, made before any save
+                           (".damaged.2" … ".5" for later ones; an older copy is never overwritten)
      A failed save never loses data silently: M.MS stays in memory, every later
      M.save() tries again, M.storage says what happened and M.onStorageError
-     listeners hear about it once per failure streak. */
+     listeners hear about it once per failure streak. The backup is never deleted
+     to make room: a full copy is swapped for a trimmed one instead. */
   M.UI_KEY = "chalk.macros.ui";
   const BAK_KEY = () => M.KEY + ".bak";
-  const BODY_KEY = () => M.KEY + ".body";
-  const MONTH_PRE = () => M.KEY + ".d.";
-  const MONTH_KEY = m => MONTH_PRE() + m;
   const STATE_KEYS = ["profiles", "foods", "meals", "days", "body"];
   function parseJSON(s) { if (s == null) return undefined; try { return JSON.parse(s); } catch (e) { return undefined; } }
   function validState(s) { return isObj(s) && s.v === 1 && (s.ui === undefined || isObj(s.ui)) && STATE_KEYS.every(k => s[k] === undefined || isObj(s[k])); }
-  function validMain(s) {
-    if (!validState(s)) return false;
-    if (s.fmt === undefined) return true;
-    return s.fmt === 2 && s.days === undefined && s.body === undefined && (s.months === undefined || Array.isArray(s.months));
-  }
-  const validChunk = o => isObj(o) && o.v === 1 && isObj(o.d);
-  const validBodyFile = o => isObj(o) && o.v === 1 && isObj(o.b);
   /* bakMax: a full backup copy is kept up to 600,000 characters (like Chalk's own
      "chalk.bak"). Past that the copy keeps profiles, foods, meals, weigh-ins and
-     the last two months of days, so it never crowds the training log out. */
+     the last 60 days, so it never crowds the training log out. */
   M.storage = { ok: true, lastError: null, bytes: 0, bakDay: null, restoredFrom: null, bakMax: 600000, damaged: [] };
   const storeFns = [];
   let storeStreak = false;
@@ -235,272 +220,92 @@ window.M = window.M || {};
   }
   function storeOk() { M.storage.ok = true; M.storage.lastError = null; storeStreak = false; }
 
-  /* ------------------------------------------------------------ packing */
-  const SLOT_I = { Breakfast: 0, Lunch: 1, Dinner: 2, Snacks: 3 };
-  const ENTRY_STD = { id: 1, slot: 1, name: 1, brand: 1, servings: 1, servingLabel: 1, g: 1, per: 1, at: 1, foodId: 1, mealId: 1, state: 1, cook: 1 };
-  const DAY_STD = { id: 1, pid: 1, date: 1, entries: 1, water: 1, note: 1, updatedAt: 1 };
-  function stdPer(p) {
-    if (!isObj(p)) return false;
-    let n = 0;
-    for (const k in p) { if (!hasOwn(p, k)) continue; n++; if (!isNum(p[k]) || M.NUT.indexOf(k) < 0) return false; }
-    return n === M.NUT.length;
-  }
-  function extras(o, std) {
-    let x = null;
-    for (const k in o) { if (!hasOwn(o, k) || std[k] || o[k] === undefined || !okKey(k)) continue; (x || (x = {}))[k] = o[k]; }
-    return x;
-  }
-  /* An entry as the app writes it → a small list:
-       [id, slot 0-3, name, servingLabel, at, servings, per (7 numbers, trailing zeros dropped),
-        g (0 = none), foodId (0 = none), brand, state/cook, mealId (0 = none), other fields]
-     where state/cook is 0, "r" / "c", or ["r"|"c", y] (["r"|"c", y, "dry"] for rice and pasta).
-     Trailing defaults are dropped. Anything unusual is kept whole as {r: entry}. */
-  function packEntry(e) {
-    if (!isObj(e)) return { r: e === undefined ? null : e };
-    if (!(isStr(e.id) && SLOT_I[e.slot] !== undefined && isStr(e.name) && isStr(e.brand) && isNum(e.servings) && isStr(e.servingLabel) &&
-      (e.g === null || (isNum(e.g) && e.g > 0)) && stdPer(e.per) && isNum(e.at))) return { r: e };
-    if ((e.foodId !== undefined && !(isStr(e.foodId) && e.foodId)) || (e.mealId !== undefined && !(isStr(e.mealId) && e.mealId)) ||
-      (e.state !== undefined && e.state !== "raw" && e.state !== "cooked")) return { r: e };
-    let sc = 0;
-    if (e.cook !== undefined) {
-      const c = e.cook;
-      if (e.state === undefined || !isObj(c) || Object.keys(c).length !== 2 || !isNum(c.y) || (c.word !== "raw" && c.word !== "dry")) return { r: e };
-      sc = c.word === "dry" ? [e.state === "cooked" ? "c" : "r", c.y, "dry"] : [e.state === "cooked" ? "c" : "r", c.y];
-    } else if (e.state !== undefined) sc = e.state === "cooked" ? "c" : "r";
-    const per = e.per, p = [per.cal, per.p, per.c, per.f, per.fiber, per.sugar, per.sodium];
-    while (p.length && p[p.length - 1] === 0) p.pop();
-    const x = extras(e, ENTRY_STD);
-    const a = [e.id, SLOT_I[e.slot], e.name, e.servingLabel, e.at, e.servings, p, e.g === null ? 0 : e.g, e.foodId === undefined ? 0 : e.foodId, e.brand, sc, e.mealId === undefined ? 0 : e.mealId];
-    if (x) a.push(x);
-    else while (a.length > 7 && (a[a.length - 1] === 0 || a[a.length - 1] === "")) a.pop();
-    return a;
-  }
-  const pv = (p, j) => (j < p.length && isNum(p[j]) ? p[j] : 0);
-  const SLOT_N = ["Breakfast", "Lunch", "Dinner", "Snacks"];
-  function unpackEntry(a) {
-    if (!Array.isArray(a)) return isObj(a) && hasOwn(a, "r") ? a.r : (a === undefined ? null : a);
-    const p = a[6];
-    const per = Array.isArray(p) && p.length === 7 ? { cal: p[0], p: p[1], c: p[2], f: p[3], fiber: p[4], sugar: p[5], sodium: p[6] }
-      : Array.isArray(p) ? { cal: pv(p, 0), p: pv(p, 1), c: pv(p, 2), f: pv(p, 3), fiber: pv(p, 4), sugar: pv(p, 5), sodium: pv(p, 6) }
-      : { cal: 0, p: 0, c: 0, f: 0, fiber: 0, sugar: 0, sodium: 0 };
-    const e = { id: a[0], slot: SLOT_N[a[1]] || "Snacks", name: a[2], brand: a[9] || "", servings: a[5], servingLabel: a[3], g: a[7] || null, per, at: a[4] };
-    if (a.length > 8) {
-      if (a[8]) e.foodId = a[8];
-      if (a[11]) e.mealId = a[11];
-      const sc = a[10];
-      if (sc) {
-        if (Array.isArray(sc)) { e.state = sc[0] === "c" ? "cooked" : "raw"; e.cook = { y: sc[1], word: sc[2] === "dry" ? "dry" : "raw" }; }
-        else e.state = sc === "c" ? "cooked" : "raw";
-      }
-      const x = a[12];
-      if (isObj(x)) Object.keys(x).forEach(k => { if (okKey(k)) e[k] = x[k]; });
-    }
-    return e;
-  }
-  function splitId(id) { const i = String(id).lastIndexOf("|"); return i < 0 ? null : { pid: id.slice(0, i), date: id.slice(i + 1) }; }
-  function packDay(id, d) {
-    if (!(d.id === id && isStr(d.pid) && isStr(d.date) && d.date.indexOf("|") < 0 && id === d.pid + "|" + d.date &&
-      Array.isArray(d.entries) && isNum(d.water) && isStr(d.note) && isNum(d.updatedAt))) return { r: d };
-    const o = { u: d.updatedAt };
-    if (d.water !== 0) o.w = d.water;
-    if (d.note) o.n = d.note;
-    o.e = d.entries.map(packEntry);
-    const x = extras(d, DAY_STD); if (x) o.x = x;
-    return o;
-  }
-  function unpackDay(id, o) {
-    if (!isObj(o)) return null;
-    if (hasOwn(o, "r")) return isObj(o.r) ? o.r : null;
-    const s = splitId(id); if (!s) return null;
-    const d = { id, pid: s.pid, date: s.date, entries: Array.isArray(o.e) ? o.e.map(unpackEntry) : [], water: o.w !== undefined ? o.w : 0, note: o.n !== undefined ? o.n : "", updatedAt: o.u };
-    if (isObj(o.x)) Object.keys(o.x).forEach(k => { if (okKey(k)) d[k] = o.x[k]; });
-    return d;
-  }
-  function packBody(id, b) {
-    if (b.id === id && isStr(b.pid) && isStr(b.date) && b.date.indexOf("|") < 0 && id === b.pid + "|" + b.date &&
-      (b.w === null || isNum(b.w)) && (b.rhr === null || isNum(b.rhr)) && isNum(b.at) && Object.keys(b).length === 6) return [b.w, b.rhr, b.at];
-    return { r: b };
-  }
-  function unpackBody(id, o) {
-    if (Array.isArray(o)) { const s = splitId(id); return s ? { id, pid: s.pid, date: s.date, w: o[0] === undefined ? null : o[0], rhr: o[1] === undefined ? null : o[1], at: o[2] } : null; }
-    return isObj(o) && isObj(o.r) ? o.r : null;
-  }
-  M.storage._ = { packEntry, unpackEntry, packDay, unpackDay, packBody, unpackBody };
-
-  /* --------------------------------------------------------- disk bookkeeping */
-  /* What the disk holds, so a save can tell what changed since the last good write.
-     A day counts as changed when its object, entries list, entry count, water,
-     note or updatedAt differ from what was written (M.log.* always bumps
-     updatedAt; m-sync swaps in new objects). */
-  const MONTH_RE = /^(\d{4})-(\d{2})-\d{2}$/;
-  function monthOf(id, d) {
-    let date = isObj(d) && isStr(d.date) ? d.date : "";
-    if (!MONTH_RE.test(date)) { const s = splitId(String(id)); date = s ? s.date : ""; }
-    const m = MONTH_RE.exec(date);
-    return m ? m[1] + "-" + m[2] : "x";
-  }
-  const emptyDay = d => !(Array.isArray(d.entries) && d.entries.length) && !num(d.water) && !d.note && !num(d.updatedAt);
-  const daySig = (id, d) => ({ ref: d, u: d.updatedAt, er: d.entries, n: Array.isArray(d.entries) ? d.entries.length : -1, w: d.water, no: d.note, m: monthOf(id, d) });
-  const sameDay = (s, d) => s.ref === d && s.u === d.updatedAt && s.er === d.entries && s.n === (Array.isArray(d.entries) ? d.entries.length : -1) && s.w === d.water && s.no === d.note;
-  const bodySig = b => ({ ref: b, at: b.at, w: b.w, rhr: b.rhr });
-  const sameBody = (s, b) => s.ref === b && s.at === b.at && s.w === b.w && s.rhr === b.rhr;
-  function freshDisk() {
-    return {
-      fmt: 0,                 /* 0 nothing yet · 1 old one-key format · 2 month keys */
-      months: new Set(),      /* month keys present on disk */
-      monthIds: new Map(),    /* month → Set of day ids written there */
-      daySig: new Map(), bodySig: new Map(),
-      dirtyMonths: new Set(), bodyDirty: false, bodyOnDisk: false,
-      bad: new Set(),         /* keys that couldn't be read at load (copied to .damaged) */
-      sizes: new Map(), uiStr: null, noMove: false, strs: new Map()
-    };
-  }
-  let disk = freshDisk();
-  const noteMonth = date => { if (MONTH_RE.test(String(date || ""))) disk.dirtyMonths.add(String(date).slice(0, 7)); };
-  function sumBytes() { let n = 0; disk.sizes.forEach(v => { n += v; }); M.storage.bytes = n; return n; }
-
-  /* Months whose keys exist: the index in the main key, every key the browser
-     lists, and (where the storage can't list keys) a probe of each month from
-     the oldest known one to next month. */
-  function addMonth(m, n) { const y = +m.slice(0, 4), mo = +m.slice(5, 7) - 1 + n; const d = new Date(y, mo, 1, 12); return d.getFullYear() + "-" + pad(d.getMonth() + 1); }
-  function diskMonths(hint) {
-    const out = new Set();
-    (Array.isArray(hint) ? hint : []).forEach(m => { if (/^\d{4}-\d{2}$|^x$/.test(String(m))) out.add(String(m)); });
-    try {
-      if (typeof localStorage !== "undefined" && typeof localStorage.key === "function" && typeof localStorage.length === "number") {
-        const pre = MONTH_PRE();
-        for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf(pre) === 0) out.add(k.slice(pre.length)); }
-        return out;
-      }
-    } catch (e) {}
-    const cur = M.today().slice(0, 7), known = Array.from(out).filter(m => m !== "x").sort();
-    let m = known.length ? known[0] : addMonth(cur, -120);
-    const end = addMonth(cur, 1);
-    for (let guard = 0; m <= end && guard < 600; guard++, m = addMonth(m, 1)) if (!out.has(m) && lsGet(MONTH_KEY(m)) != null) out.add(m);
-    if (lsGet(MONTH_KEY("x")) != null) out.add("x");
-    return out;
-  }
-
   /* Every ".damaged" copy (Erase removes them too). */
   function damagedKeys() {
-    const pre = M.KEY + ".damaged", out = [];
+    const pre = M.KEY + ".damaged", out = [pre, pre + ".2", pre + ".3", pre + ".4", pre + ".5"];
     try {
       if (typeof localStorage !== "undefined" && typeof localStorage.key === "function" && typeof localStorage.length === "number") {
-        for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf(pre) === 0) out.push(k); }
-        return out;
+        for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf(pre) === 0 && out.indexOf(k) < 0) out.push(k); }
       }
     } catch (e) {}
-    return out.concat([pre, pre + ".2", pre + ".3", pre + ".body", pre + ".body.2"]);
+    return out;
   }
-  /* A copy of something that can't be read, before anything overwrites it. Never overwrites an older copy. */
-  function keepDamaged(key, raw) {
-    const base = key.replace(M.KEY, M.KEY + ".damaged");
+  /* A main copy that can't be read is copied aside before anything overwrites it.
+     An older copy is never overwritten; the same copy is never kept twice. */
+  let damagedPending = null;
+  function keepDamaged(raw) {
+    const base = M.KEY + ".damaged";
     for (let n = 1; n <= 5; n++) {
-      const k = n === 1 ? base : base + "." + n;
-      if (lsGet(k) != null) continue;
-      if (!lsWrite(k, raw)) M.storage.damaged.push(k);
-      return;
+      const k = n === 1 ? base : base + "." + n, have = lsGet(k);
+      if (have === raw) { damagedPending = null; return true; }
+      if (have != null) continue;
+      if (lsWrite(k, raw)) { damagedPending = raw; return false; }   /* no room yet: try again before the next save */
+      damagedPending = null;
+      M.storage.damaged.push(k);
+      return true;
     }
+    damagedPending = null;   /* five copies kept already */
+    return false;
   }
 
-  /* The daily backup as {day, trim, main:{profiles,foods,meals,ui,updatedAt}, days, body}, or null. */
-  function readBak(str) {
-    const b = parseJSON(str === undefined ? lsGet(BAK_KEY()) : str);
-    if (!isObj(b)) return null;
-    if (b.bak === 1 && validState(b.data)) return { day: String(b.day || "backup"), main: b.data, days: cleanMap(b.data.days), body: cleanMap(b.data.body) };
-    if (b.bak === 2 && validMain(b.main)) {
-      const days = {}, body = {};
-      if (isObj(b.d)) Object.keys(b.d).forEach(m => { const c = b.d[m]; if (validChunk(c)) Object.keys(c.d).forEach(id => { if (okKey(id)) { const d = unpackDay(id, c.d[id]); if (d) days[id] = d; } }); });
-      if (validBodyFile(b.body)) Object.keys(b.body.b).forEach(id => { if (okKey(id)) { const r = unpackBody(id, b.body.b[id]); if (r) body[id] = r; } });
-      return { day: String(b.day || "backup"), main: b.main, days, body };
-    }
-    return null;
+  /* A copy with profiles, foods, meals, weigh-ins and only the last 60 days. */
+  function trimState(s) {
+    const t = Object.assign({}, s, { days: {} }), from = M.addDays(M.today(), -60), days = cleanMap(s.days);
+    Object.keys(days).forEach(id => {
+      const d = days[id], date = isStr(d.date) ? d.date : id.slice(id.lastIndexOf("|") + 1);
+      if (date >= from) t.days[id] = d;
+    });
+    return t;
   }
-  const bakDayOf = str => { const m = str ? /^\{"bak":[12],"day":"(\d{4}-\d{2}-\d{2})"/.exec(str) : null; return m ? m[1] : null; };
-  /* newer record wins (by tsKey); missing ones are added */
-  function takeNewer(dst, src, tsKey) {
-    Object.keys(src).forEach(id => { const a = dst[id], b = src[id]; if (!isObj(b)) return; if (!isObj(a) || num(b[tsKey]) > num(a[tsKey])) dst[id] = b; });
+  const bakHead = (day, at, trim) => '{"bak":1,"day":"' + day + '","at":' + num(at) + (trim ? ',"trim":1' : "");
+  const TRIMMED = /^\{"bak":1,"day":"[^"]*","at":\d+,"trim":1/;
+  /* First save of each day: copy the last good save on disk to .bak. A good older
+     copy is never deleted: when the data is big the copy is trimmed, and when the
+     main copy on disk can't be read, today's copy is skipped. */
+  function dailyBak() {
+    const day = M.today();
+    if (M.storage.bakDay === day) return;
+    const prev = lsGet(M.KEY);
+    if (prev == null) return;
+    const s = parseJSON(prev);
+    if (!validState(s)) return;
+    M.storage.bakDay = day;   /* one try a day, even when the phone is full */
+    const at = M.now(), trimmed = () => bakHead(day, at, true) + ',"data":' + JSON.stringify(trimState(s)) + "}";
+    if (prev.length > num(M.storage.bakMax, 600000)) { lsWrite(BAK_KEY(), trimmed()); return; }
+    const err = lsWrite(BAK_KEY(), bakHead(day, at) + ',"data":' + prev + "}");
+    if (err && isQuota(err)) lsWrite(BAK_KEY(), trimmed());   /* a failed write leaves the older copy as it was */
+  }
+  /* Phone full: swap a full backup for a trimmed one to make room. Never deletes it. */
+  function shrinkBak() {
+    const str = lsGet(BAK_KEY());
+    if (str == null || TRIMMED.test(str)) return false;
+    const b = parseJSON(str);
+    if (!isObj(b) || b.bak !== 1 || !validState(b.data)) return false;
+    const out = bakHead(/^\d{4}-\d{2}-\d{2}$/.test(String(b.day)) ? b.day : M.today(), b.at, true) + ',"data":' + JSON.stringify(trimState(b.data)) + "}";
+    if (out.length >= str.length) return false;
+    return !lsWrite(BAK_KEY(), out);
   }
 
   M.load = function () {
-    disk = freshDisk();
     M.storage.restoredFrom = null;
     M.storage.damaged = [];
-    const bakStr = lsGet(BAK_KEY());
-    M.storage.bakDay = bakDayOf(bakStr);
-    const damaged = [];
-    const rawMain = lsGet(M.KEY);
-    let main = parseJSON(rawMain);
-    if (rawMain != null && !validMain(main)) { damaged.push([M.KEY, rawMain]); main = null; }
-    const fmt2 = !!(main && main.fmt === 2);
-    const s = freshState();
-    if (main) {
-      s.updatedAt = num(main.updatedAt);
-      ["profiles", "foods", "meals"].forEach(k => { s[k] = cleanMap(main[k]); });
-      if (isObj(main.ui)) s.ui = main.ui;
-      if (!fmt2) { s.days = cleanMap(main.days); s.body = cleanMap(main.body); }
-      disk.sizes.set(M.KEY, rawMain.length);
+    damagedPending = null;
+    const raw = lsGet(M.KEY), bak = lsGet(BAK_KEY());
+    const bm = bak ? /^\{"bak":1,"day":"(\d{4}-\d{2}-\d{2})"/.exec(bak) : null;
+    M.storage.bakDay = bm ? bm[1] : null;
+    let s = parseJSON(raw);
+    if (!validState(s)) {
+      s = null;
+      if (raw != null) keepDamaged(raw);   /* before anything can overwrite it */
+      const b = parseJSON(bak);
+      if (isObj(b) && validState(b.data)) { s = b.data; M.storage.restoredFrom = String(b.day || "backup"); }
     }
-    /* month keys and the body key */
-    const fromDisk = { days: {}, body: {} }, dayMonth = new Map();
-    diskMonths(fmt2 ? main.months : null).forEach(m => {
-      const k = MONTH_KEY(m), str = lsGet(k);
-      if (str == null) return;
-      disk.months.add(m); disk.sizes.set(k, str.length);
-      const o = parseJSON(str);
-      if (!validChunk(o)) { damaged.push([k, str]); disk.bad.add(k); disk.dirtyMonths.add(m); return; }
-      Object.keys(o.d).forEach(id => { if (!okKey(id)) return; const d = unpackDay(id, o.d[id]); if (d) { fromDisk.days[id] = d; dayMonth.set(id, m); } });
-    });
-    const bstr = lsGet(BODY_KEY());
-    if (bstr != null) {
-      disk.bodyOnDisk = true; disk.sizes.set(BODY_KEY(), bstr.length);
-      const o = parseJSON(bstr);
-      if (!validBodyFile(o)) { damaged.push([BODY_KEY(), bstr]); disk.bad.add(BODY_KEY()); disk.bodyDirty = true; }
-      else Object.keys(o.b).forEach(id => { if (!okKey(id)) return; const r = unpackBody(id, o.b[id]); if (r) fromDisk.body[id] = r; });
-    }
-    const chunksAreTruth = fmt2 || !main;
-    const legacyLost = !main && !disk.months.size;   /* the damaged key held everything (old format) */
-    if (chunksAreTruth) { s.days = fromDisk.days; s.body = fromDisk.body; }
-    else { takeNewer(s.days, fromDisk.days, "updatedAt"); takeNewer(s.body, fromDisk.body, "at"); }   /* old key: keep anything newer a month key holds */
-    /* anything unreadable: keep a copy, then fill the gaps from the daily backup */
-    if (damaged.length) {
-      damaged.forEach(x => keepDamaged(x[0], x[1]));
-      const b = readBak(bakStr);
-      if (b) {
-        let used = false;
-        if (!main) {
-          s.updatedAt = num(b.main.updatedAt);
-          ["profiles", "foods", "meals"].forEach(k => { s[k] = cleanMap(b.main[k]); });
-          if (isObj(b.main.ui)) s.ui = b.main.ui;
-          used = true;
-        }
-        const badMonths = new Set(Array.from(disk.bad).filter(k => k.indexOf(MONTH_PRE()) === 0).map(k => k.slice(MONTH_PRE().length)));
-        Object.keys(b.days).forEach(id => {
-          const d = b.days[id];
-          if (s.days[id] ? (badMonths.has(monthOf(id, d)) && num(d.updatedAt) > num(s.days[id].updatedAt)) : (badMonths.has(monthOf(id, d)) || legacyLost)) { s.days[id] = d; used = true; }
-        });
-        if (disk.bad.has(BODY_KEY()) || legacyLost) Object.keys(b.body).forEach(id => { if (!s.body[id]) { s.body[id] = b.body[id]; used = true; } });
-        if (used) M.storage.restoredFrom = b.day;
-      }
-    }
-    disk.fmt = fmt2 ? 2 : main ? 1 : (disk.months.size || disk.bodyOnDisk ? 2 : 0);
     M.MS = shape(s);
     /* taps on Train | Macros live in their own small key */
+    lastUi = null;
     const uiStr = lsGet(M.UI_KEY), ui = parseJSON(uiStr);
-    if (isObj(ui)) { applyUi(M.MS.ui, ui); disk.uiStr = uiStr; disk.sizes.set(M.UI_KEY, uiStr.length); }
-    /* what's on disk right now, so the next save writes only what changes */
-    if (disk.fmt === 2) {
-      const days = M.MS.days;
-      dayMonth.forEach((m, id) => {
-        const d = days[id];
-        if (d !== fromDisk.days[id]) { disk.dirtyMonths.add(m); return; }
-        disk.daySig.set(id, daySig(id, d));
-        if (!disk.monthIds.has(m)) disk.monthIds.set(m, new Set());
-        disk.monthIds.get(m).add(id);
-      });
-      if (!disk.bad.has(BODY_KEY())) Object.keys(M.MS.body).forEach(id => { const b = M.MS.body[id]; if (b === fromDisk.body[id]) disk.bodySig.set(id, bodySig(b)); else disk.bodyDirty = true; });
-    }
-    sumBytes();
+    if (isObj(ui)) { applyUi(M.MS.ui, ui); lastUi = uiStr; }
+    M.storage.bytes = raw && s && !M.storage.restoredFrom ? raw.length : 0;
     return M.MS;
   };
 
@@ -513,180 +318,32 @@ window.M = window.M || {};
     Object.keys(isObj(ps) ? ps : {}).forEach(id => { const p = ps[id]; if (okKey(id) && isObj(p) && !pristine(id, p)) out[id] = p; });
     return out;
   }
+  let lastUi = null;
   function uiJSON() { const u = M.MS.ui || {}; return JSON.stringify({ mode: u.mode === "macros" ? "macros" : "train", person: isPid(u.person) ? u.person : null, tab: isStr(u.tab) && u.tab ? u.tab : "diary", date: u.date || null }); }
   /* Writes only the small ui key (mode, person, tab, date). Never a full save. */
   M.saveUi = function () {
     const s = uiJSON();
-    if (s === disk.uiStr) return true;
-    const err = lsWrite(M.UI_KEY, s);
-    if (err) return false;
-    disk.uiStr = s; disk.sizes.set(M.UI_KEY, s.length);
+    if (s === lastUi) return true;
+    if (lsWrite(M.UI_KEY, s)) return false;
+    lastUi = s;
     return true;
   };
-
-  /* Recent months for a trimmed backup: everything from 2 months before this one. */
-  const trimFrom = () => addMonth(M.today().slice(0, 7), -2);
-  /* The last good save on disk as one backup string, or null when something on disk is damaged or missing. */
-  function bakFromDisk(day) {
-    const mainStr = lsGet(M.KEY), main = parseJSON(mainStr);
-    if (!validMain(main)) return null;
-    const head = '{"bak":' + (main.fmt === 2 ? 2 : 1) + ',"day":"' + day + '","at":' + M.now();
-    const max = num(M.storage.bakMax, 600000);
-    if (main.fmt !== 2) {
-      if (mainStr.length <= max) return head + ',"data":' + mainStr + "}";
-      const t = Object.assign({}, main, { days: {} }), from = trimFrom();
-      Object.keys(cleanMap(main.days)).forEach(id => { if (monthOf(id, main.days[id]) >= from) t.days[id] = main.days[id]; });
-      return head + ',"trim":1,"data":' + JSON.stringify(t) + "}";
-    }
-    if (disk.bad.size) return null;
-    const bodyStr = lsGet(BODY_KEY());
-    let total = mainStr.length + (bodyStr ? bodyStr.length : 0);
-    const parts = [];
-    Array.from(disk.months).sort().forEach(m => { const str = lsGet(MONTH_KEY(m)); if (str != null) { parts.push([m, str]); total += str.length; } });
-    let trim = false;
-    if (total > max) { const from = trimFrom(); trim = true; for (let i = parts.length - 1; i >= 0; i--) if (parts[i][0] < from || parts[i][0] === "x") parts.splice(i, 1); }
-    return head + (trim ? ',"trim":1' : "") + ',"main":' + mainStr + ',"body":' + (bodyStr || "null") + ',"d":{' + parts.map(x => '"' + x[0] + '":' + x[1]).join(",") + "}}";
-  }
-  /* First save of each day: copy the last good save to .bak. A good older copy is
-     never deleted: when the data is big the copy is trimmed, and when something
-     on disk is damaged today's copy is skipped. */
-  function dailyBak() {
-    const day = M.today();
-    if (M.storage.bakDay === day) return;
-    const b = bakFromDisk(day);
-    if (b == null) return;
-    M.storage.bakDay = day;   /* one try a day, even when the phone is full */
-    lsWrite(BAK_KEY(), b);
-  }
-  /* Phone full: swap a full backup for a trimmed one to make room. Never deletes it. */
-  function shrinkBak() {
-    const str = lsGet(BAK_KEY());
-    if (str == null || /^\{"bak":[12],"day":"[^"]*","at":\d+,"trim":1/.test(str)) return false;
-    const b = parseJSON(str); if (!isObj(b)) return false;
-    const from = trimFrom();
-    let out = null;
-    if (b.bak === 2 && isObj(b.d)) {
-      const d = {}; Object.keys(b.d).forEach(m => { if (m >= from && m !== "x") d[m] = b.d[m]; });
-      out = JSON.stringify({ bak: 2, day: b.day, at: b.at, trim: 1, main: b.main, body: b.body, d });
-    } else if (b.bak === 1 && validState(b.data)) {
-      const t = Object.assign({}, b.data, { days: {} });
-      Object.keys(cleanMap(b.data.days)).forEach(id => { if (monthOf(id, b.data.days[id]) >= from) t.days[id] = b.data.days[id]; });
-      out = JSON.stringify({ bak: 1, day: b.day, at: b.at, trim: 1, data: t });
-    }
-    if (!out || out.length >= str.length) return false;
-    return !lsWrite(BAK_KEY(), out);
-  }
-  function put(k, s) {
-    let e = lsWrite(k, s);
-    if (e && isQuota(e) && shrinkBak()) e = lsWrite(k, s);
-    if (!e) disk.sizes.set(k, s.length);
-    return e;
-  }
-  /* The old one-key format: everything in M.KEY (used only while the move to month keys doesn't fit). */
-  function persistOld() {
+  function persist() {
     let str;
     try { str = JSON.stringify(Object.assign({}, M.MS, { profiles: keptProfiles(M.MS.profiles) })); } catch (e) { storeFail(e); return false; }
-    const err = put(M.KEY, str);
-    if (err) { storeFail(err); return false; }
-    disk.fmt = 1;
-    storeOk(); sumBytes();
-    return true;
-  }
-  function persist() {
-    const MS = M.MS;
+    /* the damaged copy must be kept before the main key is written over */
+    if (damagedPending != null && !keepDamaged(damagedPending) && damagedPending != null && shrinkBak()) keepDamaged(damagedPending);
+    if (damagedPending != null) { storeFail(new Error("No room to keep a copy of the damaged data")); return false; }
     try { dailyBak(); } catch (e) {}
     try { M.saveUi(); } catch (e) {}
-    if (disk.fmt === 1 && disk.noMove) return persistOld();
-    const moving = disk.fmt !== 2;
-    const days = isObj(MS.days) ? MS.days : {}, body = isObj(MS.body) ? MS.body : {};
-    let monthStr, bodyStr, groups;
-    try {
-      /* 1. which months changed since the last good write */
-      const dirty = new Set(disk.dirtyMonths), seen = new Set();
-      Object.keys(days).forEach(id => {
-        const d = days[id];
-        if (!isObj(d) || !okKey(id)) return;
-        seen.add(id);
-        const sg = disk.daySig.get(id);
-        if (sg && sameDay(sg, d)) return;
-        if (sg) dirty.add(sg.m);
-        if (sg || !emptyDay(d)) dirty.add(monthOf(id, d));
-      });
-      disk.daySig.forEach((sg, id) => { if (!seen.has(id)) dirty.add(sg.m); });
-      /* 2. those months, packed */
-      monthStr = new Map(); groups = new Map();
-      if (dirty.size) {
-        dirty.forEach(m => groups.set(m, []));
-        Object.keys(days).forEach(id => { const d = days[id]; if (!isObj(d) || !okKey(id) || emptyDay(d)) return; const g = groups.get(monthOf(id, d)); if (g) g.push(id); });
-        groups.forEach((ids, m) => {
-          if (!ids.length) { monthStr.set(m, null); return; }
-          const o = {}; ids.forEach(id => { o[id] = packDay(id, days[id]); });
-          monthStr.set(m, '{"v":1,"d":' + JSON.stringify(o) + "}");
-        });
-      }
-      /* 3. body, when any record changed */
-      let bodyChanged = disk.bodyDirty || moving;
-      const bseen = new Set();
-      Object.keys(body).forEach(id => { const b = body[id]; if (!isObj(b) || !okKey(id)) return; bseen.add(id); const sg = disk.bodySig.get(id); if (!sg || !sameBody(sg, b)) bodyChanged = true; });
-      if (!bodyChanged) disk.bodySig.forEach((sg, id) => { if (!bseen.has(id)) bodyChanged = true; });
-      if (bodyChanged) {
-        const o = {}; let n = 0;
-        bseen.forEach(id => { o[id] = packBody(id, body[id]); n++; });
-        bodyStr = n ? '{"v":1,"b":' + JSON.stringify(o) + "}" : null;
-      }
-    } catch (e) { storeFail(e); return false; }
-    /* 4. write the months, then the body, then the main key (which lists the months) */
-    let err = null;
-    const wroteNow = [];
-    monthStr.forEach((str, m) => {
-      const k = MONTH_KEY(m);
-      if (str == null) {
-        lsDel(k); disk.months.delete(m); disk.sizes.delete(k); disk.bad.delete(k); disk.dirtyMonths.delete(m);
-        const old = disk.monthIds.get(m); if (old) old.forEach(id => { const sg = disk.daySig.get(id); if (sg && sg.m === m) disk.daySig.delete(id); });
-        disk.monthIds.delete(m);
-        return;
-      }
-      const e = put(k, str);
-      if (e) { err = err || e; return; }
-      wroteNow.push(k);
-      disk.months.add(m); disk.bad.delete(k); disk.dirtyMonths.delete(m);
-      const ids = groups.get(m), idSet = new Set(ids), old = disk.monthIds.get(m);
-      if (old) old.forEach(id => { if (!idSet.has(id)) { const sg = disk.daySig.get(id); if (sg && sg.m === m) disk.daySig.delete(id); } });
-      ids.forEach(id => disk.daySig.set(id, daySig(id, days[id])));
-      disk.monthIds.set(m, idSet);
-    });
-    if (bodyStr !== undefined) {
-      if (bodyStr === null) { lsDel(BODY_KEY()); disk.sizes.delete(BODY_KEY()); disk.bad.delete(BODY_KEY()); disk.bodySig.clear(); disk.bodyDirty = false; disk.bodyOnDisk = false; }
-      else {
-        const e = put(BODY_KEY(), bodyStr);
-        if (e) err = err || e;
-        else {
-          wroteNow.push(BODY_KEY());
-          disk.bodySig.clear(); Object.keys(body).forEach(id => { if (isObj(body[id]) && okKey(id)) disk.bodySig.set(id, bodySig(body[id])); });
-          disk.bodyDirty = false; disk.bodyOnDisk = true; disk.bad.delete(BODY_KEY());
-        }
-      }
-    }
-    if (moving && err && disk.fmt === 1) {
-      /* The move to month keys didn't fit next to the old key: take back what this
-         save wrote and keep the old format until the next start. */
-      wroteNow.forEach(k => { lsDel(k); disk.sizes.delete(k); });
-      disk.months.clear(); disk.monthIds.clear(); disk.daySig.clear(); disk.bodySig.clear(); disk.bodyOnDisk = false;
-      disk.noMove = true;
-      return persistOld();
-    }
-    let mainStr;
-    try { mainStr = JSON.stringify({ v: 1, fmt: 2, updatedAt: num(MS.updatedAt), profiles: keptProfiles(MS.profiles), foods: isObj(MS.foods) ? MS.foods : {}, meals: isObj(MS.meals) ? MS.meals : {}, months: Array.from(disk.months).sort() }); }
-    catch (e) { storeFail(e); return false; }
-    const e = put(M.KEY, mainStr);
-    if (e) err = err || e;
-    else { disk.fmt = 2; disk.bad.delete(M.KEY); }
-    if (err) { storeFail(err); sumBytes(); return false; }
-    storeOk(); sumBytes();
+    let err = lsWrite(M.KEY, str);
+    /* out of room: trim the backup (never delete it) and try once more */
+    if (err && isQuota(err) && shrinkBak()) err = lsWrite(M.KEY, str);
+    if (err) { storeFail(err); return false; }
+    storeOk();
+    M.storage.bytes = str.length;
     return true;
   }
-  /* For code that edits a logged day in place (without M.log.*): marks that day's month to be written on the next save. */
-  M.markDay = function (dateKey) { noteMonth(dateKey); };
 
   M.save = function () {
     const s = M.MS;
@@ -701,10 +358,9 @@ window.M = window.M || {};
       Object.keys(M.MS.days).forEach(id => M.sync.deleted.days.add(id));
       Object.keys(M.MS.body).forEach(id => M.sync.deleted.body.add(id));
     } catch (e) {}
-    diskMonths(Array.from(disk.months)).forEach(m => { lsDel(MONTH_KEY(m)); lsDel(M.KEY + ".damaged.d." + m); lsDel(M.KEY + ".damaged.d." + m + ".2"); });
-    [M.KEY, BODY_KEY(), BAK_KEY()].concat(damagedKeys()).forEach(lsDel);
+    [M.KEY, BAK_KEY()].concat(damagedKeys()).forEach(lsDel);
     M.MS = freshState();
-    disk = freshDisk();
+    damagedPending = null;
     M.storage.bakDay = null; M.storage.restoredFrom = null; M.storage.damaged = [];
     M.save();
     return M.MS;
@@ -953,6 +609,13 @@ window.M = window.M || {};
     return num(e.g) > 0 ? num(e.g) : 0;
   }
 
+  /* Cooked grams of the whole batch for a portion of a batch meal, else 0. */
+  function batchOf(e) {
+    if (!isObj(e) || !e.mealId || e.state !== "cooked") return 0;
+    if (num(e.batchG) > 0) return num(e.batchG);
+    const m = M.meals && M.meals.get ? M.meals.get(e.mealId) : null;
+    return isObj(m) && isObj(m.batch) && num(m.batch.cookedG) > 0 ? num(m.batch.cookedG) : 0;
+  }
   M.cook = {
     OZ: OZ_G, LB: LB_G, UNIT_G: WEIGHT_G,
     unitWord, fmtWeight, fmtVolume,
@@ -1052,9 +715,17 @@ window.M = window.M || {};
       if (!(g1 > 0)) return null;
       return { state, cook, grams: g1 * Math.max(0, num(e.servings, 1)), fam: u && WEIGHT_G[u] ? u : null, vol: u && VOLUME[u] ? { unit: u, g: g1 / (sv.qty || 1) } : null };
     },
-    /* "6 oz raw (4.4 oz cooked)" for an entry-like, "" when it isn't a cook food. */
+    /* "6 oz raw (4.4 oz cooked)" for an entry-like, "" when it isn't a cook food.
+       A portion of a batch meal reads cooked only: "6 oz cooked · of 80 oz batch"
+       ("170 g cooked · of 2.3 kg batch"). */
     entryLabel(e, units) {
       const i = M.cook.entryInfo(e); if (!i) return "";
+      const b = batchOf(e);
+      if (b) {
+        const fam = famOf(i.fam || units || personUnits());
+        const whole = fam === "g" && b >= 1000 ? String(r1(b / 1000)) + " kg" : fmtWeight(b, fam);
+        return fmtWeight(i.grams, fam) + " cooked · of " + whole + " batch";
+      }
       return M.cook.label(i.grams, i.state, i.cook, i.fam || units || personUnits(), { vol: i.vol });
     },
     /* A copy of a cook food seen in its cooked state (serving / per / per100g /
@@ -1131,8 +802,8 @@ window.M = window.M || {};
     const now = M.now();
     const o = Object.assign({}, f);
     o.id = o.id || M.uid();
-    o.name = String(o.name || "Food").trim();
-    o.brand = String(o.brand || "").trim();
+    o.name = String(o.name || "Food").trim().slice(0, 120);
+    o.brand = String(o.brand || "").trim().slice(0, 120);
     o.barcode = String(o.barcode || "").trim();
     o.source = o.source || "custom";
     o.serving = normServing(o.serving);
@@ -1209,8 +880,8 @@ window.M = window.M || {};
     const now = M.now();
     const o = Object.assign({}, m);
     o.id = o.id || M.uid();
-    o.name = String(o.name || "Meal").trim();
-    o.desc = String(o.desc || "").trim();
+    o.name = String(o.name || "Meal").trim().slice(0, 120);
+    o.desc = String(o.desc || "").trim().slice(0, 120);
     o.slot = M.isSlot(o.slot) ? o.slot : "Any";
     o.items = (Array.isArray(o.items) ? o.items : []).map(normItem);
     o.servingsMade = num(o.servingsMade, 1) > 0 ? num(o.servingsMade, 1) : 1;
@@ -1280,8 +951,8 @@ window.M = window.M || {};
     if (food && o.state === "cooked") food = M.cook.view(food, "cooked");   /* fills below use the weighed state */
     o.id = o.id || M.uid();
     o.slot = M.isSlot(o.slot) ? o.slot : M.defaultSlot();
-    o.name = String(o.name || (food && food.name) || "Food").trim();
-    o.brand = String(o.brand || (food && food.brand) || "").trim();
+    o.name = String(o.name || (food && food.name) || "Food").trim().slice(0, 120);
+    o.brand = String(o.brand || (food && food.brand) || "").trim().slice(0, 120);
     o.servings = num(o.servings, 1) > 0 ? num(o.servings, 1) : 1;
     if (!o.servingLabel) {
       if (isObj(o.serving)) { o.servingLabel = M.fmtServing(o.serving); if (o.g == null) o.g = o.serving.g; }
@@ -1293,6 +964,11 @@ window.M = window.M || {};
     o.at = num(o.at) || M.now();
     if (!o.foodId) delete o.foodId;
     if (!o.mealId) delete o.mealId;
+    /* a portion of a batch meal remembers the batch's cooked weight, so its label never changes later */
+    if (o.mealId && o.state === "cooked" && !(num(o.batchG) > 0)) {
+      const m = M.MS.meals[o.mealId];
+      if (isObj(m) && isObj(m.batch) && num(m.batch.cookedG) > 0) { o.batch = true; o.batchG = r1(num(m.batch.cookedG)); }
+    }
     return o;
   }
   M.log = {
@@ -1329,11 +1005,13 @@ window.M = window.M || {};
        change this day. */
     addMeal(dateKey, mealId, servings, slot, opt) {
       const m = M.MS.meals[mealId]; if (!m) return [];
+      /* the foods inside count as used too (saved in the one save below) */
+      (Array.isArray(m.items) ? m.items : []).forEach(it => { if (isObj(it) && isStr(it.foodId)) touchFood(it.foodId); });
       const s = M.isSlot(slot) ? slot : (M.isSlot(m.slot) ? m.slot : M.defaultSlot());
       if (isObj(m.batch) && num(m.batch.cookedG) > 0 && isObj(opt) && num(opt.grams) > 0) {
         const u = WEIGHT_G[opt.unit] ? opt.unit : "oz", ug = WEIGHT_G[u], cg = num(m.batch.cookedG);
         const per = {}; M.NUT.forEach(k => { per[k] = r4(num(m.per[k]) * ug / cg); });
-        return [M.log.add(dateKey, { slot: s, name: m.name, brand: "", servings: r4(num(opt.grams) / ug), servingLabel: "1 " + u + " cooked", g: r4(ug), per, mealId, state: "cooked", cook: M.cook.batchCook(m) })];
+        return [M.log.add(dateKey, { slot: s, name: m.name, brand: "", servings: r4(num(opt.grams) / ug), servingLabel: "1 " + u + " cooked", g: r4(ug), per, mealId, state: "cooked", cook: M.cook.batchCook(m), batch: true, batchG: r1(cg) })];
       }
       const e = M.log.add(dateKey, { slot: s, name: m.name, brand: "", servings: num(servings, 1) > 0 ? num(servings, 1) : 1, servingLabel: "1 serving", g: null, per: m.per, mealId });
       return [e];
@@ -1354,8 +1032,8 @@ window.M = window.M || {};
       if (removed) { touchDay(d); M.save(); }
       return removed;
     },
-    slotEntries(dateKey, slot, pid) { const d = M.dayOf(dateKey, pid); return d ? d.entries.filter(x => x.slot === slot) : []; },
-    totals(dateKey, pid) { const d = M.dayOf(dateKey, pid); return M.foodMath.sum(d ? d.entries : []); },
+    slotEntries(dateKey, slot, pid) { const d = M.dayOf(dateKey, pid); return d && Array.isArray(d.entries) ? d.entries.filter(x => isObj(x) && x.slot === slot) : []; },
+    totals(dateKey, pid) { const d = M.dayOf(dateKey, pid); return M.foodMath.sum(d && Array.isArray(d.entries) ? d.entries.filter(isObj) : []); },
     slotTotals(dateKey, slot, pid) { return M.foodMath.sum(M.log.slotEntries(dateKey, slot, pid)); },
     setWater(dateKey, oz) { const d = M.day(dateKey); d.water = Math.max(0, r0(num(oz))); touchDay(d); M.save(); return d.water; },
     setNote(dateKey, note) { const d = M.day(dateKey); d.note = String(note || ""); touchDay(d); M.save(); return d.note; },
@@ -1367,17 +1045,30 @@ window.M = window.M || {};
 
   /* ------------------------------------------------------------------- body */
   const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const BODY_OK = { ok: true, msg: "" };
   M.body = {
-    /* {date?, w?, rhr?, pid?} — w in lb. Merges into the existing record for that day. */
+    /* Is this a real weight or resting heart rate? value is in the person's units
+       (lb, or kg when units is "metric"). → {ok, msg} with a plain message. */
+    check(value, kind, units) {
+      const rhr = kind === "rhr", kg = units === "metric";
+      const v = typeof value === "number" ? value : String(value == null ? "" : value).trim() === "" ? NaN : Number(String(value).trim());
+      if (rhr) return v >= 25 && v <= 220 ? BODY_OK : { ok: false, msg: "Resting heart rate should be 25 to 220 beats a minute." };
+      if (kg) return v >= 23 && v <= 320 ? BODY_OK : { ok: false, msg: "Weight should be 23 to 320 kg." };
+      return v >= 50 && v <= 700 ? BODY_OK : { ok: false, msg: "Weight should be 50 to 700 lb." };
+    },
+    /* {date?, w?, rhr?, pid?} — w in lb. Merges into the existing record for that day.
+       Refuses (null) a weight or heart rate out of range. The 2-week weigh-in clock
+       (lastBody) only moves for a weigh-in dated today or yesterday. */
     add(rec) {
       rec = isObj(rec) ? rec : {};
-      const pid = rec.pid || M.pid(); if (!pid) return null;
-      const date = rec.date || M.today();
+      const pid = rec.pid || M.pid(); if (!isPid(pid)) return null;
+      const date = isStr(rec.date) && /^\d{4}-\d{2}-\d{2}$/.test(rec.date) ? rec.date : M.today();
       const id = dayId(pid, date);
       const w = rec.w == null || rec.w === "" ? null : num(rec.w, null);
       const rhr = rec.rhr == null || rec.rhr === "" ? null : num(rec.rhr, null);
       const hasW = w != null && w > 0, hasR = rhr != null && rhr > 0;
       if (!hasW && !hasR) return M.MS.body[id] || null;
+      if ((hasW && !M.body.check(w, "w", "us").ok) || (hasR && !M.body.check(rhr, "rhr").ok)) return null;
       const b = isObj(M.MS.body[id]) ? M.MS.body[id] : { id, pid, date, w: null, rhr: null, at: 0 };
       if (hasW) b.w = r1(w);
       if (hasR) b.rhr = r0(rhr);
@@ -1385,17 +1076,23 @@ window.M = window.M || {};
       M.MS.body[id] = b;
       M.sync.dirty.body.add(id);
       const p = M.person(pid);
-      p.lastBody = M.now();
-      if (hasW) { const latest = M.body.latest(pid, "w"); if (!latest || latest.date <= date) p.weightLb = b.w; }
+      if (date === M.today() || date === M.addDays(M.today(), -1)) p.lastBody = M.now();
+      if (hasW) { const latest = M.body.latest(pid, "w"); if (!latest || latest.date <= date) { p.weightLb = b.w; p.updatedAt = M.now(); } }
       M.save();
       return b;
     },
+    /* Deletes that day's record. The weight goes back to the latest weigh-in left and
+       the targets follow (unless they're set by hand). One save. */
     remove(date, pid) {
       pid = pid || M.pid(); if (!pid) return false;
       const id = dayId(pid, date); if (!M.MS.body[id]) return false;
       delete M.MS.body[id];
       M.sync.dirty.body.delete(id); M.sync.deleted.body.add(id);
-      M.save();
+      if (isPid(pid)) {
+        const p = M.person(pid), latest = M.body.latest(pid, "w");
+        if (latest && latest.value !== p.weightLb) { p.weightLb = latest.value; p.updatedAt = M.now(); }
+        M.calc.applyTargets(p);   /* saves */
+      } else M.save();
       return true;
     },
     list(pid) { pid = pid || M.pid(); return Object.values(M.MS.body).filter(b => b && b.pid === pid).sort(byDate); },
@@ -1421,70 +1118,204 @@ window.M = window.M || {};
       }
       return out;
     },
-    /* lb/wk: mean of the last 7 days vs mean of the first 7 days of the 28-day
-       window ending at the latest weigh-in, divided by the weeks between the
-       two groups' mean dates. null until there is ~2 weeks of data. */
+    /* lb a week: the best straight line (least squares) through the weigh-ins of the
+       56 days ending at the latest one. Works with a weigh-in every 2 weeks: needs 2+
+       weigh-ins at least 14 days apart, else null. */
     ratePerWeek(pid) {
-      const all = M.body.series(pid, "w", 0); if (all.length < 4) return null;
-      const end = all[all.length - 1].date, start = M.addDays(end, -27);
-      const win = all.filter(x => x.date >= start); if (win.length < 4) return null;
-      const a = win.filter(x => M.daysBetween(win[0].date, x.date) <= 6);
-      const b = win.filter(x => M.daysBetween(x.date, end) <= 6);
-      if (!a.length || !b.length) return null;
-      const mean = arr => arr.reduce((t, x) => t + num(x.v), 0) / arr.length;
-      const mDate = arr => arr.reduce((t, x) => t + M.daysBetween(start, x.date), 0) / arr.length;
-      const gap = mDate(b) - mDate(a); if (gap < 7) return null;
-      return r2((mean(b) - mean(a)) / gap * 7);
+      const all = M.body.series(pid, "w", 0); if (all.length < 2) return null;
+      const end = all[all.length - 1].date, start = M.addDays(end, -55);
+      const win = all.filter(x => x.date >= start);
+      if (win.length < 2 || M.daysBetween(win[0].date, end) < 14) return null;
+      const xs = win.map(x => M.daysBetween(start, x.date)), ys = win.map(x => num(x.v));
+      const mx = xs.reduce((t, x) => t + x, 0) / xs.length, my = ys.reduce((t, y) => t + y, 0) / ys.length;
+      let sxy = 0, sxx = 0;
+      for (let i = 0; i < xs.length; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) * (xs[i] - mx); }
+      return sxx > 0 ? r2(sxy / sxx * 7) : null;
     }
   };
 
   /* ---------------------------------------------------------------- recents */
-  M.recents = function (pid, n) {
-    pid = pid || M.pid(); n = num(n, 20) || 20;
+  /* A recent row seen on the LIVE food or meal: today's numbers, serving and cook
+     info, with last time's amount, unit and state. Old merged ids resolve through
+     M.DB.alias. A food marked alwaysRaw (the chicken breast) comes back raw: the
+     cooked grams ÷ y. Only a food or meal that no longer exists keeps its snapshot. */
+  /* Nutrition of `grams` of a food in a state, not rounded (a "1 g" unit times 175 must stay exact). */
+  function perExact(f, state, grams) {
+    const p = M.cook.per100(f, state); if (!p) return null;
+    const o = {}; M.NUT.forEach(k => { o[k] = r4(num(p[k]) * num(grams) / 100); });
+    return o;
+  }
+  function liveRecent(o) {
+    if (o.mealId) {
+      const m = M.meals.get(o.mealId);
+      if (!isObj(m)) return o;
+      o.name = m.name; o.brand = "";
+      if (isObj(m.batch) && num(m.batch.cookedG) > 0) {
+        const g1 = unitGrams(o), cg = num(m.batch.cookedG);
+        if (g1 > 0) { const per = {}; M.NUT.forEach(k => { per[k] = r4(num(m.per && m.per[k]) * g1 / cg); }); o.per = per; }
+      }
+      else { const sv = M.parseServing(o.servingLabel); if (lc(sv.unit) === "serving" && sv.qty === 1) o.per = normPer(m.per); }
+      return o;
+    }
+    if (!o.foodId) return o;
+    const f = M.foods.get(o.foodId);
+    if (!isObj(f)) return o;
+    const al = M.cook.alias(o.foodId), c = M.cook.of(f);
+    o.foodId = f.id; o.name = f.name; o.brand = f.brand || "";
+    if (c) { o.state = o.state || (al ? al.state : "raw"); o.cook = cookLite(c); }
+    else { delete o.state; delete o.cook; }
+    const g1 = unitGrams(o);
+    if (c && f.alwaysRaw === true && o.state === "cooked" && g1 > 0) {
+      /* cooked grams → raw grams, in the same family of unit (oz / lb → oz, else g) */
+      const rawG = g1 * o.servings / c.y, u = unitWord(M.parseServing(o.servingLabel).unit), oz = u === "oz" || u === "lb";
+      o.state = "raw";
+      o.servingLabel = (oz ? "1 oz " : "1 g ") + c.word;
+      o.g = oz ? OZ_G : 1;
+      o.servings = oz ? r1(rawG / OZ_G) || 0.1 : Math.max(1, Math.round(rawG));
+      o.per = perExact(f, "raw", o.g) || o.per;
+      return o;
+    }
+    const per = g1 > 0 ? perExact(f, o.state === "cooked" ? "cooked" : "raw", g1) : null;
+    if (per) o.per = per;
+    else {
+      /* no grams to go on: the food's own serving or one of its portions, by label */
+      const sv = normServing(f.serving), lab = lc(M.servingText(o.servingLabel));
+      if (lab === lc(M.servingText(M.fmtServing(sv)))) o.per = normPer(f.per);
+    }
+    return o;
+  }
+  /* A tiny add-on (about a teaspoon of oil or less): listed after the rest. */
+  function tinyRecent(o) {
+    if (num(o.per && o.per.cal) * num(o.servings, 1) > 60) return false;   /* real food: no need to look closer */
+    const g1 = unitGrams(o), sv = M.parseServing(o.servingLabel), u = unitWord(sv.unit) || lc(sv.unit);
+    if (g1 > 0) return g1 * o.servings <= 5;
+    return /^(tsp|teaspoons?)$/.test(u) && sv.qty * o.servings <= 1;
+  }
+  /* M.recents(pid, n = 30, slot): one row per food / meal / name, logged in the last 60 days.
+     With a slot: most often logged in that slot in the last 14 days first, then newest.
+     Tiny add-ons always go last. */
+  M.recents = function (pid, n, slot) {
+    pid = pid || M.pid(); n = num(n, 30) || 30;
     if (!pid) return [];
-    const from = M.addDays(M.today(), -59);
+    const from = M.addDays(M.today(), -59), from14 = M.addDays(M.today(), -13);
     const map = new Map();
     const snap = e => {
       const o = { servingLabel: e.servingLabel || "1 serving", servings: num(e.servings, 1) || 1, g: num(e.g) > 0 ? num(e.g) : null, per: normPer(e.per), foodId: e.foodId || null, mealId: e.mealId || null, lastUsed: num(e.at) };
       if (e.state === "raw" || e.state === "cooked") { o.state = e.state; if (cookLite(e.cook)) o.cook = cookLite(e.cook); }
       return o;
     };
+    const keyOfEntry = e => {
+      if (e.mealId && M.meals.get(e.mealId)) return "m:" + e.mealId;
+      if (e.foodId) { const f = M.foods.get(e.foodId); if (isObj(f)) return "f:" + f.id; }
+      return lc(e.name) + "|" + lc(e.brand);
+    };
     Object.values(M.MS.days).forEach(d => {
-      if (!d || d.pid !== pid || d.date < from || !Array.isArray(d.entries)) return;
+      if (!isObj(d) || d.pid !== pid || !isStr(d.date) || d.date < from || !Array.isArray(d.entries)) return;
       d.entries.forEach(e => {
-        if (!e || !e.name) return;
-        const k = lc(e.name) + "|" + lc(e.brand);
+        if (!isObj(e) || !e.name) return;
+        const k = keyOfEntry(e), inSlot = slot && e.slot === slot && d.date >= from14 ? 1 : 0, at = num(e.at);
         const cur = map.get(k);
-        if (!cur) map.set(k, Object.assign({ name: e.name, brand: e.brand || "", count: 1 }, snap(e)));
-        else { cur.count++; if (num(e.at) >= cur.lastUsed) Object.assign(cur, { name: e.name, brand: e.brand || "" }, snap(e)); }
+        if (!cur) map.set(k, { e, at, count: 1, slotCount: inSlot });
+        else { cur.count++; cur.slotCount += inSlot; if (at >= cur.at) { cur.e = e; cur.at = at; } }
       });
     });
-    return Array.from(map.values()).sort((a, b) => b.lastUsed - a.lastUsed).slice(0, n);
+    /* the newest entry of each; order on what was logged, then rebuild only the rows handed back */
+    const rows = Array.from(map.values()).map(x => Object.assign({ name: x.e.name, brand: x.e.brand || "", count: x.count, slotCount: x.slotCount }, snap(x.e)));
+    rows.forEach(o => { o.tiny = tinyRecent(o); });
+    rows.sort((a, b) => (a.tiny - b.tiny) || (slot ? b.slotCount - a.slotCount : 0) || b.lastUsed - a.lastUsed);
+    return rows.slice(0, n).map(o => { try { return liveRecent(o); } catch (x) { return o; } });
   };
 
   /* ----------------------------------------------------------------- search */
-  const WORD_SPLIT = /[^\p{L}\p{N}%]+/u;
-  function tokens(q) { return lc(q).split(WORD_SPLIT).filter(Boolean); }
-  /* -1 = no match; otherwise higher is better. Every token must hit name, brand, kw or extra.
+  /* Words for matching: lowercase, no apostrophes, no leading amounts ("2 eggs",
+     "200 g chicken"), one form for plurals (berries → berry, potatoes → potato,
+     eggs → egg), split on anything that isn't a letter. Used for queries and names. */
+  const AMOUNT_WORDS = new Set(["g", "gram", "grams", "oz", "ounce", "ounces", "lb", "lbs", "pound", "pounds", "kg", "ml", "x", "cup", "cups", "tbsp", "tsp", "of"]);
+  function singular(w) {
+    if (w.length <= 3) return w;
+    if (/ies$/.test(w)) return w.slice(0, -3) + "y";
+    if (/oes$/.test(w)) return w.slice(0, -2);
+    if (/(sses|xes|zes|ches|shes)$/.test(w)) return w.slice(0, -2);
+    if (/s$/.test(w) && !/(ss|us)$/.test(w)) return w.slice(0, -1);
+    return w;
+  }
+  M.searchTokens = function (text) {
+    const s = lc(text).replace(/['’‘`]/g, "");
+    const parts = s.split(/\s+/).filter(Boolean);
+    let i = 0;
+    while (i < parts.length && /^[\d.,/½¼¾⅓⅔×x-]+$/.test(parts[i]) && /[\d½¼¾⅓⅔]/.test(parts[i])) {
+      i++;
+      while (i < parts.length && AMOUNT_WORDS.has(parts[i])) i++;
+    }
+    return parts.slice(i).join(" ").split(/[^\p{L}]+/u).filter(Boolean).map(singular);
+  };
+  const tokens = q => M.searchTokens(q);
+  const tokCache = new Map();
+  function toksOf(s) {
+    s = String(s == null ? "" : s);
+    let t = tokCache.get(s);
+    if (!t) { t = M.searchTokens(s); if (tokCache.size > 5000) tokCache.clear(); tokCache.set(s, t); }
+    return t;
+  }
+  /* -1 = no match; otherwise higher is better. Every word must hit the name, brand, kw or extra.
+     Whole words beat word starts, which beat letters inside a word. The head noun of
+     the name ("rice" in "White rice", not in "Rice cake") counts most.
      kw = words that count like name words ("raw" / "cooked" on meat, rice, pasta). */
+  /* The words of a name (and brand), worked out once per name. */
+  const nameCache = new Map();
+  function nameInfo(name, brand) {
+    const key = String(name == null ? "" : name) + "\u0001" + String(brand == null ? "" : brand);
+    let o = nameCache.get(key);
+    if (o) return o;
+    const n = lc(name), words = toksOf(name), bw = toksOf(brand);
+    /* a name that repeats its brand ("Dave's Killer Bread Powerseed") is matched without it */
+    let hw = toksOf(n.split(/[,(]/)[0]);
+    if (bw.length && bw.every(w => hw.indexOf(w) >= 0)) { const nb = hw.filter(w => bw.indexOf(w) < 0); if (nb.length) hw = nb; }
+    o = { n, plain: n.replace(/['’]/g, ""), words, bw, lb: lc(brand), hw, head: hw.length ? hw[hw.length - 1] : "", j: words.join(" ") };
+    if (nameCache.size > 5000) nameCache.clear();
+    nameCache.set(key, o);
+    return o;
+  }
+  let scoreWeak = false;   /* set by scoreText: some word only matched inside another word, a brand or the description */
   function scoreText(toks, name, brand, extra, kw) {
-    const n = lc(name), b = lc(brand), x = lc(extra);
-    const words = n.split(WORD_SPLIT).filter(Boolean), kws = lc(kw).split(WORD_SPLIT).filter(Boolean);
+    const ni = nameInfo(name, brand), n = ni.n, words = ni.words, bw = ni.bw, hw = ni.hw, headNoun = ni.head;
+    const xw = toksOf(extra), kws = toksOf(kw);
     let s = 0;
+    scoreWeak = false;
     for (const t of toks) {
-      if (n === t) s += 60;
-      else if (n.startsWith(t)) s += 30;
-      else if (words.some(w => w.startsWith(t)) || kws.some(w => w.startsWith(t))) s += 20;
-      else if (n.includes(t)) s += 10;
-      else if (b.includes(t)) s += 6;
-      else if (x.includes(t)) s += 3;
+      if (hw.length === 1 && hw[0] === t) s += 50;
+      else if (t === headNoun) s += 36;
+      else if (hw.indexOf(t) >= 0) s += 28 + (hw[0] === t ? 2 : 0);
+      else if (words.indexOf(t) >= 0 || kws.indexOf(t) >= 0) s += 22;
+      else if (words.some(w => w.startsWith(t))) s += 14 + (words[0] && words[0].startsWith(t) ? 4 : 0);
+      else if (bw.indexOf(t) >= 0) s += 12;
+      else if (ni.plain.includes(t)) { s += 8; scoreWeak = true; }
+      else if (bw.some(w => w.startsWith(t)) || ni.lb.includes(t)) { s += 6; scoreWeak = true; }
+      else if (xw.some(w => w.startsWith(t))) { s += 3; scoreWeak = true; }
       else return -1;
     }
-    return s - Math.min(10, n.length / 8);
+    return s - Math.min(8, n.length / 10);
   }
   const usesBonus = o => Math.min(10, Math.log2(num(o.uses) + 1) * 2);
   /* Cook foods also answer to "raw" / "dry" / "cooked" ("cooked chicken", "dry pasta"). */
   const cookWords = f => { const c = M.cook.of(f); return c ? (c.word === "dry" ? "dry uncooked cooked" : "raw cooked") : ""; };
+  /* The words Nick and Katerina use for the foods they buy (built-in foods marked
+     staple / alwaysRaw in m-data). These foods come first for these words, still
+     below their own saved foods and meals. */
+  const hasW = (f, w) => toksOf(f.name).concat(toksOf(f.brand)).some(x => x === w || x.startsWith(w));
+  const STAPLE_WORDS = [
+    { q: ["chicken", "chicken breast", "breast", "raw chicken", "chicken raw", "chicken breast raw", "raw chicken breast", "cooked chicken", "cooked chicken breast", "chicken breast cooked"],
+      hit: f => f.alwaysRaw === true || (f.staple === true && hasW(f, "chicken") && hasW(f, "breast")) },
+    { q: ["cottage cheese"], hit: f => f.staple === true && hasW(f, "cottage") && hasW(f, "cheese") },
+    { q: ["jam", "jelly", "strawberry jam", "strawberry jelly"], hit: f => f.staple === true && (hasW(f, "jam") || hasW(f, "jelly") || hasW(f, "smucker")) },
+    { q: ["turkey", "turkey slice", "slice turkey", "sliced turkey", "deli turkey", "lunch meat", "turkey lunch meat", "turkey deli meat", "deli meat"],
+      hit: f => f.staple === true && hasW(f, "turkey") && (hasW(f, "slice") || hasW(f, "deli") || hasW(f, "lunch") || hasW(f, "hillshire")) }
+  ];
+  function stapleRule(toks) { const q = toks.join(" "); return STAPLE_WORDS.find(r => r.q.indexOf(q) >= 0) || null; }
+  /* Their own foods, meals and recents that match on whole words or word starts always
+     come before built-in foods (a tier of their own, above any name score). */
+  const STAPLE = 12;     /* a built-in food they buy: above other built-in foods */
+  const NAMED = 60;      /* a built-in food they named for these words (chicken, turkey, jam, cottage cheese) */
   function foodResult(kind, f) {
     const serving = normServing(f.serving);
     const r = { kind, id: f.id, name: f.name, brand: f.brand || "", sub: M.fmtServing(serving), per: normPer(f.per), serving, alts: normAlts(f.alts), foodId: f.id, mealId: null, ref: f };
@@ -1526,7 +1357,7 @@ window.M = window.M || {};
       return true;
     };
     if (!toks.length) {
-      if (wantRecents) M.recents(pid, 10).forEach(rc => push(recentResult(rc)));
+      if (wantRecents) M.recents(pid, 30, slot).forEach(rc => push(recentResult(rc)));
       const meals = wantMeals ? M.meals.list() : [];
       if (slot) meals.filter(m => m.slot === slot).forEach(m => push(mealResult(m)));
       meals.filter(m => m.slot === "Any").forEach(m => push(mealResult(m)));
@@ -1534,19 +1365,26 @@ window.M = window.M || {};
       M.foods.list().forEach(f => push(foodResult("food", f)));
       return out.slice(0, limit);
     }
-    const qn = lc(q).trim();
+    const qn = toks.join(" ");
+    const rule = stapleRule(toks);
     const scored = [];
-    const consider = (r, bonus, extra, kw) => {
-      const s = scoreText(toks, r.name, r.brand, extra, kw);
-      if (s < 0) return;
-      scored.push({ r, s: s + bonus + (lc(r.name) === qn ? 40 : 0) });
+    const consider = (r, bonus, extra, kw, forced, own) => {
+      let s = scoreText(toks, r.name, r.brand, extra, kw);
+      if (s < 0) { if (!forced) return; s = 0; }
+      scored.push({ r, tier: own && !scoreWeak ? 0 : 1, s: s + bonus + (nameInfo(r.name, r.brand).j === qn ? 40 : 0) });
     };
-    if (wantRecents) M.recents(pid, 40).forEach((rc, i) => consider(recentResult(rc), 25 + Math.max(0, 10 - i / 4)));
-    if (wantMeals) M.meals.list().forEach(m => consider(mealResult(m), 15 + (slot && m.slot === slot ? 15 : m.slot === "Any" ? 6 : 0) + usesBonus(m), m.desc));
-    M.foods.list().forEach(f => consider(foodResult("food", f), 10 + usesBonus(f), "", cookWords(f)));
-    /* plain meat / fish / rice / pasta (the cook foods) edge out mixed dishes that share a word */
-    genericList().forEach(f => { if (f && f.name) consider(foodResult("generic", f), M.cook.of(f) ? 3 : 0, "", cookWords(f)); });
-    scored.sort((a, b) => b.s - a.s || lc(a.r.name).localeCompare(lc(b.r.name)));
+    const namedFood = f => { try { return !!(rule && rule.hit(f)); } catch (e) { return false; } };
+    if (wantRecents) M.recents(pid, 40, slot).forEach((rc, i) => consider(recentResult(rc), 25 + Math.max(0, 10 - i / 4), "", "", false, true));
+    if (wantMeals) M.meals.list().forEach(m => consider(mealResult(m), 15 + (slot && m.slot === slot ? 25 : m.slot === "Any" ? 6 : 0) + usesBonus(m), m.desc, "", false, true));
+    M.foods.list().forEach(f => consider(foodResult("food", f), 10 + usesBonus(f), "", cookWords(f), false, true));
+    /* built-in foods: a food they named for these words first, then foods they buy,
+       then plain meat / fish / rice / pasta (the cook foods) before mixed dishes that share a word */
+    genericList().forEach(f => {
+      if (!isObj(f) || !f.name) return;
+      const named = namedFood(f);
+      consider(foodResult("generic", f), (named ? NAMED : 0) + (f.staple === true ? STAPLE : 0) + (M.cook.of(f) ? 3 : 0), "", cookWords(f), named);
+    });
+    scored.sort((a, b) => a.tier - b.tier || b.s - a.s || lc(a.r.name).localeCompare(lc(b.r.name)));
     for (const x of scored) { if (out.length >= limit) break; push(x.r); }
     return out;
   };
@@ -1558,8 +1396,9 @@ window.M = window.M || {};
       const p = M.person(pid), now = M.now(), sn = p.snooze || {};
       if (!p.setupAt) return "setup";
       if (now - num(p.setupAt) > 60 * DAY && num(sn.refresh60) < now) return "refresh60";
-      /* Setup collects a weight, so it counts as the first body check-in. */
-      const lastBody = Math.max(num(p.lastBody), num(p.setupAt));
+      /* The 2-week weigh-in clock runs from the last weigh-in only (setup sets it:
+         setup collects a weight). A 60-day refresh doesn't reset it. */
+      const lastBody = num(p.lastBody) || num(p.setupAt);
       if (now - lastBody > 14 * DAY && num(sn.body14) < now) return "body14";
       return null;
     },
@@ -1578,6 +1417,19 @@ window.M = window.M || {};
       else if (kind === "body14") { p.lastBody = now; p.snooze.body14 = 0; }
       M.save();
       return p;
+    },
+    /* After the person edits their numbers (You): a complete profile that was never set
+       up counts as set up; a due 60-day refresh counts as done. Saves only when
+       something changed. → what's due now. */
+    numbersChanged(pid) {
+      pid = pid || M.pid(); if (!isPid(pid)) return null;
+      const p = M.person(pid), now = M.now();
+      if (!isObj(p.snooze)) p.snooze = { refresh60: 0, body14: 0 };
+      let changed = false;
+      if (!p.setupAt) { if (M.calc.complete(p)) { p.setupAt = now; if (!p.lastBody) p.lastBody = now; changed = true; } }
+      else if (now - num(p.setupAt) > 60 * DAY) { p.setupAt = now; p.snooze.refresh60 = 0; changed = true; }
+      if (changed) { p.updatedAt = now; M.save(); }
+      return M.checkins.due(pid);
     }
   };
 
@@ -1595,34 +1447,57 @@ window.M = window.M || {};
     pid = pid || M.pid(); weeksBack = Math.max(0, num(weeksBack));
     const end = M.addDays(M.today(), -7 * weeksBack), start = M.addDays(end, -6);
     const p = M.person(pid);
-    const daily = [], acc = { cal: 0, p: 0, c: 0, f: 0 };
-    let logged = 0;
+    /* Today is still going: its bar shows (sofar: true) but it stays out of the
+       averages, unless it is the only day logged. */
+    const today = M.today(), daily = [], acc = { cal: 0, p: 0, c: 0, f: 0 }, tAcc = { cal: 0, p: 0, c: 0, f: 0 };
+    let logged = 0, full = 0, todayLogged = false;
     for (let i = 0; i < 7; i++) {
       const date = M.addDays(start, i);
       const d = pid ? M.dayOf(date, pid) : null;
-      const has = !!(d && d.entries.length);
-      const t = has ? M.foodMath.sum(d.entries) : M.foodMath.blank();
-      if (has) { logged++; acc.cal += t.cal; acc.p += t.p; acc.c += t.c; acc.f += t.f; }
-      daily.push({ date, logged: has, cal: t.cal, p: t.p, c: t.c, f: t.f });
+      const es = d && Array.isArray(d.entries) ? d.entries.filter(isObj) : [];
+      const has = es.length > 0;
+      const t = has ? M.foodMath.sum(es) : M.foodMath.blank();
+      const into = date === today ? tAcc : acc;
+      if (has) { logged++; if (date === today) todayLogged = true; else full++; into.cal += t.cal; into.p += t.p; into.c += t.c; into.f += t.f; }
+      const row = { date, logged: has, cal: t.cal, p: t.p, c: t.c, f: t.f };
+      if (date === today) row.sofar = true;
+      daily.push(row);
     }
-    const avg = k => (logged ? r0(acc[k] / logged) : 0);
-    return { days: 7, start, end, logged, avgCal: avg("cal"), avgP: avg("p"), avgC: avg("c"), avgF: avg("f"), daily, target: M.cp(p.targets) };
+    const useToday = !full && todayLogged, n = useToday ? 1 : full, src = useToday ? tAcc : acc;
+    const avg = k => (n ? r0(src[k] / n) : 0);
+    return { days: 7, start, end, logged, avgDays: n, todayLeftOut: todayLogged && !useToday, avgCal: avg("cal"), avgP: avg("p"), avgC: avg("c"), avgF: avg("f"), daily, target: M.cp(p.targets) };
   };
 
   /* ---------------------------------------------------------- export/import */
   function mergeById(dst, src, tsKey) {
     Object.keys(isObj(src) ? src : {}).forEach(id => {
-      const a = dst[id], b = src[id];
+      if (!okKey(id)) return;
+      const a = hasOwn(dst, id) ? dst[id] : null, b = src[id];
       if (!isObj(b)) return;
-      if (!a || num(b[tsKey]) >= num(a[tsKey])) dst[id] = b;
+      if (!isObj(a) || num(b[tsKey]) >= num(a[tsKey])) dst[id] = b;
     });
   }
+  /* When a profile last changed (the same clock sync uses). */
+  const profTs = p => Math.max(num(p.updatedAt), num(p.setupAt), num(p.lastBody));
+  /* Names, brands and descriptions are capped at 120 characters. */
+  const cap = v => (isStr(v) && v.length > 120 ? v.slice(0, 120) : v);
+  function capRec(r) { if (isObj(r)) ["name", "brand", "desc"].forEach(k => { if (isStr(r[k])) r[k] = cap(r[k]); }); return r; }
   M.export = () => M.cp(M.MS);
   M.import = function (obj) {
     if (!isObj(obj) || obj.v !== 1) return false;
     const cur = M.MS, inc = shape(M.cp(obj));
-    const newer = num(inc.updatedAt) >= num(cur.updatedAt);
-    Object.keys(inc.profiles).forEach(id => { if (!cur.profiles[id] || newer) cur.profiles[id] = inc.profiles[id]; });
+    /* profiles one by one: a set-up profile beats one never set up; else the newer one wins */
+    Object.keys(inc.profiles).forEach(id => {
+      if (!isPid(id)) return;
+      const b = inc.profiles[id], a = hasOwn(cur.profiles, id) ? cur.profiles[id] : null;
+      if (!isObj(b)) return;
+      if (!isObj(a) || (!a.setupAt && b.setupAt)) { cur.profiles[id] = b; return; }
+      if (a.setupAt && !b.setupAt) return;
+      if (profTs(b) >= profTs(a)) cur.profiles[id] = b;
+    });
+    Object.keys(inc.foods).forEach(id => capRec(inc.foods[id]));
+    Object.keys(inc.meals).forEach(id => capRec(inc.meals[id]));
+    Object.keys(inc.days).forEach(id => { const d = inc.days[id]; if (Array.isArray(d.entries)) { d.entries = d.entries.filter(isObj); d.entries.forEach(capRec); } });
     mergeById(cur.foods, inc.foods, "updatedAt");
     mergeById(cur.meals, inc.meals, "updatedAt");
     mergeById(cur.days, inc.days, "updatedAt");

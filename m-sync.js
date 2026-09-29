@@ -33,7 +33,14 @@ window.M = window.M || {};
    ========================================================================== */
 (function (M) {
   "use strict";
+  /* ================= CLOUD SYNC SETTINGS: the only two lines to fill in =================
+     Both empty = sync is off: no network requests at all, and the card says
+     "Cloud sync isn't set up yet."
+     SB_URL: the Supabase project URL, like "https://abcd1234.supabase.co"
+     SB_KEY: the project's PUBLISHABLE key ("sb_publishable_…"), never a secret key.
+             It goes only in the apikey header (it is not a JWT). */
   const SB_URL = ""; const SB_KEY = "";
+  /* ===================================================================================== */
 
   /* ------------------------------------------------------------- constants */
   const ST_KEY = "chalk.sync.v1";            /* this file's own state */
@@ -197,11 +204,13 @@ window.M = window.M || {};
 
   const over = { url: null, key: null, delay: null };
   function cfg() {
-    const url = String(over.url != null ? over.url : SB_URL || "").trim().replace(/\/+$/, "");
-    const key = String(over.key != null ? over.key : SB_KEY || "").trim();
+    /* pasted values can carry invisible characters (a header with one makes every request fail) */
+    const url = String(over.url != null ? over.url : SB_URL || "").replace(/[^\x21-\x7e]/g, "").replace(/\/+$/, "").replace(/\/rest\/v1$/i, "");
+    const key = String(over.key != null ? over.key : SB_KEY || "").replace(/[^\x21-\x7e]/g, "");
     return { url, key };
   }
-  const configured = () => { const c = cfg(); return !!(c.url && c.key); };
+  /* a secret key must never ship in a web page: with one, sync stays off */
+  const configured = () => { const c = cfg(); return !!(c.url && c.key) && /^https?:\/\//i.test(c.url) && !/^sb_secret_/i.test(c.key); };
   const isOn = () => configured() && !!st.code;
   const endpoint = () => cfg().url + "/rest/v1/" + TABLE;
   const upsertURL = () => endpoint() + "?on_conflict=household,kind,id";
@@ -348,6 +357,10 @@ window.M = window.M || {};
     else if (o.entries.some(e => !isObj(e))) o.entries = o.entries.filter(isObj);
     o.entries.forEach((e, i) => { fixLine(e, "Food"); if (typeof e.id !== "string" || !e.id) e.id = "x" + i; if (typeof e.slot !== "string" || !(typeof M.isSlot === "function" ? M.isSlot(e.slot) : true)) e.slot = "Snacks"; });
     fixNum(o, "water", false, 0); fixStr(o, "note", 1000, ""); fixNum(o, "updatedAt", false);
+    /* the app reads these on every day: fill what a bad row dropped (own rows always have them) */
+    if (!isNum(o.water)) o.water = 0;
+    if (typeof o.note !== "string") o.note = "";
+    if (!isNum(o.updatedAt)) o.updatedAt = 0;
     return true;
   }
   function fixBody(o, id) {
@@ -482,12 +495,38 @@ window.M = window.M || {};
   }
 
   /* ------------------------------------------------------------------ http */
-  function headers(code, extra) {
+  /* As few headers as possible, the same for every request of a kind: reads send apikey and
+     x-household; writes add content-type and Prefer. The browser checks these first (a CORS
+     preflight). A publishable key is not a JWT: it goes in apikey only, never Authorization. */
+  function headers(code, extra, hasBody) {
     const key = cfg().key;
-    const h = { apikey: key, "x-household": code, "content-type": "application/json" };
-    if (/^eyJ/.test(key)) h.Authorization = "Bearer " + key;
+    const h = { apikey: key, "x-household": code };
+    if (hasBody) h["content-type"] = "application/json";
+    if (/^eyJ[\w-]*\.[\w-]+\.[\w-]*$/.test(key)) h.Authorization = "Bearer " + key;   /* only an old-style JWT key */
     if (extra) Object.keys(extra).forEach(k => { h[k] = extra[k]; });
     return h;
+  }
+  /* This phone's clock minus the server's (Date header), used only when it's clearly off (over a
+     minute): edit times are then compared in server time, so a phone whose clock runs fast
+     can't win with an edit it made earlier (and a slow one isn't always beaten). */
+  let skew = 0;
+  function noteClock(res) {
+    try {
+      const d = res && res.headers && typeof res.headers.get === "function" ? res.headers.get("date") : null;
+      const srv = d ? Date.parse(d) : NaN;
+      if (!isFinite(srv)) return;
+      const off = now() - (srv + 500);          /* Date is whole seconds */
+      skew = Math.abs(off) > 60000 ? off : 0;
+    } catch (e) {}
+  }
+  const srvTime = t => (isNum(t) && t > 0 ? t - skew : t);
+  /* An Anthropic key never leaves the phone, even if it was pasted into a name or a note. */
+  function noKey(s) {
+    if (!s) return s;
+    if (s.indexOf("sk-ant-") >= 0) s = s.replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, "");
+    const k = String(lsGet("chalk.ai.key") || "").trim();
+    if (k.length >= 16 && s.indexOf(k) >= 0) s = s.split(k).join("");
+    return s;
   }
   function retryAfter(res) {
     try {
@@ -508,13 +547,15 @@ window.M = window.M || {};
       const timer = setTimeout(() => { try { if (ctl) ctl.abort(); } catch (e) {} finish(reject, { code: "net", message: "timeout" }); }, TIMEOUT_MS);
       let p;
       try {
-        const opt = { method, headers: headers(code, extra), cache: "no-store", credentials: "omit" };
+        const opt = { method, headers: headers(code, extra, body != null), cache: "no-store", credentials: "omit" };
         if (body != null) opt.body = body;
         if (ctl) opt.signal = ctl.signal;
         p = fetch(url, opt);
       } catch (e) { finish(reject, { code: "net", message: String(e && e.message || e) }); return; }
+      /* a blocked CORS check (preflight) or a dropped connection rejects with a TypeError */
       Promise.resolve(p).then(res => {
         if (done) return;
+        noteClock(res);
         if (!res || !res.ok) {
           const status = res ? res.status : 0, ra = retryAfter(res);
           Promise.resolve(res && typeof res.text === "function" ? res.text() : "").catch(() => "").then(t => finish(reject, { code: "http", status, retryAfter: ra, message: String(t || "").slice(0, 300) }));
@@ -542,8 +583,12 @@ window.M = window.M || {};
     if (e && e.code === "setup") return "The cloud isn't set up right yet. We'll try again.";
     if (e && e.code === "unsafe") return "The cloud isn't set up safely. Nothing was shared.";
     if (e && e.code === "net" && e.message === "timeout" && !offline()) return "The cloud is slow to answer. We'll try again soon.";
-    return "Can't reach the internet. We'll try again soon.";
+    if (offline()) return "Can't reach the internet. We'll try again soon.";
+    /* online, but the request never got an answer (blocked check, dropped connection) */
+    return "Couldn't reach the cloud. We'll try again soon.";
   }
+  /* join doesn't try again by itself */
+  const joinErr = e => errText(e).replace(/ We'll try again(?: soon| later)?\.$/, " Try again in a minute.");
 
   /* ------------------------------------------------------------------ pull */
   function forget(key) { delete st.hashes[key]; delete st.gone[key]; delete st.base[key]; delete st.bad[key]; delete st.fail[key]; rcache.delete(key); }
@@ -626,7 +671,7 @@ window.M = window.M || {};
       if (local === undefined) { forget(key); return; }
       /* a delete wins over a copy nobody touched here since the last sync, and (first join,
          nothing agreed yet) over a copy older than the delete */
-      if ((synced !== undefined && hashRec(key, local) === synced) || (synced === undefined && remoteTime(r) > localTime(kind, local))) {
+      if ((synced !== undefined && hashRec(key, local) === synced) || (synced === undefined && remoteTime(r) > srvTime(localTime(kind, local)))) {
         delete coll[id]; forget(key); markDirty(kind, id); ch.applied++;
       }
       return;
@@ -647,19 +692,31 @@ window.M = window.M || {};
            a new phone's first-day setup must not overwrite real targets */
         if (synced === undefined && rs && !(ls && num(local.setupAt) < num(data.setupAt))) { take(data); return; }
       }
-      if (synced !== undefined && lh === synced) { take(keepLocal(kind, up === data ? data : up, local)); return; }
+      if (synced !== undefined && lh === synced) {
+        /* Unchanged here since our last push. If that push carried edits the other phone hadn't
+           seen yet (the copy we both last agreed on differs), its own push may have raced ours:
+           merge field by field against that copy instead of losing our edits. The cloud copy was
+           written after our push (it replaced it), so on a field both changed, it wins. */
+        const b = st.base[key];
+        if ((kind === "food" || kind === "meal") && isObj(b) && H(b) !== lh) {
+          const m = merge3(b, upData(kind, local), up, true);
+          coll[id] = keepLocal(kind, m, local); agree(key, kind, data, rh); rcache.delete(key); markDirty(kind, id); ch.applied++;
+          return;
+        }
+        take(keepLocal(kind, up === data ? data : up, local)); return;
+      }
       /* both sides changed since they last agreed */
       if ((kind === "food" || kind === "meal") && isObj(st.base[key])) {
-        const m = merge3(st.base[key], upData(kind, local), up, remoteAt > localTime(kind, local));
+        const m = merge3(st.base[key], upData(kind, local), up, remoteAt > srvTime(localTime(kind, local)));
         coll[id] = keepLocal(kind, m, local); agree(key, kind, data, rh); rcache.delete(key); markDirty(kind, id); ch.applied++;
         return;
       }
-      if (remoteAt > localTime(kind, local)) take(keepLocal(kind, up === data ? data : up, local));
+      if (remoteAt > srvTime(localTime(kind, local))) take(keepLocal(kind, up === data ? data : up, local));
       return;
     }
     if (synced !== undefined) {
       /* deleted here since the last sync: only a newer edit from the other phone brings it back */
-      if (rh !== synced && remoteAt > num(st.gone[key], now())) take(up === data ? data : up);
+      if (rh !== synced && remoteAt > srvTime(num(st.gone[key], now()))) take(up === data ? data : up);
       return;
     }
     if (st.joining && (kind === "food" || kind === "meal")) {
@@ -846,9 +903,9 @@ window.M = window.M || {};
     return out;
   }
   function makeItem(kind, id, data, deleted, at, key, h, ok) {
-    const row = { household: st.code, kind, id, data, deleted: !!deleted, client_updated: Math.max(0, Math.round(num(at))), device: st.device };
+    const row = { household: st.code, kind, id, data, deleted: !!deleted, client_updated: Math.max(0, Math.round(srvTime(num(at)))), device: st.device };
     let s = "";
-    try { s = JSON.stringify(row); } catch (e) { s = ""; }
+    try { s = noKey(JSON.stringify(row)); } catch (e) { s = ""; }
     return { kind, key, h, s, bytes: s ? bytesOf(s) : 0, ok };
   }
   function trainItem(opts, out) {
@@ -889,7 +946,8 @@ window.M = window.M || {};
     snap.changed.forEach(it => {
       const x = makeItem(it.kind, it.id, upData(it.kind, it.rec), false, localTime(it.kind, it.rec), it.key, it.h, () => {
         st.hashes[it.key] = it.h; delete st.gone[it.key];
-        if (it.kind === "food" || it.kind === "meal") { try { st.base[it.key] = JSON.parse(x.s).data; } catch (e) {} }
+        /* the merge base stays the copy both phones last agreed on until ours comes back in a pull */
+        if ((it.kind === "food" || it.kind === "meal") && !isObj(st.base[it.key])) { try { st.base[it.key] = JSON.parse(x.s).data; } catch (e) {} }
       });
       items.push(x);
     });
@@ -935,6 +993,15 @@ window.M = window.M || {};
     ch.forEach(x => { const f = st.fail[x.key]; st.fail[x.key] = { h: x.h, n: f && f.h === x.h ? num(f.n) + 1 : 1, at: now(), s: e && e.status ? e.status : 0 }; });
   }
   const maxFail = ch => ch.reduce((m, x) => { const f = st.fail[x.key]; return Math.max(m, f && f.h === x.h ? num(f.n) : 0); }, 0);
+  /* Does the server take a write at all right now? Send our own household row again (same
+     data, harmless). If even that fails, it's an outage, not a bad row. */
+  async function takesWrites(gen) {
+    if (!isObj(st.meta) || budget > BISECT_BUDGET) return false;
+    const it = makeItem("meta", "household", st.meta, false, num(st.meta.createdAt) || now(), "meta|household", H(st.meta), () => {});
+    budget++;
+    try { await request("POST", upsertURL(), "[" + it.s + "]", st.code, PREFER); } catch (e2) { return false; }
+    return gen === epoch;
+  }
   /* The server refused a request: find the rows it refuses and set them aside. */
   async function refuse(ch, e, gen) {
     if (ch.length === 1) { setBad(ch[0], e, "refused"); saveSt(); return; }
@@ -954,7 +1021,9 @@ window.M = window.M || {};
      is that row, not the server) or after it failed three times on its own. */
   async function bisect(ch, gen, e) {
     if (ch.length === 1) {
-      if (!postOk && maxFail(ch) < 3) throw e;
+      /* nothing else got in this sync: only blame the row if the server takes a write */
+      if (!postOk && !(await takesWrites(gen))) throw e;
+      if (gen !== epoch) return;
       setBad(ch[0], e, "aside"); saveSt(); return;
     }
     const mid = Math.ceil(ch.length / 2), parts = [ch.slice(0, mid), ch.slice(mid)], bad = [];
@@ -1197,7 +1266,8 @@ window.M = window.M || {};
   function scheduleRetry(e) {
     if (!isOn()) return;
     clearTimeout(retryT);
-    const ms = Math.max(RETRY[Math.min(retryN, RETRY.length - 1)], num(e && e.retryAfter));
+    /* a browser often can't read Retry-After (not exposed): a 429 waits at least a minute anyway */
+    const ms = Math.max(RETRY[Math.min(retryN, RETRY.length - 1)], num(e && e.retryAfter), e && e.status === 429 ? 60000 : 0);
     retryN++;
     st.retryAt = now() + ms;
     retryT = unref(setTimeout(() => { retryT = null; cycle({ reason: "retry" }); }, ms));
@@ -1394,8 +1464,8 @@ window.M = window.M || {};
           attach(); startTicker();
           const r = await cycle({ reason: "join", manual: true });
           return { ok: true, synced: !!r.ok, error: r.ok ? "" : r.error };
-        }, e => ({ ok: false, error: errText(e) })).catch(e => ({ ok: false, error: errText(e) }));
-      } catch (e) { return Promise.resolve({ ok: false, error: errText(e) }); }
+        }, e => ({ ok: false, error: joinErr(e) })).catch(e => ({ ok: false, error: joinErr(e) }));
+      } catch (e) { return Promise.resolve({ ok: false, error: joinErr(e) }); }
     },
     /* Turn off: this phone stops syncing and keeps everything. It remembers what it last
        agreed with this household, so joining the same code later can't bring back things
@@ -1429,13 +1499,17 @@ window.M = window.M || {};
     changeCode() {
       try {
         if (!isOn()) return Promise.resolve({ ok: false, error: configured() ? "Sync is off." : "Cloud sync isn't set up yet." });
-        const old = st.code, t = now();
-        resetFor(rand(20));
-        st.old = st.old.filter(j => j.code !== old).concat({ code: old, why: "moved", at: t });
-        st.meta = { v: 1, createdAt: t, by: st.device };
-        st.verified = false; st.pp = curPid() || "";
-        saveSt(); attach(); startTicker(); notify();
-        return cycle({ reason: "code", manual: true }).then(r => Promise.resolve(finishOld()).then(() => ({ ok: !!r.ok, code: st.code, error: r.ok ? "" : r.error })));
+        /* First bring in what the other phone added (like her profile), so the new code gets it too. */
+        return cycle({ reason: "manual", manual: true }).then(r0 => {
+          if (!r0 || !r0.ok || !isOn()) return { ok: false, code: st.code, error: (r0 && r0.error) || "Sync is off." };
+          const old = st.code, t = now();
+          resetFor(rand(20));
+          st.old = st.old.filter(j => j.code !== old).concat({ code: old, why: "moved", at: t });
+          st.meta = { v: 1, createdAt: t, by: st.device };
+          st.verified = false; st.pp = curPid() || "";
+          saveSt(); attach(); startTicker(); notify();
+          return cycle({ reason: "code", manual: true }).then(r => Promise.resolve(finishOld()).then(() => ({ ok: !!r.ok, code: st.code, error: r.ok ? "" : r.error })));
+        }).catch(e => ({ ok: false, code: st.code, error: errText(e) }));
       } catch (e) { return Promise.resolve({ ok: false, error: errText(e) }); }
     },
     /* What the cloud holds for this person's training (from the last pull), or null. */

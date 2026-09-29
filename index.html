@@ -77,6 +77,12 @@ input,select{font:inherit;color:inherit}
 .modebar button.on{background:var(--acc);color:var(--acc-ink)}
 .modebar svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 .modebar .mb-l{white-space:nowrap;font-variant-numeric:tabular-nums}
+/* Train | Macros reads as one two-way switch: both sides sit in one rounded frame, the side you're on is filled */
+.modebar{width:calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));max-width:536px;margin:4px auto 2px;padding:4px;gap:4px;height:auto;border:1px solid var(--line);border-radius:14px;background:var(--sur2);box-shadow:var(--shadow)}
+.modebar button{min-height:46px;height:auto;border-radius:10px;background:transparent;color:var(--mut)}
+.modebar button+button{border-left:0}
+.modebar button.on{background:var(--acc);color:var(--acc-ink);box-shadow:0 1px 3px rgba(0,0,0,.2)}
+@media (max-width:360px){ .modebar button{font-size:15px;letter-spacing:.03em;gap:5px;padding:0 4px} .modebar svg{width:18px;height:18px} }
 
 .wrap{padding:10px max(12px,env(safe-area-inset-right)) 24px max(12px,env(safe-area-inset-left));display:flex;flex-direction:column;gap:12px;max-width:560px;margin:0 auto}
 
@@ -97,6 +103,8 @@ input,select{font:inherit;color:inherit}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;font-weight:600;background:var(--sur2);border:1px solid var(--line)}
 .btn.primary{background:var(--acc);color:var(--acc-ink);border-color:transparent;font-family:"Barlow Condensed","Barlow",sans-serif;font-size:20px;letter-spacing:.02em;text-transform:uppercase}
 .btn.block{width:100%}
+a.btn{text-decoration:none;color:inherit}
+a.btn.primary{color:var(--acc-ink)}
 .btn.ghost{background:transparent}
 .btn.danger{color:var(--warn)}
 .btn:disabled{opacity:.45}
@@ -629,7 +637,7 @@ function migrate(S){
    names must be known ones, so no field can turn into markup on screen. Real saves pass through unchanged. */
 function cleanTrain(S){
   if(!S||typeof S!=="object") return;
-  const isO=o=>o&&typeof o==="object", num=v=>{ const n=typeof v==="number"?v:Number(v); return isFinite(n)?n:0; };
+  const isO=o=>o&&typeof o==="object", num=v=>{ const n=typeof v==="number"?v:Number(v); return isFinite(n)?n:0; }, numN=v=>v==null?v:num(v);
   const nums=(o,keys)=>{ if(isO(o)) keys.forEach(k=>{ if(o[k]!=null&&typeof o[k]!=="number") o[k]=num(o[k]); }); };
   const MS=new Set(MUSCLES.concat(["Other"])), musc=a=>Array.isArray(a)?a.filter(m=>MS.has(m)):[];
   const set=x=>nums(x,["w","r"]);
@@ -644,9 +652,9 @@ function cleanTrain(S){
   if(Array.isArray(S.log)) S.log.forEach(rec);
   if(isO(S.lastSummary)){ rec(S.lastSummary.rec); if(Array.isArray(S.lastSummary.results)) S.lastSummary.results.forEach(x=>{ nums(x,["from","to","dsets"]); if(isO(x.range)) nums(x.range,["lo","hi"]); }); }
   if(isO(S.ex)) Object.keys(S.ex).forEach(k=>{ const E=S.ex[k]; if(!isO(E)){ delete S.ex[k]; return; } nums(E,["w","miss","best","streak","sets","reps"]);
-    if(Array.isArray(E.hist)) E.hist.forEach(h=>{ nums(h,["d","w","e1"]); if(isO(h)&&Array.isArray(h.r)) h.r=h.r.map(num); });
-    if(isO(E.last)){ nums(E.last,["w"]); if(Array.isArray(E.last.r)) E.last.r=E.last.r.map(num); } if(isO(E.range)) nums(E.range,["lo","hi"]); });
-  if(isO(S.custom)) Object.keys(S.custom).forEach(k=>{ const c=S.custom[k]; if(!isO(c)){ delete S.custom[k]; return; } if(!MS.has(c.m)) c.m="Other"; if(!TYPE_LABEL[c.t]) c.t="mc"; c.s=musc(c.s); nums(c,["inc","rest","guess"]); });
+    if(Array.isArray(E.hist)) E.hist.forEach(h=>{ nums(h,["d","w","e1"]); if(isO(h)&&Array.isArray(h.r)) h.r=h.r.map(numN); });
+    if(isO(E.last)){ nums(E.last,["w"]); if(Array.isArray(E.last.r)) E.last.r=E.last.r.map(numN); } if(isO(E.range)) nums(E.range,["lo","hi"]); });
+  if(isO(S.custom)) Object.keys(S.custom).forEach(k=>{ const c=S.custom[k]; if(!isO(c)){ delete S.custom[k]; return; } if(!MS.has(c.m)) c.m="Other"; if(!TYPE_LABEL[c.t]) c.t="mc"; if(c.s!=null) c.s=musc(c.s); nums(c,["inc","rest","guess"]); });
   if(isO(S.program)&&isO(S.program.workouts)) Object.values(S.program.workouts).forEach(W=>{ if(isO(W)){ if(W.focus) W.focus=musc(W.focus); items(W); } });
   if(isO(S.plan)){ items(S.plan); if(S.plan.off) S.plan.off=musc(S.plan.off); }
   if(isO(S.active)){ items(S.active); nums(S.active,["start"]); }
@@ -1719,6 +1727,8 @@ function openSheet(title,body){
   if(!sheetOn()&&op) sheetOpener=op;
   sheetGen++;
   t.textContent=title; document.getElementById("sheetB").innerHTML=body; bg.classList.add("on"); document.getElementById("sheetB").scrollTop=0;
+  /* a toast still showing from a moment ago moves up, out from under the sheet */
+  const tt=document.getElementById("toast"); if(tt&&tt.classList.contains("on")) tt.classList.add("top");
   sh.removeAttribute("aria-hidden"); sh.removeAttribute("inert"); bgInert(true);
   try{ t.focus({preventScroll:true}); }catch(e){}
   requestAnimationFrame(()=>{ if(bg.classList.contains("on")) sh.classList.add("on"); });
@@ -1738,7 +1748,7 @@ function closeSheet(){
 }
 function exerciseList(action, extra, curId, focus, inDay){
   const ids=Object.keys(LIB).concat(Object.keys(S.custom)); const have=new Set(inDay||[]);
-  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp ${focus&&focus.includes(m)?"foc":""}">${m}</div>`+list.map(id=>{ const L=getEx(id), E=S.ex[id]; return `<button class="opt ${id===curId?"cur":""}" data-a="${action}" data-ex="${esc(id)}" ${extra}><span>${esc(L.n)}${have.has(id)?` <span class="tag">in today</span>`:""}</span><span class="m">${E&&E.w!=null?fmtW(E.w)+" lb":TYPE_LABEL[L.t]}</span></button>`; }).join(""); };
+  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp ${focus&&focus.includes(m)?"foc":""}">${esc(m)}</div>`+list.map(id=>{ const L=getEx(id), E=S.ex[id]; return `<button class="opt ${id===curId?"cur":""}" data-a="${action}" data-ex="${esc(id)}" ${extra}><span>${esc(L.n)}${have.has(id)?` <span class="tag">in today</span>`:""}</span><span class="m">${E&&E.w!=null?fmtW(E.w)+" lb":TYPE_LABEL[L.t]}</span></button>`; }).join(""); };
   const all=MUSCLES.concat(["Other"]); let h="";
   if(focus&&focus.length){ h+=all.filter(m=>focus.includes(m)).map(grp).join(""); const rest=all.filter(m=>!focus.includes(m)); h+=`<button class="opt" data-a="more"><span>All other muscle groups</span><span class="m">show</span></button><div hidden>${rest.map(grp).join("")}</div>`; }
   else h+=all.map(grp).join("");
@@ -1777,7 +1787,7 @@ document.getElementById("tabs").addEventListener("click",e=>{ const b=e.target.c
 document.getElementById("sheetBg").addEventListener("click",closeSheet);
 /* iOS leaves the body offset after the keyboard closes; the only scroller is #scroll, so snap the page back */
 document.addEventListener("focusout",()=>setTimeout(()=>{ document.body.scrollTop=0; window.scrollTo(0,0); },60));
-document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&document.getElementById("sheet").classList.contains("on")) closeSheet(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&(sheetOn()||document.getElementById("sheet").classList.contains("on"))) closeSheet(); });
 document.addEventListener("input",e=>{
   const el=e.target; if(!el.dataset) return;
   if(el.dataset.f==="w"||el.dataset.f==="r"){ const sl=S.active.items[+el.dataset.i]; const d=slotDraft(sl); d[el.dataset.f]=Number(el.value); }
@@ -1859,7 +1869,7 @@ document.addEventListener("click",e=>{
     case "prog-add-block": { S.program.workouts[b.dataset.wid].items.push(defaultBlock()); bumpDay(b.dataset.wid); save(); render(); toast("Block added — swap the moves as you like"); break; }
     case "export": { const txt=JSON.stringify({...S, __macros:(window.M&&M.export)?M.export():undefined}); const done=()=>toast("Copied. Paste it into Notes.");
       /* a big backup goes out as a file: multi-MB text in a text box or the share sheet freezes the phone */
-      const name="chalk-backup-"+new Date().toISOString().slice(0,10)+".json", big=txt.length>150000;
+      const dt=new Date(), name="chalk-backup-"+dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0")+".json", big=txt.length>150000;
       const show=()=>{ if(!big){ openSheet("Backup",`<textarea readonly aria-label="Backup text">${esc(txt)}</textarea>`); return; }
         let url=""; try{ url=URL.createObjectURL(new Blob([txt],{type:"application/json"})); setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} },300000); }catch(e){}
         openSheet("Backup",`<p class="hint">Your backup is ${fmtSize(txt.length)}. That's too big to show here, so save it as a file.</p>${url?`<a class="btn primary block" style="margin-top:10px" href="${esc(url)}" download="${esc(name)}">Save file</a>`:""}`); };

@@ -439,7 +439,7 @@ t("views.you: renders all cards; t-num weight change updates profile + targets +
   assert.ok(/data-m="t-reviewed"/.test(html) && /data-m="t-log-body"/.test(html));
   assert.ok(/Set today\. We'll ask again in 60 days\./.test(html));
   assert.ok(/data-m="t-reviewed">Still right</.test(html));
-  assert.ok(/next Oct 12, 2026/.test(html), "2-week status with next-due date");
+  assert.ok(/Next one Oct 12\./.test(html), "2-week status with next-due date (no year: it is this year)");
   assert.ok(/work without a key/.test(html) && /id="mt-key"/.test(html) && /data-m="t-ai-save"/.test(html) && !/t-ai-remove/.test(html));
   assert.ok(/href="https:\/\/console\.anthropic\.com\/settings\/keys"/.test(html), "key link");
   assert.ok(/<option value="claude-sonnet-5-5" selected>/.test(html) && /claude-haiku-4-5-20251001/.test(html));
@@ -677,7 +677,8 @@ t("Sync & backup card: not set up · off · join · on · sync now · restore (t
     /* off */
     fake.conf = true;
     html = M.ui.views.you(); show(html);
-    assert.ok(/Share foods and meals between your phones and keep a backup\./.test(html));
+    assert.ok(/Share foods and meals between your phones\. Food logs, weight and workouts are backed up too\./.test(html));
+    assert.ok(/Start on one phone\. Then join on the other phone with the code it shows\./.test(html));
     assert.ok($('[data-m="t-sync-on"]') && $('[data-m="t-sync-joinshow"]'));
     assert.strictEqual($("#mt-join").hidden, true, "join box starts hidden");
     click('[data-m="t-sync-joinshow"]');
@@ -710,7 +711,7 @@ t("Sync & backup card: not set up · off · join · on · sync now · restore (t
     assert.ok(calls.indexOf("create") >= 0 && renders > r && /Sync is on/.test(toasts[toasts.length - 1]));
     html = M.ui.views.you(); show(html);
     assert.ok(/ABCD-EFGH-JKLM-NPQR-STUV/.test($("#mt-code").textContent), "code in groups of 4");
-    assert.ok(/Type this code on the other phone/.test(html));
+    assert.ok(/Now add the other phone/.test(html) && /Type this code:/.test(html), "the steps for the other phone");
     assert.ok(/Not synced yet/.test($("#mt-sync-status").textContent));
     assert.ok(!$('[data-m="t-sync-restore"]'), "no restore without a backup");
     await new Promise(res => setTimeout(res, 5));
@@ -737,8 +738,9 @@ t("Sync & backup card: not set up · off · join · on · sync now · restore (t
     let rb = $('[data-m="t-sync-restore"]');
     assert.ok(rb, "restore button added");
     assert.ok(/<b>150 workouts<\/b> in the cloud aren't on this phone\./.test($("#mt-restore").innerHTML));
-    assert.ok(/replaces the training history on this phone/.test($("#mt-restore").textContent));
-    assert.strictEqual($("#mt-restore").nextElementSibling, $('[data-m="t-sync-off"]'), "above Turn off");
+    assert.ok(/replaces the workouts on this phone/.test($("#mt-restore").textContent));
+    assert.strictEqual($("#mt-restore").previousElementSibling, $("#mt-restore-at"), "in its place");
+    assert.ok($("#mt-restore").nextElementSibling.classList.contains("mt-more"), "above More options");
     fake.restoreResult = false;
     click(rb);
     assert.strictEqual(calls.indexOf("restore"), -1, "first tap only arms");
@@ -763,7 +765,7 @@ t("Sync & backup card: not set up · off · join · on · sync now · restore (t
     /* another phone's copy with nothing this phone lacks: still offered, with its date */
     fake.tr = { pid: "nick", t: NOW - DAY, n: 3, last: NOW - DAY, same: false, mine: false, missing: 0, held: false, busy: false };
     html = M.ui.views.you();
-    assert.ok(/Training backup: 3 workouts, saved Sep \d+, 2026\./.test(html) && /data-m="t-sync-restore"/.test(html));
+    assert.ok(/Training backup: 3 workouts, saved Sep \d+\./.test(html) && /data-m="t-sync-restore"/.test(html));
     /* nothing to get back → no button: this phone's own backup, a copy equal to this phone, an empty one */
     [{ mine: true, same: false }, { mine: false, same: true }, { mine: false, same: false, n: 0 }].forEach(x => {
       fake.tr = Object.assign({ pid: "nick", t: NOW, n: 3, last: NOW, missing: 0, held: false, busy: false }, x);
@@ -852,10 +854,10 @@ t("UIT-04: out-of-range numbers are refused; a big jump needs a second tap (Log 
   const sb = document.getElementById("sheetB"), save = sb.querySelector('[data-m="t-save-body"]'), msg = () => $("#mt-body-msg").textContent;
   const set = (w, r) => { sb.querySelector("#mt-w").value = w; sb.querySelector("#mt-rhr").value = r; };
   set("1850", ""); click(save);
-  assert.ok(/50 to 700 lb/.test(msg()) && !M.MS.body["nick|" + M.today()], "1850 lb refused");
-  set("0.4", ""); click(save); assert.ok(/50 to 700 lb/.test(msg()));
-  set("", "999"); click(save); assert.ok(/25 to 220 beats a minute/.test(msg()));
-  set("", "5"); click(save); assert.ok(/25 to 220/.test(msg()) && !M.MS.body["nick|" + M.today()]);
+  assert.ok(/50 (to|and) 700 lb/.test(msg()) && !M.MS.body["nick|" + M.today()], "1850 lb refused");
+  set("0.4", ""); click(save); assert.ok(/50 (to|and) 700 lb/.test(msg()));
+  set("", "999"); click(save); assert.ok(/25 (to|and) 220 beats a minute/.test(msg()));
+  set("", "5"); click(save); assert.ok(/25 (to|and) 220/.test(msg()) && !M.MS.body["nick|" + M.today()]);
   set("225", ""); click(save);
   assert.ok(/big change from 185 lb/.test(msg()) && /tap Save again/.test(msg()), msg());
   assert.ok(!M.MS.body["nick|" + M.today()], "first tap saves nothing");
@@ -868,7 +870,7 @@ t("UIT-04: out-of-range numbers are refused; a big jump needs a second tap (Log 
   show(M.ui.bannerHTML());
   const b14 = () => $("#mt-b14-msg").textContent;
   $("#mt-b14-w").value = "900"; click('[data-m="t-save-body14"]');
-  assert.ok(/50 to 700 lb/.test(b14()) && M.checkins.due("nick") === "body14");
+  assert.ok(/50 (to|and) 700 lb/.test(b14()) && M.checkins.due("nick") === "body14");
   $("#mt-b14-w").value = "150"; click('[data-m="t-save-body14"]');
   assert.ok(/big change from 225 lb/.test(b14()) && M.checkins.due("nick") === "body14", "first tap only warns");
   click('[data-m="t-save-body14"]');
@@ -877,7 +879,7 @@ t("UIT-04: out-of-range numbers are refused; a big jump needs a second tap (Log 
   M.ui.tab = "you"; show(M.ui.views.you());
   const wbox = () => $('[data-m="t-num"][data-f="weight"]');
   change(wbox(), 2000);
-  assert.ok(/50 to 700 lb/.test($("#mt-wmsg").textContent) && !$("#mt-wmsg").hidden);
+  assert.ok(/50 (to|and) 700 lb/.test($("#mt-wmsg").textContent) && !$("#mt-wmsg").hidden);
   assert.strictEqual(p.weightLb, 150); assert.strictEqual(wbox().value, "150", "box shows the kept weight");
   change(wbox(), 190);
   assert.strictEqual(p.weightLb, 150, "big jump waits");
@@ -890,7 +892,7 @@ t("UIT-04: out-of-range numbers are refused; a big jump needs a second tap (Log 
   /* metric ranges are in kg */
   p.units = "metric"; M.save(); show(M.ui.views.you());
   change(wbox(), 400);
-  assert.ok(/23 to 320 kg/.test($("#mt-wmsg").textContent));
+  assert.ok(/23 (to|and) 320 kg/.test($("#mt-wmsg").textContent));
   p.units = "us"; M.save();
   NOW = base;
 });
@@ -940,6 +942,7 @@ t("UIT-03/UIT-24/TRN-18/UIT-05/UIT-06/UIT-10: check-in cards, You edits finish s
   M.reset(); M.trends.resetDraft(); M.setMode("train");
   let h = M.ui.bannerHTML();
   assert.ok(/Set your food targets/.test(h) && /data-m="mode" data-v="macros" data-tab="diary"/.test(h), "Train before setup: a small card into Macros");
+  assert.ok(!/btn primary[^"]*" data-m="mode"/.test(h), "a quiet button: the workout stays the main action on Train");
   /* the person fills You instead of the setup card */
   M.ui.tab = "you"; show(M.ui.views.you());
   click('[data-m="t-sex"][data-v="f"]'); show(M.ui.views.you());
@@ -971,7 +974,7 @@ t("UIT-03/UIT-24/TRN-18/UIT-05/UIT-06/UIT-10: check-in cards, You edits finish s
   assert.ok(/Time to weigh in/.test(M.ui.bannerHTML()), "2-week card title");
   /* snoozed → You says until when */
   show(M.ui.bannerHTML()); click('[data-m="t-snooze"]');
-  assert.ok(/skipped until/.test(M.ui.views.you()));
+  assert.ok(/Skipped until/.test(M.ui.views.you()));
   /* Switch hidden while a workout runs */
   global.S.active = { id: "w1" };
   h = M.ui.views.you();
@@ -1089,7 +1092,8 @@ t("BES-16/18/19: the code is picked out of pasted text; first / other phone butt
     show(html);
     click('[data-m="t-sync-on"]');
     html = M.ui.views.you();
-    assert.ok(/On the other phone, open Macros → You and tap <b>Other phone: join with code<\/b>/.test(html.replace(/<b>Next:<\/b> on/, "On")), "next step shown after Turn on");
+    assert.ok(/On the other phone, open Chalk\. Tap <b>Macros<\/b>, then <b>You<\/b>\./.test(html) && /Scroll down to <b>Sync &amp; backup<\/b>\. Tap <b>Other phone: join with code<\/b>\./.test(html), "steps shown after Start");
+    assert.ok(html.indexOf("Sync &amp; backup</h3>") < html.indexOf("AI (Claude)</h3>"), "Sync sits above the AI card");
   } finally { if (had) M.cloud = had; else delete M.cloud; }
   localStorage.setItem("chalk.sync.restored", "42"); toasts.length = 0;
   assert.strictEqual(M.trends.restoredNote(), "Training restored: 42 workouts");
@@ -1185,7 +1189,7 @@ t("BES/SEC sync card: code hidden behind Show, stuck items said once, off-state 
     assert.ok(calls.indexOf("change") >= 0);
     show(M.ui.views.you());
     assert.strictEqual(code(), "QQQQ-RRRR-SSSS-TTTT-UUUU", "the new code shows in full");
-    assert.ok(/Next:/.test($("#mt-sync").textContent));
+    assert.ok(/Now add the other phone/.test($("#mt-sync").textContent), "the steps again, for the new code");
     /* Delete cloud copy: two taps, then the off card says what happened */
     const del = $('[data-m="t-sync-delete"]');
     click(del); assert.strictEqual(calls.indexOf("delete"), -1);
@@ -1216,6 +1220,137 @@ t("BES/SEC sync card: code hidden behind Show, stuck items said once, off-state 
     /* no codeMasked (older m-sync): the code shows in full, no Show button */
     delete M.cloud.codeMasked; show(M.ui.views.you());
     assert.strictEqual(code(), "ABCD-EFGH-JKLM-NPQR-STUV"); assert.ok(!$('[data-m="t-sync-show"]'));
+  } finally { if (had) M.cloud = had; else delete M.cloud; M.ui.tab = "you"; NOW = base; }
+});
+
+t("UX2-21: a daily weigh-in moves the targets only on a change of 2 lb or more; a deleted weigh-in still puts them back exactly", () => {
+  M.ui.tab = "trends"; M.reset(); M.trends.resetDraft(); closeSheet();
+  const p = setupNick();
+  const t185 = Object.assign({}, p.targets);
+  assert.deepStrictEqual(t185, M.calc.targets(p));
+  const weigh = w => { click(mkBtn("t-log-body")); const sb = document.getElementById("sheetB"); sb.querySelector("#mt-w").value = String(w); sb.querySelector("#mt-rhr").value = ""; click(sb.querySelector('[data-m="t-save-body"]')); };
+  weigh(185.8);
+  assert.strictEqual(p.weightLb, 185.8, "the weight is today's");
+  assert.deepStrictEqual(p.targets, t185, "0.8 lb of wobble: same targets");
+  assert.ok(M.trends.targetsHold(p));
+  NOW += DAY; weigh(183.4);
+  assert.deepStrictEqual(p.targets, t185, "1.6 lb under: still the same");
+  NOW += DAY; weigh(182.6);
+  assert.deepStrictEqual(p.targets, M.calc.targets(p), "2.4 lb under the weight they were set for: they move");
+  assert.ok(p.targets.p < t185.p);
+  const t1826 = Object.assign({}, p.targets);
+  /* the 2-week card follows the same rule */
+  NOW += 15 * DAY; assert.strictEqual(M.checkins.due("nick"), "body14");
+  show(M.ui.bannerHTML()); $("#mt-b14-w").value = "183.1"; click('[data-m="t-save-body14"]');
+  assert.strictEqual(p.weightLb, 183.1); assert.deepStrictEqual(p.targets, t1826, "card: small change keeps them");
+  /* deleting a weigh-in is exact again: back to the weight left, targets worked out for it */
+  assert.ok(M.trends.removeBody("nick", M.today(), "w"));
+  assert.strictEqual(p.weightLb, 182.6); assert.deepStrictEqual(p.targets, M.calc.targets(p));
+  /* anything else that changes the numbers still recomputes right away */
+  p.activity = "active"; assert.ok(!M.trends.targetsHold(p), "a different activity is not wobble");
+  p.activity = "moderate";
+  p.targetsManual = true; assert.ok(!M.trends.targetsHold(p), "hand-typed targets are left to the person");
+  p.targetsManual = false;
+});
+
+t("the weekly rate reads the same in the tile and the goal line (halves round the same way)", () => {
+  M.ui.tab = "trends"; M.reset(); M.trends.resetDraft();
+  const p = setupNick();
+  for (let i = 20; i >= 0; i--) M.body.add({ date: M.addDays(M.today(), -i), w: r1t(190 - (20 - i) * 0.15) });
+  const real = M.body.ratePerWeek;
+  try {
+    [[-1.05, "−1.1", "1.1 lb a week"], [-0.45, "−0.5", "0.5 lb a week"], [-1.04, "−1.0", "1 lb a week"]].forEach(([r, tileTxt, words]) => {
+      M.body.ratePerWeek = () => r;
+      show(M.ui.views.trends());
+      const tile = Array.from(document.querySelectorAll(".mt-card .stat")).find(s => /Per week/i.test(s.textContent));
+      assert.ok(tile && tile.querySelector(".v").textContent.indexOf(tileTxt) === 0, r + " tile: " + (tile && tile.textContent));
+      assert.ok(document.querySelector(".mt-goalline").textContent.indexOf(words) >= 0, r + " goal line: " + document.querySelector(".mt-goalline").textContent);
+      assert.ok(/last 3 weeks/.test(tile.textContent), "says what the rate is over (21 days of weigh-ins): " + tile.textContent);
+    });
+  } finally { M.body.ratePerWeek = real; }
+});
+
+t("Sync flow reads in order: Start → steps + code → join on the other phone → status first; rare actions under More options; short sentences", async () => {
+  M.ui.tab = "you"; M.reset(); M.trends.resetDraft(); toasts.length = 0;
+  const had = M.cloud, base = NOW;
+  NOW += 30 * 60e3;   /* nothing from earlier tests counts as new */
+  try {
+    const st = { on: false, code: "", lastSync: 0, lastError: "", pending: 0, stuck: 0, busy: false, note: "" };
+    let joinOk = true;
+    M.cloud = {
+      configured: () => true, status: () => Object.assign({}, st), training: () => null,
+      fmtCode: c => String(c).replace(/(.{4})(?=.)/g, "$1-"),
+      codeMasked: () => (st.code ? st.code.slice(0, 4) + "-••••-••••-••••-••••" : ""),
+      create() { Object.assign(st, { on: true, code: "ABCDEFGHJKLMNPQRSTUV" }); return st.code; },
+      join(code) { if (joinOk) Object.assign(st, { on: true, code, lastSync: NOW }); return Promise.resolve(joinOk ? { ok: true } : { ok: false, error: "No one is using that code yet. Check it on the other phone." }); },
+      leave() { Object.assign(st, { on: false, code: "" }); },
+      syncNow: () => Promise.resolve({ ok: true }),
+      changeCode: () => Promise.resolve({ ok: true }), deleteCloud: () => Promise.resolve({ ok: true })
+    };
+    setupNick();
+    const card = () => $("#mt-sync");
+    const words = () => card().textContent.replace(/\s+/g, " ").trim();
+    const before = (a, b) => { const h = card().innerHTML; assert.ok(h.indexOf(a) >= 0 && h.indexOf(b) >= 0 && h.indexOf(a) < h.indexOf(b), a + " comes before " + b); };
+    const short = () => Array.prototype.forEach.call(card().querySelectorAll("p,li,label,.lbl,button,summary,.mt-status span"), el =>
+      el.textContent.replace(/\s+/g, " ").trim().split(/(?<=[.!?:])\s+/).forEach(x => assert.ok(x.split(" ").length <= 16, "short sentence: " + x)));
+    /* 1. off: what it does, then how (first phone / other phone) */
+    show(M.ui.views.you());
+    before("Share foods and meals", "First phone: start sync");
+    before("First phone: start sync", "Other phone: join with code");
+    short();
+    /* 2. first phone taps Start: the steps for the other phone, then the code in full, then the status */
+    click('[data-m="t-sync-on"]'); show(M.ui.views.you());
+    before("Now add the other phone", 'id="mt-code"');
+    before('id="mt-code"', 'id="mt-sync-status"');
+    assert.strictEqual($("#mt-code").textContent, "ABCD-EFGH-JKLM-NPQR-STUV", "in full while it's new");
+    assert.ok(/Keep a copy in Notes too\. A new phone needs it to get your data back\./.test(words()));
+    assert.strictEqual(document.querySelectorAll("#mt-sync ol li").length, 3, "three steps");
+    short();
+    /* rare actions are folded away, closed at first, and stay open across a redraw once opened */
+    const det = $("#mt-sync details.mt-more");
+    assert.ok(det && !det.open, "More options starts closed");
+    ["t-sync-off", "t-sync-newcode", "t-sync-delete"].forEach(m => assert.ok(det.querySelector('[data-m="' + m + '"]'), m + " inside More options"));
+    assert.ok(/This phone stops syncing\. Nothing is deleted\./.test(det.textContent));
+    click('#mt-sync summary[data-m="t-sync-more"]'); show(M.ui.views.you());
+    assert.ok($("#mt-sync details.mt-more").open, "stays open after a redraw");
+    click('#mt-sync summary[data-m="t-sync-more"]'); $("#mt-sync details.mt-more").open = false; show(M.ui.views.you());
+    assert.ok(!$("#mt-sync details.mt-more").open, "closed again");
+    /* 3. later (10 minutes on): status first, the code hidden under a label */
+    NOW += 11 * 60e3; st.lastSync = NOW; show(M.ui.views.you());
+    before('id="mt-sync-status"', 'id="mt-code"');
+    assert.ok(!/Now add the other phone/.test(words()));
+    assert.ok(/Your sync code/.test(words()) && /Both phones use this code\./.test(words()));
+    assert.strictEqual($("#mt-code").textContent, "ABCD-••••-••••-••••-••••");
+    assert.strictEqual($("#mt-sync-status").textContent, "Synced just now");
+    short();
+    /* Change code: the card waits for the new code; the old one is never shown as the one to type */
+    let finish = null;
+    M.cloud.changeCode = () => new Promise(res => { finish = () => { st.code = "QQQQRRRRSSSSTTTTUUUU"; res({ ok: true }); }; });
+    show(M.ui.views.you());
+    const cc = $('[data-m="t-sync-newcode"]'); click(cc); const pending = click(cc);
+    assert.strictEqual(cc.textContent, "Changing…");
+    assert.strictEqual($("#mt-code").textContent, "ABCD-••••-••••-••••-••••", "still hidden while it changes");
+    assert.ok(!/Now add the other phone/.test(words()));
+    finish(); await pending; show(M.ui.views.you());
+    assert.strictEqual($("#mt-code").textContent, "QQQQ-RRRR-SSSS-TTTT-UUUU", "the new code in full");
+    assert.ok(/Now add the other phone/.test(words()), "with the steps");
+    /* 4. the other phone: join with the code → "This phone is joined", status first */
+    click('[data-m="t-sync-off"]'); click('[data-m="t-sync-off"]');
+    show(M.ui.views.you());
+    assert.ok($('[data-m="t-sync-on"]').classList.contains("primary"));
+    click('[data-m="t-sync-joinshow"]');
+    assert.ok($('label[for="mt-join-code"]'), "the code box has a label");
+    assert.ok(!$('[data-m="t-sync-on"]').classList.contains("primary"), "Join is the one bold button once the code box is open");
+    $("#mt-join-code").value = "Here: abcd-efgh-jklm-npqr-stuv";
+    await click('[data-m="t-sync-join"]');
+    show(M.ui.views.you());
+    assert.ok(/This phone is joined\. It now syncs with your other phone\./.test(words()));
+    before("This phone is joined", 'id="mt-sync-status"');
+    before('id="mt-sync-status"', 'id="mt-code"');
+    assert.strictEqual($("#mt-code").textContent, "ABCD-••••-••••-••••-••••", "the joining phone keeps the code hidden");
+    short();
+    NOW += 11 * 60e3; show(M.ui.views.you());
+    assert.ok(!/This phone is joined/.test(words()), "the note goes away later");
   } finally { if (had) M.cloud = had; else delete M.cloud; M.ui.tab = "you"; NOW = base; }
 });
 

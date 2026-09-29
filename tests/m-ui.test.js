@@ -673,7 +673,7 @@ t("batch meal: 'How much did you eat?' of 51 oz cooked → 12 oz → '16.5 oz ra
   assert.deepStrictEqual(qa('[data-m="det-useg"]').map(b => b.textContent), ["oz", "g"], "oz or g");
   assert.ok(q('[data-m="meal-edit"]') && q('[data-m="meal-del"]'), "meal tools still there");
   input(q('[data-m="det-qty"]'), "12");
-  assert.strictEqual($("m-det-amt").textContent, "16.5 oz raw (12 oz cooked)");
+  assert.strictEqual($("m-det-amt").textContent, "12 oz cooked", "F2b: a batch portion reads cooked only");
   click(q('[data-m="det-useg"][data-v="g-cooked"]'));
   assert.strictEqual(q('[data-m="det-qty"]').value, "340");
   assert.strictEqual($("m-det-of").textContent, "of 1446 g cooked");

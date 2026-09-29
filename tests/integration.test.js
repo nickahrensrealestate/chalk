@@ -56,13 +56,20 @@ window.M = window.M || {};
 ${fill ? "M.ui = M.ui || {}; Object.keys(stub).forEach(k => { if (!(k in M.ui)) M.ui[k] = stub[k]; });" : "M.ui = stub;"}
 })();`;
 
-/* m-sync.js as shipped (SB_URL / SB_KEY empty), or pointed at a fake Supabase for pass 3.
-   The orchestrator fills in exactly this line, so the test insists it is there. */
-const SB_LINE = 'const SB_URL = ""; const SB_KEY = "";';
+/* m-sync.js with its config line set for the test: empty (sync off, zero requests) unless a
+   fake Supabase is given for pass 3. The shipped line must be either empty or a real project
+   URL + a publishable key (never a secret key). */
+const SB_RE = /const SB_URL = "([^"]*)";(\s*)const SB_KEY = "([^"]*)";/;
 function syncSource(cfg) {
   const src = read("m-sync.js");
-  assert.ok(src.includes(SB_LINE), "m-sync.js carries the empty config line");
-  return cfg ? src.replace(SB_LINE, "const SB_URL = " + JSON.stringify(cfg.url) + "; const SB_KEY = " + JSON.stringify(cfg.key) + ";") : src;
+  const m = src.match(SB_RE);
+  assert.ok(m, "m-sync.js carries the config line (SB_URL, SB_KEY)");
+  const url = m[1], key = m[3];
+  assert.ok((url === "" && key === "") ||
+    (/^https:\/\/[a-z0-9]{20}\.supabase\.co$/.test(url) && /^sb_publishable_[A-Za-z0-9_-]{10,}$/.test(key)),
+    "shipped sync config is empty, or a project URL + a publishable key");
+  const c = cfg || { url: "", key: "" };
+  return src.replace(SB_RE, (all, u, sp) => "const SB_URL = " + JSON.stringify(c.url) + ";" + sp + "const SB_KEY = " + JSON.stringify(c.key) + ";");
 }
 
 /* mode: "stub"  → m-core/m-data/m-food + a full stub M.ui (deterministic wiring test)
@@ -236,6 +243,23 @@ t("sw.js: one version everywhere — CACHE, CORE ?v=, index.html's files and APP
   const core = coreOf(SWSRC);
   ["index.html", "manifest.json", "icon-180.png", "icon-192.png", "icon-512.png"].forEach(f => assert.ok(core.includes('"' + f + '"'), "CORE has " + f));
   ["m.css", "m-trends.css", "m-core.js", "m-data.js", "m-food.js", "m-ui.js", "m-trends.js", "m-sync.js"].forEach(f => assert.ok(core.includes('"' + f + '" + V'), "CORE has " + f + "?v="));
+  /* and every m-* file in the app folder, so a new module can't be left out of the offline copy */
+  fs.readdirSync(ROOT).filter(f => /^m[-.].*\.(js|css)$/.test(f)).forEach(f => assert.ok(core.includes('"' + f + '" + V'), "CORE has the app file " + f));
+});
+t("Train | Macros reads as one two-way switch: one rounded frame, the side you're on filled with the accent", () => {
+  const css = (HTML.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || "";
+  const last = sel => { const all = [...css.matchAll(new RegExp(sel.replace(/[.+]/g, "\\$&") + "\\{([^}]*)\\}", "g"))]; return all.length ? all[all.length - 1][1] : ""; };
+  assert.ok(/border-radius:14px/.test(last(".modebar")) && /border:1px solid var\(--line\)/.test(last(".modebar")), "framed");
+  assert.ok(/background:var\(--acc\)/.test(last(".modebar button.on")) && /color:var\(--acc-ink\)/.test(last(".modebar button.on")), "selected side filled");
+  const all = sel => [...css.matchAll(new RegExp(sel.replace(/[.+]/g, "\\$&") + "\\{([^}]*)\\}", "g"))].map(m => m[1]);
+  assert.ok(all(".modebar button").some(r => /min-height:4[4-9]px/.test(r)), "44 px or taller");
+});
+t("light theme tokens: muted and warning text dark enough, placeholders in --mut (IOS-07); content starts 10px under the bar (TRN-11)", () => {
+  const root = (HTML.match(/:root\{([^}]*)\}/) || [])[1] || "";
+  assert.ok(root.includes("--mut:#5C6169") && root.includes("--warn:#B03A24") && root.includes("--mus-t:#1F66D6"), root);
+  assert.ok(/input::placeholder,textarea::placeholder\{color:var\(--mut\);opacity:1\}/.test(HTML));
+  assert.ok(/\.wrap\{padding:10px /.test(HTML));
+  assert.ok(/\.modebar button\.on:focus-visible\{outline-color:var\(--acc-ink\)/.test(HTML), "focus ring visible on the selected mode button (IOS-15)");
 });
 /* OFL-13: a phone keeps the cached app until sw.js says a new version exists. So whenever any CORE file differs from
    what's live (GitHub Pages serves main → origin/main, else main), CACHE must differ from the live CACHE too.
@@ -254,6 +278,9 @@ t("sw.js: CACHE differs from the live one whenever a CORE file differs from what
   const liveBytes = f => { try { return git(["show", ref + ":" + f]); } catch (e) { return null; } };
   /* the rule: any CORE file not byte-identical to live → the version must not be live's */
   const problem = (read, now) => { const changed = files.filter(f => { const old = liveBytes(f); return !old || !old.equals(read(f)); }); return changed.length && now === liveCache ? changed : null; };
+  /* phones only take a newer version: the number must go up, never sideways */
+  const num = c => +((/^chalk-v(\d+)$/.exec(c || "") || [])[1] || 0);
+  assert.ok(num(nowCache) >= num(liveCache), nowCache + " is older than live " + liveCache);
   const bad = problem(f => fs.readFileSync(path.join(ROOT, f)), nowCache);
   assert.ok(!bad, "these app files differ from " + ref + " but sw.js still says " + nowCache + ". Bump VERSION in sw.js, APP_VERSION and every ?v= in index.html: " + (bad || []).join(", "));
   /* and the rule catches a forgotten bump: live files with one edited, version left at live's */
@@ -381,7 +408,8 @@ function runPass(label, real) {
     t("import of {...S, __macros:{v:1,...}} calls M.import and restores S", () => {
       const S = JSON.parse(w.eval("JSON.stringify(S)"));
       const macros = { v: 1, updatedAt: Date.now() + 5000, ui: { mode: "train", person: "nick", date: null, tab: "diary" },
-        profiles: { nick: { id: "nick", name: "Nick", weightLb: 190 } }, foods: {}, meals: {}, days: {}, body: {} };
+        /* a real backup's profile was set up and carries its own updatedAt (M.import merges profile by profile, BEC-03) */
+        profiles: { nick: { id: "nick", name: "Nick", weightLb: 190, setupAt: Date.now() - 864e5, updatedAt: Date.now() + 5000 } }, foods: {}, meals: {}, days: {}, body: {} };
       let got = null; const orig = w.M.import;
       w.M.import = o => { got = o; return orig.call(w.M, o); };
       click(w, q(d, '#app [data-a="import"]'));
@@ -609,13 +637,234 @@ async function runSyncPass() {
   } finally { dom.window.close(); }
 }
 
+/* ------------------- the update keeps every workout: live saves go in, the same bytes come out
+   tests/fixtures/chalk-v1-live.json holds chalk.v1 exactly as the version on the phones now (d757f4b, chalk-v15)
+   wrote it after real taps, for Nick and for Katerina, each with a workout still running. */
+function runLiveDataPass() {
+  console.log("live training data (saved by the version on the phones now) through the new code");
+  const LIVE = JSON.parse(read("tests/fixtures/chalk-v1-live.json"));
+  for (const who of ["nick", "kat"]) {
+    const raw = LIVE[who], S0 = JSON.parse(raw);
+    const { dom, w, d, errors } = boot({ real: true, store: { "chalk.v1": raw, "chalk.bak.d": "2000-01-01" } });
+    const stored = () => w.localStorage.getItem("chalk.v1");
+    const tab = name => click(w, q(d, '#tabs [data-tab="' + name + '"]'));
+    try {
+      t(who + ": boot leaves chalk.v1 byte for byte as the live app wrote it", () => {
+        assert.deepStrictEqual(errors, []);
+        assert.strictEqual(stored(), raw);
+        assert.strictEqual(w.localStorage.getItem("chalk.bak"), raw, "today's backup is the untouched save");
+        assert.strictEqual(w.localStorage.getItem("chalk.bad"), null);
+      });
+      t(who + ": the page holds exactly the saved data; cleanTrain leaves a real save alone", () => {
+        assert.deepStrictEqual(JSON.parse(w.eval("JSON.stringify(S)")), S0);
+        const c = JSON.parse(raw); w.cleanTrain(c); assert.strictEqual(JSON.stringify(c), raw);
+      });
+      if (who === "nick") t("older save shapes pass through unchanged too (null reps from a reps block, a custom move from before muscle lists, a cleared weight box)", () => {
+        const old = JSON.parse(raw);
+        old.ex.mb_slam = { w: 0, miss: 0, best: 0, hist: [{ d: 1790000000000, w: 0, r: [null, null], e1: 0, sec: false }], last: { w: 0, r: [null] } };
+        old.custom.c_old_move_x1 = { n: "Old move", m: "Core", t: "band", inc: 5, rest: 75, guess: 0, k: 0, p: "crunch" };
+        old.active.items.forEach(it => { if (it.t !== "block") it.draft = { w: null, r: 8 }; });
+        const before = JSON.stringify(old); w.cleanTrain(old); assert.strictEqual(JSON.stringify(old), before);
+      });
+      t(who + ": every Train view and the Macros switch render it without writing anything", () => {
+        ["history", "progress", "settings", "today"].forEach(n => { tab(n); assert.ok(d.getElementById("app").children.length, n + " rendered"); });
+        tab("history"); const h = q(d, '#app [data-a="hist"]'); assert.ok(h, "a workout row"); click(w, h);
+        tab("today");
+        click(w, q(d, '#modebar [data-v="macros"]')); click(w, q(d, '#modebar [data-v="train"]'));
+        assert.strictEqual(stored(), raw);
+        assert.deepStrictEqual(errors, []);
+      });
+      t(who + ": History lists every workout; the running workout is still running", () => {
+        tab("history"); const app = d.getElementById("app").textContent;
+        S0.log.forEach(r => assert.ok(app.includes(r.name), r.name + " listed"));
+        tab("today");
+        assert.ok(q(d, '[data-a="finish"]'), "Finish shows: the workout in progress resumed");
+        assert.strictEqual(w.eval("S.active && S.active.id"), S0.active.id);
+      });
+      t(who + ": logging the next set keeps every earlier workout, lift and custom move as it was", () => {
+        const nDone = A => A.items.reduce((n, it) => n + (Array.isArray(it.done) ? it.done.length : 0), 0);
+        click(w, q(d, '#app [data-a="log"]'));
+        const now = JSON.parse(stored());
+        ["log", "custom", "program", "ex", "cyc", "mix", "goal", "settings", "lastSummary", "profile"].forEach(k => assert.deepStrictEqual(now[k], S0[k], k));
+        assert.strictEqual(nDone(now.active), nDone(S0.active) + 1, "one new set");
+        assert.deepStrictEqual(errors, []);
+      });
+    } finally { dom.window.close(); }
+  }
+}
+
+/* ------------------- F6: sheets, toast, rest badge, switch person, backup, updates, escaping (real modules) */
+const swHook = win => {
+  /* a service-worker stand-in: the page listens to it for "a newer version is ready" */
+  const sw = new win.EventTarget(); sw.controller = null; sw.getRegistration = () => Promise.resolve(null);
+  Object.defineProperty(win.navigator, "serviceWorker", { value: sw, configurable: true });
+};
+const swSays = (w, data) => w.navigator.serviceWorker.dispatchEvent(new w.MessageEvent("message", { data }));
+async function runF6Pass() {
+  console.log("F6: sheets, toast, rest badge, switch person, backup, updates, escaping");
+  {
+    const { dom, w, errors } = boot({ real: true, hook: swHook });
+    try {
+      t("update at launch with nothing going on: reloads straight away", () => {
+        let n = 0; w.reloadApp = () => { n++; };
+        swSays(w, { type: "chalk-updated", cache: "chalk-v" + (APPV) }); assert.strictEqual(n, 0, "same version: nothing");
+        swSays(w, { type: "chalk-updated", cache: "chalk-v" + (APPV + 1) }); assert.strictEqual(n, 1, "newer: reload");
+        assert.deepStrictEqual(errors, []);
+      });
+    } finally { dom.window.close(); }
+  }
+  const { dom, w, d, errors } = boot({ real: true, hook(win) {
+    swHook(win); win.scrollTo = () => {};   /* jsdom has no scrolling; the focusout handler calls it */
+    const gi = win.Storage.prototype.getItem; win.__reads = 0;
+    win.Storage.prototype.getItem = function (k) { if (k === "chalk.v1") win.__reads++; return gi.call(this, k); };
+  } });
+  const app = () => d.getElementById("app"), toastEl = () => d.getElementById("toast");
+  const tab = n => click(w, q(d, '#tabs [data-tab="' + n + '"]'));
+  const mode = v => click(w, q(d, '#modebar [data-v="' + v + '"]'));
+  const act = a => { const b = d.createElement("button"); b.dataset.a = a; d.body.appendChild(b); click(w, b); b.remove(); };
+  const restore = bk => { tab("settings"); click(w, q(d, '#app [data-a="import"]')); d.getElementById("impT").value = JSON.stringify(bk); click(w, q(d, '#sheetB [data-a="import-do"]')); };
+  try {
+    t("boot reads the training save once (PRF-07) and logs no errors", () => { assert.deepStrictEqual(errors, []); assert.strictEqual(w.__reads, 1); });
+    click(w, q(d, '#app [data-a="pick-profile"][data-v="nick"]'));
+    t("mode buttons carry aria-pressed that follows the mode (TRN-15)", () => {
+      const tr = q(d, '#modebar [data-v="train"]'), mc = q(d, '#modebar [data-v="macros"]');
+      assert.deepStrictEqual([tr.getAttribute("aria-pressed"), mc.getAttribute("aria-pressed")], ["true", "false"]);
+      mode("macros"); assert.deepStrictEqual([tr.getAttribute("aria-pressed"), mc.getAttribute("aria-pressed")], ["false", "true"]);
+      mode("train"); assert.deepStrictEqual([tr.getAttribute("aria-pressed"), mc.getAttribute("aria-pressed")], ["true", "false"]);
+    });
+    t("toast time grows with length: 1.5 s + 60 ms a letter, 6 s at most", () => {
+      assert.strictEqual(w.toastMs(""), 1500); assert.strictEqual(w.toastMs("x".repeat(10)), 2100); assert.strictEqual(w.toastMs("x".repeat(500)), 6000);
+    });
+    let opener = null;
+    t("sheet open: screen behind is inert, the sheet is live, focus on its title, toasts show at the top (IOS-02/03)", () => {
+      opener = q(d, '#app [data-a="pick-workout"]'); assert.ok(opener, "Which workout? button");
+      w.toast("Before the sheet"); assert.ok(!toastEl().classList.contains("top"));
+      opener.focus(); click(w, opener);
+      assert.ok(toastEl().classList.contains("top"), "a toast from a moment ago moves up, out from under the sheet");
+      [q(d, ".top"), ...["modebar", "scroll", "cta", "tabs"].map(id => d.getElementById(id))].forEach(el => assert.ok(el.hasAttribute("inert"), (el.id || el.className) + " inert"));
+      const sh = d.getElementById("sheet"); assert.ok(!sh.hasAttribute("inert") && !sh.hasAttribute("aria-hidden"), "sheet live");
+      assert.strictEqual(d.activeElement, d.getElementById("sheetT"));
+      w.toast("Saved"); assert.ok(toastEl().classList.contains("top") && toastEl().classList.contains("on"));
+    });
+    await ta("Escape closes it: inert lifted, sheet hidden, focus back on the opener, M.ui.cleanup runs, body cleared (PRF-12)", async () => {
+      let cleaned = 0; const orig = w.M.ui.cleanup; w.M.ui.cleanup = function () { cleaned++; return orig ? orig.apply(this, arguments) : undefined; };
+      d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      ["modebar", "scroll", "cta", "tabs"].forEach(id => assert.ok(!d.getElementById(id).hasAttribute("inert"), id));
+      const sh = d.getElementById("sheet"); assert.strictEqual(sh.getAttribute("aria-hidden"), "true"); assert.ok(sh.hasAttribute("inert"));
+      assert.strictEqual(d.activeElement, opener);
+      await sleep(320);
+      w.M.ui.cleanup = orig;
+      assert.strictEqual(cleaned, 1); assert.strictEqual(d.getElementById("sheetB").innerHTML, "");
+      w.toast("Back"); assert.ok(!toastEl().classList.contains("top"), "bottom again");
+    });
+    t("workout running: the Train half reads the workout time (TRN-09)", () => {
+      click(w, q(d, '#cta [data-a="start"]')); assert.ok(w.eval("!!S.active"));
+      assert.strictEqual(w.trainBadge(), "Train · 0 min");
+      assert.strictEqual(q(d, '#modebar [data-v="train"] .mb-l').textContent, "Train · 0 min");
+    });
+    t("resting: overlay on, mode bar tappable; in Macros the overlay hides and the clock runs on the Train half (UX2-05/TRN-05)", () => {
+      click(w, q(d, '#app [data-a="log"]')); assert.ok(w.eval("!!T"), "rest started");
+      assert.ok(d.getElementById("rest").classList.contains("on")); assert.match(w.trainBadge(), /^Train · \d+:\d\d$/);
+      mode("macros");
+      assert.ok(!d.getElementById("rest").classList.contains("on"), "overlay hidden in Macros"); assert.ok(w.eval("!!T"), "clock still running");
+      assert.match(q(d, '#modebar [data-v="train"] .mb-l').textContent, /^Train · \d+:\d\d$/);
+    });
+    t("rest ends while in Macros: a toast says so, the badge goes back to the workout time", () => {
+      w.eval("T.end=Date.now()-1; tickRest()");
+      assert.match(toastEl().textContent, /^Rest is over\. Next: /); assert.strictEqual(w.trainBadge(), "Train · 0 min");
+      w.eval("stopRest()");
+    });
+    t("back in Train before rest ends: the overlay is there again", () => {
+      mode("train"); click(w, q(d, '#app [data-a="log"]')); mode("macros"); mode("train");
+      assert.ok(d.getElementById("rest").classList.contains("on")); w.eval("stopRest()");
+    });
+    t("clock ticks in Macros don't draw Train over it (TRN-16)", () => {
+      mode("macros"); const before = app().innerHTML; w.eval("trainRender()"); assert.strictEqual(app().innerHTML, before); mode("train");
+    });
+    await ta("a \"Program updated\" note waits for Train instead of popping up over Macros (TRN-17)", async () => {
+      w.eval("stopRest()"); mode("macros"); w.eval("S.flash='Your days were rebuilt.'; render()");
+      await sleep(500); assert.ok(!d.getElementById("sheetBg").classList.contains("on"), "no sheet over Macros"); assert.ok(w.eval("!!S.flash"), "note kept");
+      mode("train"); await sleep(500);
+      assert.strictEqual(d.getElementById("sheetT").textContent, "Program updated"); assert.ok(!w.eval("S.flash"));
+      w.closeSheet(); await sleep(300);
+    });
+    t("update during a workout: no reload, a button says so; tapping it reloads", () => {
+      let n = 0; w.reloadApp = () => { n++; };
+      swSays(w, { type: "chalk-version", cache: "chalk-v" + (APPV + 1) });
+      assert.strictEqual(n, 0); const u = d.getElementById("upd"); assert.ok(!u.hidden); assert.strictEqual(u.textContent, "Updated. Tap to reload");
+      click(w, u); assert.strictEqual(n, 1);
+    });
+    t("Switch person is hidden during a workout; a Switch from elsewhere says finish first (UIT-10/TRN-03)", () => {
+      tab("settings"); assert.ok(!q(d, '#app [data-a="switch-profile"]'));
+      act("switch-profile"); assert.strictEqual(w.eval("S.profile"), "nick"); assert.strictEqual(toastEl().textContent, "Finish your workout first");
+      w.eval("S.active=null; save(); render()");
+    });
+    t("same person picked again keeps the plan; Cancel goes back; the other person gets their own start", () => {
+      const plan = () => w.eval("JSON.stringify({program:S.program,mix:S.mix,goal:S.goal,block:S.block,cyc:S.cyc})");
+      const before = plan();
+      tab("settings"); click(w, q(d, '#app [data-a="switch-profile"]'));
+      assert.strictEqual(w.eval("S.profile"), null); click(w, q(d, '#app [data-a="switch-cancel"]'));
+      assert.strictEqual(w.eval("S.profile"), "nick"); assert.strictEqual(plan(), before);
+      tab("settings"); click(w, q(d, '#app [data-a="switch-profile"]')); click(w, q(d, '#app [data-a="pick-profile"][data-v="nick"]'));
+      assert.strictEqual(w.eval("S.profile"), "nick"); assert.strictEqual(plan(), before, "program, mix, goal, 45-day clock kept");
+      tab("settings"); click(w, q(d, '#app [data-a="switch-profile"]')); click(w, q(d, '#app [data-a="pick-profile"][data-v="kat"]'));
+      assert.strictEqual(w.eval("S.profile"), "kat"); assert.strictEqual(w.eval("JSON.stringify(S.mix)"), w.eval("JSON.stringify(PRESETS.kat.mix)"));
+    });
+    t("Restore says what happens; if the food part can't be read the workouts still come back (CPY-35/TRN-08/TRN-13)", () => {
+      tab("settings"); click(w, q(d, '#app [data-a="import"]'));
+      assert.ok(d.getElementById("sheetB").textContent.includes("Workouts are replaced. Food logs and meals from the backup are added back; newer changes on this phone stay."));
+      const bk = JSON.parse(w.eval("JSON.stringify(S)")); bk.settings.restC = 90; bk.__macros = { v: 1 };
+      const orig = w.M.import; w.M.import = () => { throw new Error("unreadable"); };
+      try { d.getElementById("impT").value = JSON.stringify(bk); click(w, q(d, '#sheetB [data-a="import-do"]')); } finally { w.M.import = orig; }
+      assert.strictEqual(w.eval("S.settings.restC"), 90); assert.strictEqual(toastEl().textContent, "Workouts restored. The food part couldn't be read.");
+    });
+    t("a big backup is offered as a file, never dumped into a text box (PRF-08)", () => {
+      w.URL.createObjectURL = () => "blob:chalk-test"; w.URL.revokeObjectURL = () => {};
+      w.eval("S.log=Array.from({length:900},(_,i)=>({id:'r'+i,wid:'PULL',name:'Pull day',start:Date.now()-i*864e5,end:Date.now()-i*864e5+3600e3,sets:{bb_row:[{w:135,r:8},{w:135,r:8},{w:135,r:8}]},volume:3240,nsets:3,blocks:[],abs:false,results:[]}))");
+      tab("settings"); click(w, q(d, '#app [data-a="export"]'));
+      assert.ok(!q(d, "#sheetB textarea"), "no text box"); const a = q(d, '#sheetB a[download]');
+      assert.ok(a && a.textContent === "Save file" && /^chalk-backup-\d{4}-\d\d-\d\d\.json$/.test(a.getAttribute("download")));
+      w.closeSheet(); w.eval("S.log=[]; save(); render()");
+    });
+    t("a hostile backup can't put markup on any Train screen; ids survive as text (SEC-02)", () => {
+      const X = '"><img src=x onerror="window.__pwn=1">';
+      const bk = JSON.parse(w.eval("JSON.stringify(S)")); const W0 = bk.program.order[0];
+      bk.log = [{ id: "a" + X, wid: W0, name: "Legs" + X, start: Date.now() - 3600e3, end: Date.now(), sets: { bb_row: [{ w: "135" + X, r: 8 }], ["zz" + X]: [{ w: 1, r: 1 }] }, volume: 1, nsets: 2,
+        blocks: [{ name: "B" + X, mode: "timer", done: 2, rounds: 3, work: 30, rest: 10, moves: [{ ex: "mb_slam", w: 0, reps: 10 }] }], abs: false,
+        results: [{ ex: "bb_row", from: 1, to: 2, kind: "up", chg: "c" + X, pr: false, range: null, dsets: 0 }] }];
+      bk.custom = { ["c_x" + X]: { n: "Evil" + X, m: "Chest" + X, t: "bb" + X, inc: 5, rest: 75, guess: 50, s: ["Back" + X], p: "generic" } };
+      bk.ex["c_x" + X] = { w: 100, miss: 0, best: 0, hist: [{ d: Date.now(), w: 100, r: [5], e1: 110 }] };
+      bk.program.workouts[W0].name = "Day" + X; bk.program.workouts[W0].focus = ["Back", "Back" + X];
+      restore(bk);
+      ["today", "history", "progress", "settings"].forEach(n => { tab(n); assert.ok(app().children.length, n); });
+      tab("history"); const hr = q(d, '#app [data-a="hist"]'); assert.strictEqual(hr.dataset.id, "a" + X); click(w, hr);
+      tab("today"); click(w, q(d, '#app [data-a="pick-workout"]')); w.closeSheet();
+      click(w, q(d, '#cta [data-a="start"]'));
+      assert.strictEqual(d.querySelectorAll("img").length, 0); assert.ok(!d.querySelector("[onerror]")); assert.strictEqual(w.__pwn, undefined);
+      assert.strictEqual(w.eval("S.custom[" + JSON.stringify("c_x" + X) + "].m"), "Other", "unknown muscle name dropped");
+      w.eval("S.active=null; save(); render()");
+    });
+    t("Erase names everything it deletes and removes the Claude key too (CPY-04/TRN-07/TRN-14)", () => {
+      w.localStorage.setItem("chalk.ai.key", "sk-test");
+      tab("settings"); click(w, q(d, '#app [data-a="wipe"]'));
+      const txt = d.getElementById("sheetB").textContent;
+      ["workouts", "food logs", "saved meals", "your foods", "weigh-ins", "Claude key"].forEach(s => assert.ok(txt.includes(s), s));
+      click(w, q(d, '#sheetB [data-a="wipe-do"]'));
+      assert.strictEqual(w.localStorage.getItem("chalk.ai.key"), null); assert.ok(!w.eval("S.profile"));
+    });
+    t("no errors during the F6 pass", () => assert.deepStrictEqual(errors.map(String), [], errors.map(String).join(" | ")));
+  } finally { dom.window.close(); }
+}
+
 runPass("pass 1: stub M.ui (integration wiring)", false);
 const realFiles = ["m-ui.js", "m-trends.js"].filter(exists);
 if (realFiles.length) runPass("pass 2: real " + realFiles.join(" + ") + (realFiles.length < 2 ? " (stub fills the rest)" : ""), true);
 else console.log("pass 2 skipped: m-ui.js / m-trends.js not present yet");
+runLiveDataPass();
 
 (async () => {
   await runSwPass();
+  if (realFiles.length === 2) await runF6Pass();
   if (realFiles.length === 2 && exists("m-sync.js")) await runSyncPass();
   else console.log("pass 3 skipped: needs m-ui.js, m-trends.js and m-sync.js");
   console.log("\n" + pass + " passed, " + fail + " failed");

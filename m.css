@@ -294,3 +294,9 @@
 /* Chalk's .hint loads after this file: warnings keep the warning color, the batch tip keeps its space */
 .hint.m-warnline{color:var(--warn)}
 .hint.m-batchtip{color:var(--ink);font-size:14px;margin:8px 0 12px}
+/* describe / label: an empty status line leaves no gap */
+#m-desc-status:empty{min-height:0;margin:6px 0}
+#m-label-status:empty{min-height:0;margin:0}
+/* idea cards: "Add to Breakfast" stays on one line; "Save as meal" takes the rest (or its own row on a narrow phone) */
+.m-sug .m-btnrow>.btn{flex:1 1 auto}
+.m-sug .m-btnrow>.btn.primary{min-width:auto;white-space:nowrap}

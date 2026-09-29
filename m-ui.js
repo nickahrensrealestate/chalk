@@ -572,6 +572,8 @@ window.M = window.M || {};
   /* The amount line under the stepper, for every food: "6 oz raw (4.4 oz cooked)", "3 large · 150 g". */
   function detAmountText() {
     const o = curOpt(), d = detPer();
+    /* F2b: a batch portion is weighed cooked, so it reads cooked only ("4 oz cooked"), like the diary row */
+    if (det.cookMode && det.batch && o.state === "cooked") return M.cook.fmtWeight(d.servings * o.g, o.vol ? (units() === "metric" ? "g" : "oz") : o.unit) + " cooked";
     if (det.cookMode) return M.cook.label(d.servings * o.g, o.state, det.cook, o.vol ? units() : o.unit, { vol: o.vol ? { unit: o.unit, g: o.g } : null });
     if (o.grams) return g0(det.grams) + " g";
     const a = amountParts(det.servings, o.label, o.g);
@@ -647,6 +649,8 @@ window.M = window.M || {};
         amt = { g: num(sv.g) > 0 ? num(sv.g) : M.cook.portionG(units()), state: "raw" };
       }
       if (!key) key = has(fam + "-" + (amt ? amt.state : "raw")) ? fam + "-" + (amt ? amt.state : "raw") : ck.opts[0].key;
+      /* F2b: an alwaysRaw food (Kirkland chicken breast) goes into a saved meal or a batch in raw grams */
+      if (det.mode === "pick" && ck.food && ck.food.alwaysRaw === true && has("g-raw")) key = "g-raw";
       det.unit = key;
       const o = curOpt();
       if (amt) {
@@ -894,7 +898,7 @@ window.M = window.M || {};
   const TOOLS = [["open-scan", "▥", "Scan barcode"], ["open-label", "▤", "Scan label"], ["open-form", "＋", "New food"], ["quick", "⚡", "Quick add"], ["open-photo", "◉", "Photo"], ["open-describe", "✎", "Describe"], ["suggest", "✦", "Suggest"]];
   function addHTML() {
     const typing = !!add.q;
-    return '<div class="m-add' + (typing ? " m-typing" : "") + '"><div class="m-pills" role="group" aria-label="Meal">' + M.SLOTS.map(s => '<button class="chip' + (s === add.slot ? " on" : "") + '" data-m="add-slot" data-v="' + s + '" aria-pressed="' + (s === add.slot) + '">' + s + '</button>').join("") + '</div>' +
+    return '<div class="m-add' + (typing ? " m-typing" : "") + '">' + (add.onPick ? "" : '<div class="m-pills" role="group" aria-label="Meal">' + M.SLOTS.map(s => '<button class="chip' + (s === add.slot ? " on" : "") + '" data-m="add-slot" data-v="' + s + '" aria-pressed="' + (s === add.slot) + '">' + s + '</button>').join("") + '</div>') +
       '<div class="m-searchbox"><input class="m-search" id="m-search" type="search" data-m="search" placeholder="Search foods, meals, brands" aria-label="Search foods" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" value="' + esc(add.q) + '"><button class="m-clear" data-m="search-clear" aria-label="Clear search"' + (add.q ? "" : " hidden") + '>×</button></div>' +
       '<div class="m-tools">' + TOOLS.filter(x => !(x[0] === "quick" && add.onPick)).map(x => '<button data-m="' + x[0] + '"><span aria-hidden="true">' + x[1] + '</span>' + x[2] + '</button>').join("") + '</div>' +
       '<div class="seg scope m-seg" role="group" aria-label="Show">' + [["recent", "Recent"], ["meals", "Meals"], ["foods", "Foods"]].map(s => '<button data-m="add-seg" data-v="' + s[0] + '" aria-pressed="' + (add.seg === s[0]) + '"' + (add.seg === s[0] ? ' class="on"' : "") + '>' + s[1] + '</button>').join("") + '</div>' +
@@ -1350,7 +1354,25 @@ window.M = window.M || {};
     parts[0] = words.join(" ");
     return parts.join(",");
   }
-  function wholeAmount(it) {
+  /* An alwaysRaw food (Kirkland chicken breast) always reads in raw grams, whatever the units:
+     "1 breast (175 g raw)", or "170 g raw (124 g cooked)" for a weight. "" for other foods. */
+  function rawGramsText(it) {
+    try {
+      const f = isObj(it) && it.foodId && M.cook ? M.foods.get(it.foodId) : null;
+      if (!f || f.alwaysRaw !== true) return "";
+      const info = M.cook.entryInfo(it); if (!info || !(info.grams > 0)) return "";
+      const sv = M.parseServing(tidyLabel(it.servingLabel) || ""), u = String(sv.unit || "").replace(/\s*\(.*$/, "").replace(/\s+(raw|cooked|dry|uncooked)$/i, "").trim();
+      if (u && !M.cook.unitWord(u) && !/^(g|grams?)$/i.test(u)) {
+        const q = (sv.qty || 1) * rawServings(it), w = Math.floor(q + 1e-9), r = q - w;
+        const fr = Math.abs(r - 0.5) < 1e-6 ? "½" : Math.abs(r - 0.25) < 1e-6 ? "¼" : Math.abs(r - 0.75) < 1e-6 ? "¾" : "";
+        return (fr ? (w || "") + fr : fmtQty(q)) + " " + (q > 1 + 1e-9 ? plural(u) : u) + " (" + r0(info.grams) + " g " + (info.state === "cooked" ? "cooked" : (info.cook && info.cook.word) || "raw") + ")";
+      }
+      return M.cook.label(info.grams, info.state, info.cook, "g");
+    } catch (e) { return ""; }
+  }
+  /* noRaw: describe / photo rows keep the amount their stepper counts in */
+  function wholeAmount(it, noRaw) {
+    const rg = noRaw ? "" : rawGramsText(it); if (rg) return rg;
     const c = cookText(it); if (c) return c;
     const s = rawServings(it), sv = M.parseServing(tidyLabel(it && it.servingLabel) || "1 serving");
     const q = (sv.qty || 1) * s, g = num(sv.g) > 0 ? num(sv.g) * s : 0, unit = String(sv.unit || "serving").trim() || "serving";
@@ -1378,7 +1400,10 @@ window.M = window.M || {};
       '<button class="btn primary block" data-m="items-add" style="margin-top:10px">' + (items.onPick ? "Add to meal" : "Add to " + esc(items.slot)) + '</button>';
   }
   /* "2 slices (100 g) · P …" — the whole amount; an item set to 0 says it is left out */
-  const itemLine = (it, t) => (rawServings(it) > 0 ? esc(wholeAmount(it)) + ' · ' + macroLine(t) + ' · <b>' + kcal(t.cal) + '</b> kcal' : '<span class="m-zero">0 · won\'t be added</span>');
+  /* lines wrap only after a "·", never inside "P 13" or before a dot */
+  const NB = String.fromCharCode(160);   /* no-break space */
+  const keepTogether = s => String(s).split(" · ").map(p => p.split(" ").join(NB)).join(NB + "· ");
+  const itemLine = (it, t) => (rawServings(it) > 0 ? esc(wholeAmount(it, true)) + NB + '· ' + keepTogether(macroLine(t)) + NB + '· <b>' + kcal(t.cal) + '</b>' + NB + 'kcal' : '<span class="m-zero">0 · won\'t be added</span>');
   function paintItems() { const box = $("m-items"); if (box && items) box.innerHTML = itemsHTML(); }
   A["item-step"] = el => { const it = items && items.list[num(el.dataset.i)]; if (!it) return; it.servings = stepQty(rawServings(it), num(el.dataset.v), isCountItem(it) ? 1 : 0.25); paintItems(); };
   I["item-qty"] = el => { const it = items && items.list[num(el.dataset.i)]; if (!it) return; it.servings = Math.max(0, num(el.value)); const row = el.closest(".m-item"); if (row) { const tt = row.querySelector(".t"); if (tt) tt.innerHTML = itemLine(it, entryTotals(it)); } const tot = qs("#m-items .m-itot span:last-child"); if (tot) { const s = M.foodMath.sum(items.list); tot.innerHTML = '<b>' + kcal(s.cal) + '</b> kcal · ' + macroLine(s); } };
@@ -1536,7 +1561,7 @@ window.M = window.M || {};
   };
   A["sug-save"] = el => {
     const s = sug && sug.list[num(el.dataset.i)]; if (!s) return;
-    const m = M.meals.add({ name: s.name, desc: s.desc || "", slot: sug.slot, servingsMade: 1, items: sugItems(s) });
+    const m = M.meals.add({ name: s.name, desc: s.desc || "", slot: sug.slot, servingsMade: 1, items: sugItems(s).map(rawGramsItem) });
     el.textContent = "Saved"; el.disabled = true; UI.toast('Saved "' + m.name + '" to Saved meals');
   };
 
@@ -1754,12 +1779,27 @@ window.M = window.M || {};
     qsa('[data-m="mb-cunit"]').forEach(b => { b.classList.toggle("on", b.dataset.v === u); b.setAttribute("aria-pressed", b.dataset.v === u ? "true" : "false"); });
     builderLive(); saveDraft();
   };
+  /* An alwaysRaw food (Kirkland chicken breast) sits in a meal or batch as raw grams:
+     "6 oz raw" or "150 g cooked" from describe / photo / ideas becomes "1 g raw" × grams. */
+  function rawGramsItem(e) {
+    try {
+      if (!isObj(e) || !e.foodId || !M.cook) return e;
+      const f = M.foods.get(e.foodId), c = f && f.alwaysRaw === true ? M.cook.of(f) : null;
+      if (!c || !(num(c.y) > 0)) return e;
+      const info = M.cook.entryInfo(e); if (!info || !(info.grams > 0)) return e;
+      const o = M.cook.unitsFor(f, units()).find(x => x.key === "g-raw"); if (!o || !(num(o.g) > 0)) return e;
+      if (info.state === "raw" && info.fam === "g") return e;
+      const rawG = info.state === "cooked" ? info.grams / num(c.y) : info.grams;
+      return Object.assign({}, e, { state: "raw", cook: { y: c.y, word: c.word }, servingLabel: "1 " + o.label, g: o.g, per: o.per, servings: Math.round(rawG / o.g) });
+    } catch (err) { return e; }
+  }
   /* + Add item: whatever they pick (search, scan, label, new food, describe, photo, ideas) comes back here */
   A["mb-add"] = () => {
     const d = UI.draft; if (!d) return;
     UI.close();
     const back = list => {
       if (!UI.draft) UI.draft = d;
+      list = list.map(rawGramsItem);
       list.forEach(e => UI.draft.items.push(e));
       UI.draft.resumed = false;
       saveDraft(); UI.openBuilder();

@@ -7,8 +7,8 @@ window.M = window.M || {}; M.DB = M.DB || {};
                   rice and pasta are ONE food each with a raw (or dry) profile
                   and a cooked profile (`cook`, see CK below).
    M.DB.alias   : old raw/cooked ids → { id of the merged food, state }.
-   M.DB.suggest : a small set of brand-free, high-protein meal ideas built
-                  from those staples. Their own saved meals rank above these.
+   M.DB.suggest : a small set of high-protein meal ideas built from the foods
+                  they buy (`staple`). Their own saved meals rank above these.
                   Two tiny builders keep `per`/`per100g` consistent and sum
                   suggestion macros exactly.
    ========================================================================== */
@@ -50,21 +50,37 @@ window.M = window.M || {}; M.DB = M.DB || {};
      pasta: dry kcal ÷ cooked kcal per 100 g). cook.alts are cooked-state
      portions (e.g. "1 cup" of cooked rice = 158 g). */
   const r4 = v => Math.round(v * 1e4) / 1e4;
-  function CK(slug, name, brand, qty, unit, g, raw100, cooked100, altList, word, cookedAlts) {
-    const rp = per(raw100), cp = per(cooked100);
-    const y = word === "dry" ? rp.cal / cp.cal : rp.p / cp.p;
-    return W(slug, name, brand, qty, unit, g, raw100, altList, { cook: { y: r4(y), word: word === "dry" ? "dry" : "raw", per100gCooked: cp, alts: alts(cookedAlts || []) } });
+  /* The cooked profile is the raw one ÷ y (BEC-14), so the same piece of meat
+     shows the same calories weighed raw or cooked. `cooked` is the USDA cooked
+     profile (y comes from the pair) or y itself. `extra` adds flags such as
+     staple (a food they buy) or alwaysRaw (grams typed are raw grams). */
+  function CK(slug, name, brand, qty, unit, g, raw100, cooked, altList, word, cookedAlts, extra) {
+    const rp = per(raw100);
+    const y = typeof cooked === "number" ? cooked : r4(word === "dry" ? rp.cal / per(cooked).cal : rp.p / per(cooked).p);
+    const c100 = {}; NUT.forEach(k => { c100[k] = rnd(k, rp[k] / y); });
+    return W(slug, name, brand, qty, unit, g, raw100, altList, Object.assign({ cook: { y, word: word === "dry" ? "dry" : "raw", per100gCooked: c100, alts: alts(cookedAlts || []) } }, extra || {}));
   }
+  /* staple: a food Nick and Katerina actually buy (search and meal ideas favor
+     these). words: other words people use for it, for search only. */
+  const ST = { staple: true };
+  const STW = words => ({ staple: true, words });
+  /* a package label (values per `g` grams) → per 100 g, to 0.01 */
+  const lab = (v, g) => v.map(x => Math.round(x * 100 / g * 100) / 100);
   const OZ = ["1 oz", 28, "100 g", 100];
   const MEAT = ["1 oz", 28, "3 oz", 85, "6 oz", 170, "8 oz", 227, "100 g", 100];
-  /* per-100 g profiles shared by more than one food */
-  const CHICKEN_RAW = [120, 22.5, 0, 2.6, 0, 0, 45], CHICKEN_COOKED = [165, 31, 0, 3.6, 0, 0, 74];
+  /* Chicken breast cook yield from USDA (raw 22.5 g protein per 100 g, roasted
+     31 g): 1 g raw → 0.7258 g cooked, so 175 g raw ≈ 127 g cooked. */
+  const CHICKEN_Y = r4(22.5 / 31);
+  /* Kirkland Signature organic chicken breast label: 4 oz (112 g) = 110 kcal,
+     24 g protein, 0 g carbs, 1 g fat, 75 mg sodium. */
+  const KIRKLAND_RAW = lab([110, 24, 0, 1, 0, 0, 75], 112);
 
   const G = [];
   /* ------------------------------------------------------------ PROTEINS */
   G.push(
-    CK("chicken_breast", "Chicken breast, boneless skinless", "", 4, "oz", 113, CHICKEN_RAW, CHICKEN_COOKED, MEAT, "raw"),
-    CK("kirkland_organic_chicken", "Chicken breast, organic frozen (Kirkland)", "Kirkland", 4, "oz", 112, CHICKEN_RAW, CHICKEN_COOKED, MEAT, "raw"),
+    /* Nick: chicken breast is always Kirkland organic, about 175 g raw each, and
+       the grams they type are raw grams. One food; old ids alias here. */
+    CK("kirkland_organic_chicken", "Chicken breast, organic", "Kirkland", 1, "breast", 175, KIRKLAND_RAW, CHICKEN_Y, ["1/2 breast", 88, "1 oz", 28, "4 oz", 112, "6 oz", 170, "100 g", 100], "raw", [], { staple: true, alwaysRaw: true }),
     CK("chicken_thigh", "Chicken thigh, boneless skinless", "", 4, "oz", 113, [121, 19.7, 0, 4.1, 0, 0, 86], [179, 24.8, 0, 8.2, 0, 0, 95], MEAT, "raw"),
     CK("ground_beef_80", "Ground beef 80/20", "", 4, "oz", 113, [254, 17.2, 0, 20, 0, 0, 66], [250, 25, 0, 16, 0, 0, 86], MEAT, "raw"),
     CK("ground_beef_85", "Ground beef 85/15", "", 4, "oz", 113, [215, 18.6, 0, 15, 0, 0, 66], [230, 26, 0, 13.5, 0, 0, 80], MEAT, "raw"),
@@ -73,7 +89,7 @@ window.M = window.M || {}; M.DB = M.DB || {};
     W("sirloin_cooked", "Sirloin steak, cooked (trimmed)", "", 6, "oz", 170, [206, 29.5, 0, 9, 0, 0, 60], MEAT),
     W("ribeye_cooked", "Ribeye steak, cooked", "", 6, "oz", 170, [291, 24, 0, 21, 0, 0, 55], MEAT),
     W("pork_chop_cooked", "Pork chop, boneless, cooked", "", 4, "oz", 113, [197, 27.8, 0, 8.9, 0, 0, 58], MEAT),
-    CK("pork_tenderloin", "Pork tenderloin", "", 4, "oz", 113, [109, 21, 0, 2.2, 0, 0, 53], [143, 26, 0, 3.5, 0, 0, 55], MEAT, "raw"),
+    CK("pork_tenderloin", "Pork tenderloin", "", 4, "oz", 113, [109, 21, 0, 2.2, 0, 0, 53], [143, 26, 0, 3.5, 0, 0, 55], MEAT, "raw", [], ST),
     W("bacon_cooked", "Bacon, cooked", "", 2, "slices", 16, [541, 37, 1.4, 42, 0, 0, 1900], ["1 slice", 8, "3 slices", 24, "1 oz", 28, "100 g", 100]),
     L("turkey_bacon", "Turkey bacon, cooked", "", 2, "slices", 30, [60, 5, 1, 4.5, 0, 0, 340], ["1 slice", 15, "100 g", 100]),
     L("pork_sausage_links", "Breakfast sausage links, pork, cooked", "", 3, "links", 64, [180, 9, 1, 15, 0, 0, 470], ["1 link", 21, "2 links", 43, "100 g", 100]),
@@ -81,23 +97,33 @@ window.M = window.M || {}; M.DB = M.DB || {};
     L("hot_dog", "Hot dog, beef (no bun)", "", 1, "frank", 45, [150, 5, 2, 13, 0, 1, 500], ["100 g", 100]),
     W("turkey_breast_cooked", "Turkey breast, roasted, no skin", "", 4, "oz", 113, [145, 30, 0, 2.1, 0, 0, 99], MEAT),
     CK("ground_turkey_93", "Ground turkey 93/7", "", 4, "oz", 113, [150, 18.7, 0, 8.3, 0, 0, 70], [200, 26, 0, 10.5, 0, 0, 90], MEAT, "raw"),
-    L("deli_turkey", "Deli turkey breast, sliced", "", 2, "oz", 56, [60, 12, 1, 0.5, 0, 1, 450], ["1 slice", 28, "3 oz", 85, "100 g", 100]),
+    /* Hillshire Farm Ultra Thin oven roasted turkey breast label: 2 oz (56 g,
+       about 6 slices) = 60 kcal, 10 g protein, 2 g carbs, 1.5 g fat, 490 mg sodium. */
+    L("deli_turkey", "Turkey slices, oven roasted", "Hillshire Farm", 6, "slices", 56, [60, 10, 2, 1.5, 0, 0, 490], ["1 slice", 9.3, "3 slices", 28, "2 oz", 56, "100 g", 100], STW("sliced deli lunch meat lunchmeat sandwich meat thin")),
     L("deli_ham", "Deli ham, sliced", "", 2, "oz", 56, [60, 10, 2, 1.5, 0, 1, 520], ["1 slice", 28, "3 oz", 85, "100 g", 100]),
     CK("salmon", "Salmon, Atlantic", "", 4, "oz", 113, [208, 20.4, 0, 13.4, 0, 0, 59], [206, 22.1, 0, 12.4, 0, 0, 61], MEAT, "raw"),
     W("sockeye_salmon_cooked", "Salmon, wild sockeye, cooked", "", 6, "oz", 170, [156, 26.5, 0, 5.6, 0, 0, 78], MEAT),
     W("tilapia_cooked", "Tilapia, cooked", "", 4, "oz", 113, [128, 26.2, 0, 2.7, 0, 0, 56], MEAT),
-    W("cod_cooked", "Cod, cooked", "", 4, "oz", 113, [105, 22.8, 0, 0.9, 0, 0, 78], MEAT),
+    /* USDA: cod, Atlantic, raw / cooked dry heat */
+    CK("cod", "Cod", "", 4, "oz", 113, [82, 17.8, 0, 0.7, 0, 0, 54], [105, 22.8, 0, 0.9, 0, 0, 78], MEAT, "raw", [], ST),
     W("tuna_canned_water", "Tuna, canned in water, drained", "", 1, "can (4 oz drained)", 113, [116, 25.5, 0, 0.8, 0, 0, 320], ["1/2 can", 56, "1 oz", 28, "100 g", 100]),
-    W("shrimp_cooked", "Shrimp, cooked", "", 4, "oz", 113, [99, 24, 0.2, 0.3, 0, 0, 111], ["1 large shrimp", 7, "6 large shrimp", 42, "3 oz", 85, "100 g", 100]),
-    W("egg_large", "Egg, whole, large", "", 1, "large egg", 50, [143, 12.6, 0.7, 9.5, 0, 0.4, 142], ["2 eggs", 100, "3 eggs", 150, "100 g", 100]),
+    /* USDA: shrimp, raw / cooked; one large shrimp 15 g cooked, one medium 10 g
+       cooked (FNDDS), so about 18 g and 12 g raw */
+    CK("shrimp", "Shrimp", "", 4, "oz", 113, [85, 20.1, 0, 0.5, 0, 0, 119], [99, 24, 0.2, 0.3, 0, 0, 111], ["1 large shrimp", 18, "1 medium shrimp", 12, "1 oz", 28, "3 oz", 85, "6 oz", 170, "8 oz", 227, "100 g", 100], "raw", ["1 large shrimp", 15, "1 medium shrimp", 10, "3 oz", 85, "100 g", 100], ST),
+    /* USDA: scallops, raw / steamed */
+    CK("scallops", "Scallops", "", 4, "oz", 113, [69, 12.1, 3.2, 0.5, 0, 0, 392], [111, 20.5, 5.4, 0.8, 0, 0, 667], MEAT, "raw", [], ST),
+    W("egg_large", "Eggs, whole", "", 1, "large egg", 50, [143, 12.6, 0.7, 9.5, 0, 0.4, 142], ["2 eggs", 100, "3 eggs", 150, "100 g", 100]),
     W("egg_hard_boiled", "Egg, hard-boiled", "", 1, "large egg", 50, [155, 12.6, 1.1, 10.6, 0, 1.1, 124], ["2 eggs", 100, "100 g", 100]),
     W("egg_white", "Egg white, large", "", 1, "large egg white", 33, [52, 10.9, 0.7, 0.2, 0, 0.7, 166], ["2 whites", 66, "3 whites", 99, "100 g", 100]),
     L("egg_whites_carton", "Egg whites, liquid carton", "", 3, "tbsp", 46, [25, 5, 0, 0, 0, 0, 75], ["1/2 cup", 122, "1 cup", 243, "100 g", 100]),
     W("greek_yogurt_0", "Greek yogurt, plain nonfat", "", 1, "cup", 227, [59, 10.2, 3.6, 0.4, 0, 3.2, 36], ["1/2 cup", 113, "3/4 cup", 170, "100 g", 100]),
-    W("greek_yogurt_2", "Greek yogurt, plain 2%", "", 1, "container (6 oz)", 170, [73, 9.9, 3.9, 1.9, 0, 3.6, 34], ["1/2 cup", 113, "1 cup", 227, "100 g", 100]),
+    /* USDA: yogurt, Greek, plain, lowfat (2%) */
+    W("greek_yogurt_2", "Greek yogurt, plain 2%", "", 1, "container (6 oz)", 170, [73, 9.9, 3.9, 1.9, 0, 3.6, 34], ["1/2 cup", 113, "3/4 cup", 170, "1 cup", 227, "100 g", 100], ST),
     W("greek_yogurt_5", "Greek yogurt, plain 5% (whole milk)", "", 1, "container (6 oz)", 170, [97, 9, 4, 5, 0, 4, 35], ["1/2 cup", 113, "1 cup", 227, "100 g", 100]),
-    W("cottage_cheese_2", "Cottage cheese, 2%", "", 0.5, "cup", 113, [84, 11, 4.3, 2.3, 0, 4, 330], ["1 cup", 226, "3/4 cup", 170, "100 g", 100]),
-    W("cottage_cheese_4", "Cottage cheese, 4%", "", 0.5, "cup", 113, [98, 11.1, 3.4, 4.3, 0, 2.7, 364], ["1 cup", 226, "3/4 cup", 170, "100 g", 100]),
+    /* Daisy 2% (low fat) cottage cheese label: 1/2 cup (113 g) = 90 kcal, 13 g
+       protein, 5 g carbs (4 g sugar), 2.5 g fat, 350 mg sodium. The only cottage
+       cheese they eat. */
+    L("cottage_cheese_2", "Cottage cheese, 2%", "Daisy", 0.5, "cup", 113, [90, 13, 5, 2.5, 0, 4, 350], ["1/4 cup", 56.5, "3/4 cup", 170, "1 cup", 226, "100 g", 100], ST),
     L("whey_protein", "Whey protein powder", "", 1, "scoop", 31, [120, 24, 3, 1.5, 0, 1, 60], ["1/2 scoop", 15.5, "2 scoops", 62, "100 g", 100]),
     W("tofu_firm", "Tofu, firm", "", 3, "oz", 85, [105, 10.5, 2.5, 6, 1, 0.5, 15], ["1/2 block", 170, "1 oz", 28, "100 g", 100]),
     W("tempeh", "Tempeh", "", 3, "oz", 85, [192, 20, 8, 11, 5, 0, 9], ["1/2 package", 113, "1 oz", 28, "100 g", 100]),
@@ -109,16 +135,18 @@ window.M = window.M || {}; M.DB = M.DB || {};
     W("chickpeas_cooked", "Chickpeas, cooked from dry", "", 1, "cup", 164, [164, 8.9, 27.4, 2.6, 7.6, 4.8, 7], ["1/2 cup", 82, "100 g", 100]),
     W("pinto_beans_cooked", "Pinto beans, cooked", "", 0.5, "cup", 86, [143, 9, 26.2, 0.65, 9, 0.3, 1], ["1 cup", 172, "100 g", 100]),
     L("refried_beans", "Refried beans, canned", "", 0.5, "cup", 130, [130, 7, 20, 2, 6, 1, 500], ["1 cup", 260, "100 g", 100]),
-    L("dkb_21_grains", "Bread, 21 Whole Grains & Seeds (Dave's Killer Bread)", "Dave's Killer Bread", 1, "slice", 45, [110, 5, 22, 1.5, 5, 5, 170], ["2 slices", 90, "100 g", 100]),
-    L("dkb_good_seed", "Bread, Good Seed (Dave's Killer Bread)", "Dave's Killer Bread", 1, "slice", 45, [120, 5, 22, 2, 5, 5, 170], ["2 slices", 90, "100 g", 100]),
-    L("dkb_thin", "Bread, 21 Whole Grains thin-sliced (Dave's Killer Bread)", "Dave's Killer Bread", 1, "slice", 28, [60, 3, 12, 1, 3, 3, 90], ["2 slices", 56, "100 g", 100])
+    /* Dave's Killer Bread labels, per slice */
+    L("dkb_21_grains", "Bread, 21 Whole Grains", "Dave's Killer Bread", 1, "slice", 45, [110, 5, 22, 1.5, 5, 5, 170], ["2 slices", 90, "100 g", 100], ST),
+    L("dkb_good_seed", "Bread, Good Seed", "Dave's Killer Bread", 1, "slice", 45, [120, 5, 23, 3, 3, 5, 160], ["2 slices", 90, "100 g", 100], ST),
+    L("dkb_thin", "Bread, 21 Whole Grains, thin", "Dave's Killer Bread", 1, "slice", 28, [60, 3, 12, 1, 3, 3, 100], ["2 slices", 56, "100 g", 100], ST)
   );
   /* --------------------------------------------------------------- CARBS */
   G.push(
     CK("white_rice", "White rice", "", 0.25, "cup", 46, [365, 7.1, 80, 0.7, 1.3, 0.1, 5], [130, 2.7, 28.2, 0.3, 0.4, 0.1, 1], ["1/2 cup", 92, "1 cup", 185, "100 g", 100], "dry", ["1/2 cup", 79, "3/4 cup", 118, "1 cup", 158, "100 g", 100]),
     W("brown_rice_cooked", "Brown rice, cooked", "", 1, "cup", 195, [123, 2.7, 25.6, 1, 1.6, 0.2, 4], ["1/2 cup", 98, "3/4 cup", 146, "100 g", 100]),
     W("jasmine_rice_cooked", "Jasmine rice, cooked", "", 1, "cup", 158, [129, 2.7, 28.6, 0.2, 0.3, 0, 1], ["1/2 cup", 79, "100 g", 100]),
-    W("quinoa_cooked", "Quinoa, cooked", "", 1, "cup", 185, [120, 4.4, 21.3, 1.9, 2.8, 0.9, 7], ["1/2 cup", 93, "100 g", 100]),
+    /* USDA: quinoa, uncooked / cooked (1 cup dry = 170 g, 1 cup cooked = 185 g) */
+    CK("quinoa", "Quinoa", "", 0.25, "cup", 42.5, [368, 14.1, 64.2, 6.1, 7, 0, 5], [120, 4.4, 21.3, 1.9, 2.8, 0.9, 7], ["1/2 cup", 85, "1 cup", 170, "100 g", 100], "dry", ["1/2 cup", 92.5, "3/4 cup", 139, "1 cup", 185, "100 g", 100], ST),
     W("potato_baked", "Potato, baked, with skin", "", 1, "medium", 173, [93, 2.5, 21.2, 0.1, 2.2, 1.2, 10], ["1 small", 138, "1 large", 299, "100 g", 100]),
     W("potato_boiled", "Potato, boiled or roasted, no oil", "", 1, "cup", 156, [87, 1.9, 20.1, 0.1, 1.8, 0.9, 4], ["1/2 cup", 78, "100 g", 100]),
     W("sweet_potato_baked", "Sweet potato, baked, with skin", "", 1, "medium", 114, [90, 2, 20.7, 0.2, 3.3, 6.5, 36], ["1 small", 60, "1 large", 180, "1 cup cubes", 200, "100 g", 100]),
@@ -161,11 +189,16 @@ window.M = window.M || {}; M.DB = M.DB || {};
   );
   /* --------------------------------------------------------------- FRUIT */
   G.push(
-    W("banana", "Banana", "", 1, "medium", 118, [89, 1.1, 22.8, 0.3, 2.6, 12.2, 1], ["1 small", 101, "1 large", 136, "1/2 banana", 59, "100 g", 100]),
+    W("banana", "Banana", "", 1, "medium", 118, [89, 1.1, 22.8, 0.3, 2.6, 12.2, 1], ["1 small", 101, "1 large", 136, "1/2 banana", 59, "100 g", 100], ST),
+    /* USDA: lemon / lime (whole fruit, no peel) and their raw juice */
+    W("lemon", "Lemon", "", 1, "lemon", 58, [29, 1.1, 9.3, 0.3, 2.8, 2.5, 2], ["1 wedge", 7, "100 g", 100], ST),
+    W("lemon_juice", "Lemon juice", "", 1, "lemon, juiced", 48, [22, 0.4, 6.9, 0.2, 0.3, 2.5, 1], ["1 tbsp", 15, "1 tsp", 5, "100 g", 100], ST),
+    W("lime", "Lime", "", 1, "lime", 67, [30, 0.7, 10.5, 0.2, 2.8, 1.7, 2], ["1 wedge", 8, "100 g", 100], ST),
+    W("lime_juice", "Lime juice", "", 1, "lime, juiced", 44, [25, 0.4, 8.4, 0.1, 0.4, 1.7, 2], ["1 tbsp", 15, "1 tsp", 5, "100 g", 100], ST),
     W("apple", "Apple, with skin", "", 1, "medium", 182, [52, 0.3, 13.8, 0.2, 2.4, 10.4, 1], ["1 small", 149, "1 large", 223, "1 cup slices", 109, "100 g", 100]),
     W("orange", "Orange", "", 1, "medium", 131, [47, 0.9, 11.8, 0.1, 2.4, 9.4, 0], ["1 small", 96, "1 large", 184, "100 g", 100]),
-    W("strawberries", "Strawberries", "", 1, "cup, halves", 152, [32, 0.7, 7.7, 0.3, 2, 4.9, 1], ["1 berry", 12, "1/2 cup", 76, "100 g", 100]),
-    W("blueberries", "Blueberries", "", 1, "cup", 148, [57, 0.7, 14.5, 0.3, 2.4, 10, 1], ["1/2 cup", 74, "100 g", 100]),
+    W("strawberries", "Strawberries", "", 1, "cup, halves", 152, [32, 0.7, 7.7, 0.3, 2, 4.9, 1], ["1 berry", 12, "1/2 cup", 76, "100 g", 100], ST),
+    W("blueberries", "Blueberries", "", 1, "cup", 148, [57, 0.7, 14.5, 0.3, 2.4, 10, 1], ["1/2 cup", 74, "100 g", 100], ST),
     W("raspberries", "Raspberries", "", 1, "cup", 123, [52, 1.2, 11.9, 0.7, 6.5, 4.4, 1], ["1/2 cup", 62, "100 g", 100]),
     W("grapes", "Grapes", "", 1, "cup", 151, [69, 0.7, 18.1, 0.2, 0.9, 15.5, 2], ["10 grapes", 49, "1/2 cup", 76, "100 g", 100]),
     W("watermelon", "Watermelon", "", 1, "cup, diced", 152, [30, 0.6, 7.6, 0.2, 0.4, 6.2, 1], ["1 wedge (1/16 melon)", 286, "100 g", 100]),
@@ -183,29 +216,33 @@ window.M = window.M || {}; M.DB = M.DB || {};
   );
   /* ---------------------------------------------------------- VEGETABLES */
   G.push(
-    W("broccoli_cooked", "Broccoli, cooked", "", 1, "cup, chopped", 156, [35, 2.4, 7.2, 0.4, 3.3, 1.4, 41], ["1/2 cup", 78, "100 g", 100]),
-    W("broccoli_raw", "Broccoli, raw", "", 1, "cup, chopped", 91, [34, 2.8, 6.6, 0.4, 2.6, 1.7, 33], ["100 g", 100]),
+    W("broccoli_cooked", "Broccoli, cooked", "", 1, "cup, chopped", 156, [35, 2.4, 7.2, 0.4, 3.3, 1.4, 41], ["1/2 cup", 78, "100 g", 100], ST),
+    W("broccoli_raw", "Broccoli, raw", "", 1, "cup, chopped", 91, [34, 2.8, 6.6, 0.4, 2.6, 1.7, 33], ["1/2 cup", 46, "100 g", 100], ST),
     W("spinach_raw", "Spinach, raw", "", 2, "cups", 60, [23, 2.9, 3.6, 0.4, 2.2, 0.4, 79], ["1 cup", 30, "100 g", 100]),
     W("spinach_cooked", "Spinach, cooked", "", 1, "cup", 180, [23, 3, 3.8, 0.3, 2.4, 0.4, 70], ["1/2 cup", 90, "100 g", 100]),
     W("kale_raw", "Kale, raw", "", 1, "cup, chopped", 21, [49, 4.3, 8.8, 0.9, 3.6, 2.3, 38], ["2 cups", 42, "100 g", 100]),
     W("lettuce_romaine", "Lettuce, romaine", "", 2, "cups, shredded", 94, [17, 1.2, 3.3, 0.3, 2.1, 1.2, 8], ["1 cup", 47, "100 g", 100]),
     W("spring_mix", "Spring mix / mixed greens", "", 2, "cups", 85, [20, 1.8, 3.5, 0.3, 1.8, 0.8, 30], ["1 cup", 42, "100 g", 100]),
     W("tomato", "Tomato, regular", "", 1, "medium", 123, [18, 0.9, 3.9, 0.2, 1.2, 2.6, 5], ["1 cup chopped", 180, "1 slice", 20, "100 g", 100]),
-    W("roma_tomato", "Tomato, Roma", "", 1, "tomato", 62, [18, 0.9, 3.9, 0.2, 1.2, 2.6, 5], ["1 cup, chopped", 180, "100 g", 100]),
+    W("roma_tomato", "Tomato, Roma", "", 1, "tomato", 62, [18, 0.9, 3.9, 0.2, 1.2, 2.6, 5], ["1 cup, chopped", 180, "100 g", 100], ST),
     W("cherry_tomatoes", "Cherry tomatoes", "", 1, "cup", 149, [18, 0.9, 3.9, 0.2, 1.2, 2.6, 5], ["5 tomatoes", 85, "100 g", 100]),
-    W("cucumber", "Cucumber, with peel", "", 1, "cup, sliced", 104, [15, 0.7, 3.6, 0.1, 0.5, 1.7, 2], ["1/2 cucumber", 150, "100 g", 100]),
-    W("bell_pepper", "Bell pepper, red", "", 1, "medium", 119, [31, 1, 6, 0.3, 2.1, 4.2, 4], ["1 cup chopped", 149, "100 g", 100]),
-    W("carrots", "Carrots, raw", "", 1, "medium", 61, [41, 0.9, 9.6, 0.2, 2.8, 4.7, 69], ["1 cup chopped", 128, "10 baby carrots", 100, "100 g", 100]),
-    W("carrots_cooked", "Carrots, cooked", "", 0.5, "cup, sliced", 78, [35, 0.8, 8.2, 0.2, 3, 3.5, 58], ["1 cup, sliced", 156, "100 g", 100]),
-    W("onion", "Onion, white or yellow, raw", "", 0.5, "cup, chopped", 80, [40, 1.1, 9.3, 0.1, 1.7, 4.2, 4], ["1 medium", 110, "1 tbsp", 10, "100 g", 100]),
-    W("sweet_onion", "Onion, sweet (Vidalia), raw", "", 0.5, "cup, chopped", 80, [32, 0.8, 7.6, 0.1, 0.9, 5, 8], ["1 cup, chopped", 160, "1 slice", 38, "100 g", 100]),
+    /* USDA: cucumber with peel, raw (1 cucumber = 301 g) */
+    W("cucumber", "Cucumber", "", 1, "cup, sliced", 104, [15, 0.7, 3.6, 0.1, 0.5, 1.7, 2], ["1/2 cucumber", 150, "1 cucumber", 301, "100 g", 100], ST),
+    /* USDA: peppers, sweet, red, raw */
+    W("bell_pepper", "Bell pepper", "", 1, "medium", 119, [26, 1, 6, 0.3, 2.1, 4.2, 4], ["1 small", 74, "1 large", 164, "1 cup, chopped", 149, "1 cup, sliced", 92, "100 g", 100], ST),
+    W("carrots", "Carrots, raw", "", 1, "medium", 61, [41, 0.9, 9.6, 0.2, 2.8, 4.7, 69], ["1 cup chopped", 128, "10 baby carrots", 100, "100 g", 100], ST),
+    W("carrots_cooked", "Carrots, cooked", "", 0.5, "cup, sliced", 78, [35, 0.8, 8.2, 0.2, 3, 3.5, 58], ["1 cup, sliced", 156, "100 g", 100], ST),
+    W("onion", "Onion, white", "", 0.5, "cup, chopped", 80, [40, 1.1, 9.3, 0.1, 1.7, 4.2, 4], ["1 medium", 110, "1 tbsp", 10, "100 g", 100], ST),
+    W("sweet_onion", "Onion, sweet", "", 0.5, "cup, chopped", 80, [32, 0.8, 7.6, 0.1, 0.9, 5, 8], ["1 cup, chopped", 160, "1 slice", 38, "100 g", 100], ST),
     W("mushrooms", "Mushrooms, white, raw", "", 1, "cup, sliced", 70, [22, 3.1, 3.3, 0.3, 1, 2, 5], ["100 g", 100]),
     W("green_beans", "Green beans, cooked", "", 1, "cup", 125, [35, 1.9, 7.9, 0.3, 3.2, 3.6, 1], ["1/2 cup", 63, "100 g", 100]),
-    W("asparagus", "Asparagus, cooked", "", 6, "spears", 90, [22, 2.4, 4.1, 0.2, 2, 1.3, 14], ["1 cup", 180, "100 g", 100]),
-    W("corn", "Corn, sweet, cooked", "", 1, "cup", 164, [96, 3.4, 21, 1.5, 2.4, 4.5, 1], ["1 ear", 103, "1/2 cup", 82, "100 g", 100]),
+    /* USDA: asparagus, raw (1 medium spear = 16 g) */
+    W("asparagus", "Asparagus", "", 6, "spears", 96, [20, 2.2, 3.9, 0.1, 2.1, 1.9, 2], ["1 spear", 16, "1 cup", 134, "100 g", 100], ST),
+    /* USDA: sweet corn, cooked (1 medium ear = 103 g of corn) */
+    W("corn", "Corn on the cob, grilled", "", 1, "ear", 103, [96, 3.4, 21, 1.5, 2.4, 4.5, 1], ["1 small ear", 89, "1 large ear", 118, "1 cup, kernels", 149, "100 g", 100], STW("sweet corn bbq")),
     W("peas", "Peas, green, cooked", "", 1, "cup", 160, [84, 5.4, 15.6, 0.2, 5.5, 5.9, 3], ["1/2 cup", 80, "100 g", 100]),
-    W("zucchini", "Zucchini, cooked", "", 1, "cup, sliced", 180, [15, 1.1, 2.7, 0.4, 1, 1.7, 3], ["1 medium", 196, "100 g", 100]),
-    W("zucchini_raw", "Zucchini, raw", "", 1, "medium", 196, [17, 1.2, 3.1, 0.3, 1, 2.5, 8], ["1 cup, sliced", 113, "1/2 medium", 98, "100 g", 100]),
+    W("zucchini", "Zucchini, cooked", "", 1, "cup, sliced", 180, [15, 1.1, 2.7, 0.4, 1, 1.7, 3], ["1 medium", 196, "100 g", 100], ST),
+    W("zucchini_raw", "Zucchini, raw", "", 1, "medium", 196, [17, 1.2, 3.1, 0.3, 1, 2.5, 8], ["1 cup, sliced", 113, "1/2 medium", 98, "100 g", 100], ST),
     W("cauliflower", "Cauliflower, cooked", "", 1, "cup", 124, [23, 1.8, 4.1, 0.5, 2.3, 2.1, 15], ["1 cup raw", 107, "100 g", 100]),
     W("cauliflower_rice", "Cauliflower rice", "", 1, "cup", 107, [25, 2, 5, 0.3, 2, 2, 30], ["1/2 cup", 54, "100 g", 100]),
     W("brussels_sprouts", "Brussels sprouts, cooked", "", 1, "cup", 156, [36, 2.6, 7.1, 0.5, 2.6, 1.7, 21], ["100 g", 100]),
@@ -253,7 +290,12 @@ window.M = window.M || {}; M.DB = M.DB || {};
     L("bbq_sauce", "BBQ sauce", "", 2, "tbsp", 36, [70, 0, 17, 0, 0, 12, 320], ["1 tbsp", 18, "100 g", 100]),
     L("honey", "Honey", "", 1, "tbsp", 21, [64, 0.1, 17.3, 0, 0, 17.2, 1], ["1 tsp", 7, "100 g", 100]),
     L("maple_syrup", "Maple syrup, pure", "", 2, "tbsp", 40, [104, 0, 27, 0, 0, 24, 5], ["1 tbsp", 20, "1/4 cup", 80, "100 g", 100]),
-    L("jam", "Jam / jelly", "", 1, "tbsp", 20, [56, 0.1, 13.8, 0, 0.2, 9.7, 6], ["2 tbsp", 40, "100 g", 100]),
+    /* Smucker's Natural strawberry fruit spread label: 1 tbsp (19 g) = 40 kcal,
+       10 g carbs, 10 g sugar, 0 g fat, 0 g protein, 0 mg sodium. They call it
+       jam or jelly. */
+    L("jam", "Strawberry jam / jelly", "Smucker's Natural", 1, "tbsp", 19, [40, 0, 10, 0, 0, 10, 0], ["1 tsp", 6.3, "2 tbsp", 38, "100 g", 100], STW("fruit spread preserves smuckers")),
+    /* USDA: agave syrup (1 tsp = 6.9 g) */
+    W("agave", "Agave, syrup", "", 1, "tbsp", 21, [310, 0.1, 76.4, 0.5, 0.2, 68, 4], ["1 tsp", 6.9, "2 tbsp", 42, "100 g", 100], STW("nectar sweetener")),
     L("salsa", "Salsa", "", 2, "tbsp", 32, [10, 0.4, 2, 0, 0.5, 1, 190], ["1/4 cup", 64, "100 g", 100]),
     L("guacamole", "Guacamole", "", 2, "tbsp", 30, [50, 0.6, 2.5, 4.5, 2, 0.3, 90], ["1/4 cup", 60, "1 mini cup (2 oz)", 57, "100 g", 100]),
     L("hummus", "Hummus", "", 2, "tbsp", 30, [70, 2, 4, 5, 1, 0, 130], ["1/4 cup", 60, "100 g", 100]),
@@ -295,12 +337,21 @@ window.M = window.M || {}; M.DB = M.DB || {};
      logged point at these; M.foods.get() follows them to the merged food and
      `state` says which weight the old entry was. */
   M.DB.alias = {};
-  [["chicken_breast", "raw", "cooked"], ["chicken_thigh", "raw", "cooked"], ["ground_beef_80", "raw", "cooked"], ["ground_beef_85", "raw", "cooked"],
+  [["chicken_thigh", "raw", "cooked"], ["ground_beef_80", "raw", "cooked"], ["ground_beef_85", "raw", "cooked"],
     ["ground_beef_90", "raw", "cooked"], ["ground_beef_93", "raw", "cooked"], ["ground_turkey_93", "raw", "cooked"], ["pork_tenderloin", "raw", "cooked"],
     ["salmon", "raw", "cooked"], ["white_rice", "dry", "cooked"], ["pasta", "dry", "cooked"]].forEach(a => {
     M.DB.alias["g_" + a[0] + "_" + a[1]] = { id: "g_" + a[0], state: "raw" };
     M.DB.alias["g_" + a[0] + "_" + a[2]] = { id: "g_" + a[0], state: "cooked" };
   });
+  /* Chicken breast is always the Kirkland organic breast (Nick's rule): the
+     plain breast and its old raw/cooked ids all point at it. */
+  M.DB.alias.g_chicken_breast = { id: "g_kirkland_organic_chicken", state: "raw" };
+  M.DB.alias.g_chicken_breast_raw = { id: "g_kirkland_organic_chicken", state: "raw" };
+  M.DB.alias.g_chicken_breast_cooked = { id: "g_kirkland_organic_chicken", state: "cooked" };
+  /* cooked-only foods that became raw (or dry) + cooked foods */
+  M.DB.alias.g_cod_cooked = { id: "g_cod", state: "cooked" };
+  M.DB.alias.g_shrimp_cooked = { id: "g_shrimp", state: "cooked" };
+  M.DB.alias.g_quinoa_cooked = { id: "g_quinoa", state: "cooked" };
 
   /* ======================================================================
      MEAL SUGGESTIONS — built from the generic foods above so every item's
@@ -339,85 +390,91 @@ window.M = window.M || {}; M.DB = M.DB || {};
   }
 
   const S = [];
-  /* Brand-free ideas built around what Nick and Katerina actually buy:
-     Kirkland organic frozen chicken breast (Costco), the King Soopers pork
-     tenderloin 2-pack, Dave's Killer Bread, zucchini, broccoli, carrots,
-     Roma tomatoes, white and sweet onions — plus plain basics. The app
+  /* Ideas built from what Nick and Katerina actually buy (foods marked staple):
+     Kirkland organic chicken breast (Costco), the King Soopers pork tenderloin
+     2-pack, cod, shrimp, scallops, quinoa, Greek yogurt 2%, Daisy 2% cottage
+     cheese, Smucker's jam, Hillshire turkey slices, Dave's Killer Bread and
+     their fruit and vegetables. Olive oil, soy sauce and rice are small add-ons.
+     Chicken breast is always weighed raw (one breast = 175 g raw). The app
      ranks these below the person's own saved meals. */
+  const BREAST = byId.kirkland_organic_chicken.serving.g;
+  const chicken = n => ck("kirkland_organic_chicken", "raw", n === 1 ? BREAST : 88, n === 1 ? "1 breast (" + BREAST + " g raw)" : "1/2 breast (88 g raw)");
+  const oil = tsp => tsp === 1 ? gr("olive_oil", 4.5, "1 tsp (4.5 g)") : gr("olive_oil", 7, "1/2 tbsp (7 g)");
+  const agave = () => gr("agave", 6.9, "1 tsp (6.9 g)");
   /* ------------------------------------------------------------ BREAKFAST */
   S.push(
-    sug("eggs_dkb_toast", "Eggs on Dave's toast",
-      "Three scrambled eggs on two slices of Dave's Killer Bread with a sliced Roma tomato.",
-      "Breakfast", "Either", 8, [it("egg_large", 3, "3 large eggs (150 g)"), it("dkb_21_grains", 2, "2 slices (90 g)"), it("roma_tomato"), it("butter", 0.25, "1 tsp (3.5 g)")], ["high-protein", "quick"]),
-    sug("veggie_scramble", "Veggie egg scramble",
-      "Two eggs and egg whites scrambled with zucchini, onion and Roma tomato.",
-      "Breakfast", "Either", 10, [it("egg_large", 2, "2 large eggs (100 g)"), gr("egg_whites_carton", 123, "1/2 cup (123 g)"), gr("zucchini_raw", 98, "1/2 zucchini (98 g)"), gr("onion", 40, "1/4 cup chopped (40 g)"), it("roma_tomato"), it("olive_oil", 0.33, "1 tsp (4.7 g)")], ["high-protein", "low-carb"]),
-    sug("egg_turkey_bacon_sandwich", "Egg and turkey bacon sandwich",
-      "Two fried eggs and turkey bacon on Dave's Killer Bread. Ready in 10 minutes.",
-      "Breakfast", "Either", 10, [it("egg_large", 2, "2 large eggs (100 g)"), it("turkey_bacon"), it("dkb_21_grains", 2, "2 slices (90 g)"), it("butter", 0.25, "1 tsp (3.5 g)")], ["high-protein", "quick"]),
     sug("greek_yogurt_berries", "Greek yogurt with berries",
-      "A cup of plain Greek yogurt with blueberries and a spoon of peanut butter. No cooking.",
-      "Breakfast", "Either", 3, [it("greek_yogurt_0"), it("blueberries", 0.5, "1/2 cup (74 g)"), it("peanut_butter", 0.5, "1 tbsp (16 g)")], ["high-protein", "no-cook", "quick"]),
-    sug("chicken_sweet_potato_hash", "Chicken and sweet potato hash",
-      "Leftover chicken, sweet potato, onion and zucchini browned in one pan.",
-      "Breakfast", "Either", 15, [ck("chicken_breast", "cooked", 113, "4 oz cooked"), it("sweet_potato_baked"), gr("onion", 40, "1/4 cup chopped (40 g)"), gr("zucchini_raw", 98, "1/2 zucchini (98 g)"), it("olive_oil", 0.33, "1 tsp (4.7 g)")], ["high-protein", "meal-prep"]),
+      "A cup of plain 2% Greek yogurt with blueberries, strawberries and a little agave. No cooking.",
+      "Breakfast", "Either", 3, [gr("greek_yogurt_2", 227, "1 cup (227 g)"), it("blueberries", 0.5, "1/2 cup (74 g)"), gr("strawberries", 76, "1/2 cup (76 g)"), agave()], ["high-protein", "no-cook", "quick"]),
     sug("cottage_cheese_strawberries", "Cottage cheese and strawberries",
-      "A cup of cottage cheese with sliced strawberries. No cooking.",
-      "Breakfast", "Either", 3, [it("cottage_cheese_2", 2, "1 cup (226 g)"), it("strawberries")], ["high-protein", "no-cook", "quick"])
+      "A cup of Daisy 2% cottage cheese with sliced strawberries and a little agave. No cooking.",
+      "Breakfast", "Either", 3, [it("cottage_cheese_2", 2, "1 cup (226 g)"), it("strawberries"), agave()], ["high-protein", "no-cook", "quick"]),
+    sug("dkb_jam_cottage_cheese", "Dave's toast with jam and cottage cheese",
+      "Two slices of Dave's Killer Bread with Smucker's strawberry jam, and Daisy cottage cheese on the side.",
+      "Breakfast", "Either", 5, [it("dkb_21_grains", 2, "2 slices (90 g)"), it("jam"), it("cottage_cheese_2", 1, "1/2 cup (113 g)")], ["high-protein", "quick"]),
+    sug("turkey_tomato_toast", "Turkey and tomato toast",
+      "Hillshire turkey slices, Roma tomato and cucumber on two slices of Dave's Killer Bread.",
+      "Breakfast", "Either", 5, [it("dkb_21_grains", 2, "2 slices (90 g)"), it("deli_turkey", 1, "6 slices (56 g)"), it("roma_tomato"), gr("cucumber", 52, "1/2 cup, sliced (52 g)")], ["high-protein", "quick", "no-cook"]),
+    sug("chicken_pepper_hash", "Chicken and pepper hash",
+      "Half a chicken breast browned with bell pepper, white onion and zucchini in one pan.",
+      "Breakfast", "Costco", 15, [chicken(0.5), it("bell_pepper"), gr("onion", 40, "1/4 cup, chopped (40 g)"), gr("zucchini_raw", 98, "1/2 zucchini (98 g)"), oil(1)], ["high-protein", "low-carb", "one-pan"])
   );
   /* ---------------------------------------------------------------- LUNCH */
   S.push(
     sug("chicken_rice_broccoli", "Chicken, rice and broccoli",
-      "Kirkland organic chicken breast with rice and broccoli. Easy to cook ahead for the week.",
-      "Lunch", "Costco", 25, [ck("kirkland_organic_chicken", "raw", 170, "6 oz raw"), ck("white_rice", "cooked", 118.5, "3/4 cup cooked"), it("broccoli_cooked"), it("olive_oil", 0.33, "1 tsp (4.7 g)"), it("soy_sauce", 0.5, "1/2 tbsp (8 g)")], ["high-protein", "meal-prep"]),
-    sug("chicken_sandwich_dkb", "Chicken sandwich on Dave's bread",
-      "Sliced chicken breast on Dave's Killer Bread with tomato, onion, lettuce and mustard.",
-      "Lunch", "Either", 5, [ck("chicken_breast", "cooked", 113, "4 oz cooked"), it("dkb_21_grains", 2, "2 slices (90 g)"), it("roma_tomato"), gr("onion", 20, "2 thin slices (20 g)"), it("lettuce_romaine", 0.25, "1/2 cup (24 g)"), it("mustard", 2, "2 tsp (10 g)")], ["high-protein", "quick"]),
-    sug("pork_potatoes_carrots", "Pork tenderloin with potatoes and carrots",
-      "Leftover pork tenderloin with roasted potatoes and carrots.",
-      "Lunch", "King Soopers", 10, [ck("pork_tenderloin", "cooked", 142, "5 oz cooked"), it("potato_boiled"), it("carrots_cooked", 2, "1 cup, sliced (156 g)"), it("olive_oil", 0.33, "1 tsp (4.7 g)")], ["high-protein", "meal-prep"]),
-    sug("big_chicken_salad", "Big chicken salad",
-      "Chicken on greens with Roma tomatoes, carrots and sweet onion, with a light dressing.",
-      "Lunch", "Either", 8, [ck("chicken_breast", "cooked", 142, "5 oz cooked"), it("spring_mix"), it("roma_tomato", 2, "2 Roma tomatoes (124 g)"), it("carrots"), gr("sweet_onion", 20, "2 thin slices (20 g)"), it("balsamic_vinaigrette")], ["high-protein", "low-carb"]),
-    sug("turkey_hummus_plate", "Turkey plate with hummus and carrots",
-      "Deli turkey with hummus, carrots and a slice of Dave's bread. No cooking.",
-      "Lunch", "Either", 5, [it("deli_turkey", 2, "4 oz (112 g)"), it("hummus"), gr("carrots", 100, "10 baby carrots (100 g)"), it("dkb_21_grains")], ["high-protein", "no-cook", "quick"])
+      "One Kirkland chicken breast with rice and broccoli. Easy to cook ahead for the week.",
+      "Lunch", "Costco", 25, [chicken(1), ck("white_rice", "cooked", 118.5, "3/4 cup cooked"), it("broccoli_cooked"), oil(1), it("soy_sauce", 0.5, "1/2 tbsp (8 g)")], ["high-protein", "meal-prep"]),
+    sug("chicken_quinoa_bowl", "Chicken quinoa bowl",
+      "One chicken breast over quinoa with cucumber, Roma tomato and a squeeze of lemon.",
+      "Lunch", "Costco", 25, [chicken(1), ck("quinoa", "dry", 42.5, "1/4 cup dry"), it("cucumber"), it("roma_tomato"), gr("lemon_juice", 15, "1 tbsp (15 g)"), oil(1)], ["high-protein", "meal-prep"]),
+    sug("turkey_cucumber_plate", "Turkey slices with cucumber and peppers",
+      "Hillshire turkey slices with cucumber, bell pepper and baby carrots. No cooking.",
+      "Lunch", "Either", 5, [it("deli_turkey", 2, "12 slices (112 g)"), it("cucumber"), gr("bell_pepper", 92, "1 cup, sliced (92 g)"), gr("carrots", 100, "10 baby carrots (100 g)")], ["high-protein", "no-cook", "quick"]),
+    sug("shrimp_quinoa_bowl", "Shrimp quinoa bowl",
+      "Shrimp cooked with bell pepper, over quinoa with cucumber and lime juice.",
+      "Lunch", "Either", 20, [ck("shrimp", "raw", 170, "6 oz raw"), ck("quinoa", "dry", 42.5, "1/4 cup dry"), gr("bell_pepper", 60, "1/2 pepper (60 g)"), gr("cucumber", 52, "1/2 cup, sliced (52 g)"), gr("lime_juice", 15, "1 tbsp (15 g)"), oil(1)], ["high-protein"]),
+    sug("pork_corn_carrots", "Pork tenderloin with grilled corn and carrots",
+      "Pork tenderloin from the King Soopers 2-pack with an ear of grilled corn and carrots.",
+      "Lunch", "King Soopers", 30, [ck("pork_tenderloin", "raw", 142, "5 oz raw"), it("corn"), it("carrots_cooked", 2, "1 cup, sliced (156 g)"), oil(1)], ["high-protein", "meal-prep"])
   );
   /* --------------------------------------------------------------- DINNER */
   S.push(
+    sug("sheet_pan_chicken", "Sheet-pan chicken with broccoli and carrots",
+      "One Kirkland chicken breast roasted with broccoli and carrots, with rice on the side.",
+      "Dinner", "Costco", 30, [chicken(1), gr("broccoli_raw", 137, "1 1/2 cups, chopped (137 g)"), gr("carrots", 128, "1 cup, chopped (128 g)"), oil(1.5), ck("white_rice", "cooked", 79, "1/2 cup cooked")], ["high-protein", "sheet-pan"]),
     sug("pork_zucchini_sweet_onion", "Pork tenderloin with zucchini and sweet onion",
       "Roast one pork tenderloin from the King Soopers 2-pack with zucchini and sweet onion on one pan.",
-      "Dinner", "King Soopers", 35, [ck("pork_tenderloin", "cooked", 170, "6 oz cooked"), it("zucchini_raw"), it("sweet_onion"), it("olive_oil", 0.5, "1/2 tbsp (7 g)")], ["high-protein", "sheet-pan", "low-carb"]),
-    sug("sheet_pan_chicken", "Sheet-pan chicken with broccoli and carrots",
-      "Kirkland organic chicken breast roasted with broccoli and carrots, with rice on the side.",
-      "Dinner", "Costco", 30, [ck("kirkland_organic_chicken", "raw", 170, "6 oz raw"), gr("broccoli_raw", 150, "1 1/2 cups (150 g)"), gr("carrots", 100, "1 cup, sliced (100 g)"), it("olive_oil", 0.5, "1/2 tbsp (7 g)"), it("jasmine_rice_cooked", 0.75, "3/4 cup (119 g)")], ["high-protein", "sheet-pan"]),
+      "Dinner", "King Soopers", 35, [ck("pork_tenderloin", "raw", 170, "6 oz raw"), it("zucchini_raw"), it("sweet_onion"), oil(1.5)], ["high-protein", "sheet-pan", "low-carb"]),
+    sug("lemon_cod_asparagus", "Lemon cod with asparagus",
+      "Cod baked with lemon juice and olive oil, with asparagus and quinoa.",
+      "Dinner", "Either", 25, [ck("cod", "raw", 170, "6 oz raw"), gr("asparagus", 128, "8 spears (128 g)"), gr("lemon_juice", 24, "1/2 lemon, juiced (24 g)"), oil(1.5), ck("quinoa", "dry", 42.5, "1/4 cup dry")], ["high-protein", "sheet-pan"]),
+    sug("scallops_corn_zucchini", "Scallops with grilled corn and zucchini",
+      "Seared scallops with an ear of grilled corn and zucchini, finished with lemon.",
+      "Dinner", "Either", 20, [ck("scallops", "raw", 170, "6 oz raw"), it("corn"), it("zucchini_raw"), gr("lemon_juice", 15, "1 tbsp (15 g)"), oil(1)], ["high-protein", "quick"]),
+    sug("shrimp_stir_fry", "Shrimp and veggie stir-fry",
+      "Shrimp stir-fried with bell pepper, broccoli and white onion in soy sauce, over rice.",
+      "Dinner", "Either", 20, [ck("shrimp", "raw", 170, "6 oz raw"), it("bell_pepper"), gr("broccoli_raw", 91, "1 cup, chopped (91 g)"), gr("onion", 40, "1/4 cup, chopped (40 g)"), it("soy_sauce", 1, "1 tbsp (16 g)"), oil(1.5), ck("white_rice", "cooked", 118.5, "3/4 cup cooked")], ["high-protein", "one-pan"]),
     sug("chicken_tomato_skillet", "Chicken, tomato and zucchini skillet",
-      "Chicken cooked with Roma tomatoes, white onion and zucchini, served over rice.",
-      "Dinner", "Costco", 25, [ck("kirkland_organic_chicken", "raw", 170, "6 oz raw"), it("roma_tomato", 2, "2 Roma tomatoes (124 g)"), gr("onion", 75, "1/2 onion (75 g)"), gr("zucchini_raw", 150, "3/4 zucchini (150 g)"), it("olive_oil", 0.5, "1/2 tbsp (7 g)"), ck("white_rice", "cooked", 79, "1/2 cup cooked")], ["high-protein", "one-pan"]),
-    sug("pork_sweet_potato_broccoli", "Pork tenderloin, sweet potato and broccoli",
-      "Sliced pork tenderloin with a baked sweet potato and broccoli. Simple and filling.",
-      "Dinner", "King Soopers", 35, [ck("pork_tenderloin", "cooked", 170, "6 oz cooked"), it("sweet_potato_baked"), it("broccoli_cooked"), it("butter", 0.25, "1 tsp (3.5 g)")], ["high-protein"]),
-    sug("chicken_zucchini_pasta", "Chicken and zucchini pasta",
-      "Pasta with marinara, chicken breast and zucchini. A lighter pasta night.",
-      "Dinner", "Either", 20, [ck("chicken_breast", "cooked", 142, "5 oz cooked"), ck("pasta", "cooked", 140, "1 cup cooked"), it("marinara"), it("zucchini")], ["high-protein"])
+      "One chicken breast cooked with Roma tomatoes, white onion and zucchini, served over rice.",
+      "Dinner", "Costco", 25, [chicken(1), it("roma_tomato", 2, "2 Roma tomatoes (124 g)"), gr("onion", 55, "1/2 onion (55 g)"), gr("zucchini_raw", 150, "3/4 zucchini (150 g)"), oil(1.5), ck("white_rice", "cooked", 79, "1/2 cup cooked")], ["high-protein", "one-pan"])
   );
   /* --------------------------------------------------------------- SNACKS */
   S.push(
-    sug("eggs_and_carrots", "Hard-boiled eggs and carrots",
-      "Three hard-boiled eggs with a handful of carrots. Make a batch on Sunday.",
-      "Snacks", "Either", 2, [it("egg_hard_boiled", 3, "3 large eggs (150 g)"), gr("carrots", 100, "10 baby carrots (100 g)")], ["high-protein", "no-cook", "meal-prep"]),
-    sug("yogurt_honey", "Greek yogurt with honey",
-      "Plain Greek yogurt with a little honey. Cold, sweet and high in protein.",
-      "Snacks", "Either", 2, [gr("greek_yogurt_0", 170, "3/4 cup (170 g)"), it("honey", 0.5, "1/2 tbsp (10.5 g)")], ["high-protein", "no-cook", "quick"]),
+    sug("turkey_rollups", "Turkey roll-ups with cucumber",
+      "Hillshire turkey slices rolled up, with sliced cucumber. No cooking.",
+      "Snacks", "Either", 3, [it("deli_turkey", 1, "6 slices (56 g)"), it("cucumber")], ["high-protein", "no-cook", "quick"]),
     sug("cottage_cheese_tomato", "Cottage cheese with Roma tomato",
-      "Cottage cheese topped with a chopped Roma tomato and black pepper.",
-      "Snacks", "Either", 3, [it("cottage_cheese_2", 1.5, "3/4 cup (170 g)"), it("roma_tomato")], ["high-protein", "no-cook", "quick"]),
-    sug("turkey_rollups", "Turkey roll-ups",
-      "Deli turkey rolled up with a little mustard, plus carrots. No cooking.",
-      "Snacks", "Either", 3, [it("deli_turkey", 1.5, "3 oz (84 g)"), it("mustard", 2, "2 tsp (10 g)"), gr("carrots", 60, "6 baby carrots (60 g)")], ["high-protein", "no-cook", "quick"]),
-    sug("chicken_hummus_snack", "Chicken and hummus snack plate",
-      "Leftover chicken with hummus and sliced zucchini for dipping.",
-      "Snacks", "Either", 3, [ck("chicken_breast", "cooked", 85, "3 oz cooked"), it("hummus"), gr("zucchini_raw", 98, "1/2 zucchini (98 g)")], ["high-protein", "no-cook", "quick"])
+      "Daisy 2% cottage cheese topped with a chopped Roma tomato and black pepper.",
+      "Snacks", "Either", 3, [it("cottage_cheese_2", 1, "1/2 cup (113 g)"), it("roma_tomato")], ["high-protein", "no-cook", "quick"]),
+    sug("yogurt_strawberries_agave", "Greek yogurt with strawberries",
+      "Plain 2% Greek yogurt with strawberries and a little agave. Cold, sweet and high in protein.",
+      "Snacks", "Either", 2, [gr("greek_yogurt_2", 170, "3/4 cup (170 g)"), gr("strawberries", 76, "1/2 cup (76 g)"), agave()], ["high-protein", "no-cook", "quick"]),
+    sug("dkb_jam_toast", "Dave's toast with jam",
+      "One slice of Dave's Killer Bread with Smucker's strawberry jam.",
+      "Snacks", "Either", 3, [it("dkb_21_grains", 1, "1 slice (45 g)"), it("jam")], ["quick"]),
+    sug("chicken_snack_plate", "Chicken snack plate",
+      "Half a chicken breast, cooked ahead, with cucumber and baby carrots.",
+      "Snacks", "Costco", 3, [chicken(0.5), it("cucumber"), gr("carrots", 60, "6 baby carrots (60 g)")], ["high-protein", "meal-prep", "quick"])
   );
   M.DB.suggest = S;
 })(window.M);

@@ -20,7 +20,14 @@ global.localStorage = {
 };
 const NAV = { vibrate() { return true; } };
 try { Object.defineProperty(global, "navigator", { value: NAV, configurable: true, writable: true }); } catch (e) {}
-global.AbortController = class { constructor() { this.signal = { aborted: false }; } abort() { this.signal.aborted = true; } };
+/* like the browser's: abort() sets .aborted and calls "abort" listeners once */
+global.AbortController = class {
+  constructor() {
+    const fns = new Set();
+    this.signal = { aborted: false, addEventListener(type, fn) { if (type === "abort") fns.add(fn); }, removeEventListener(type, fn) { fns.delete(fn); }, _fns: fns };
+  }
+  abort() { if (this.signal.aborted) return; this.signal.aborted = true; Array.from(this.signal._fns).forEach(fn => { try { fn(); } catch (e) {} }); }
+};
 
 ["m-core.js", "m-data.js", "m-food.js"].forEach(f => vm.runInThisContext(SRC(f), { filename: f }));
 const M = global.M;
@@ -35,6 +42,7 @@ function t(name, fn) { tests.push({ name, fn }); }
 const kcalOf = it => it.per.cal * it.servings;
 const reply = obj => ({ ok: true, status: 200, json: async () => obj });
 const plain = x => JSON.parse(JSON.stringify(x));   /* objects made in another VM context */
+const isObjT = v => !!v && typeof v === "object" && !Array.isArray(v);
 const claudeReply = obj => reply({ content: [{ type: "text", text: typeof obj === "string" ? obj : JSON.stringify(obj) }] });
 
 console.log("m-food.js");
@@ -849,6 +857,12 @@ t("label with Claude: exact numbers + serving text; per-100 g labels converted; 
 /* ======================================================================= */
 /* describe without Claude                                                  */
 const cookOf = id => (M.cook && typeof M.cook.of === "function" ? M.cook.of(M.foods.get(id)) : null);
+/* kcal per gram of a built-in food, raw or cooked, from its own numbers (m-data owns them) */
+const kcalPerG = (id, state) => {
+  const f = M.foods.get(id), c = cookOf(id) || (f && f.cook);
+  if (state === "cooked" && c) return (c.per100gCooked ? c.per100gCooked.cal : f.per100g.cal / c.y) / 100;
+  return f.per100g.cal / 100;
+};
 t("describe (no Claude): the six everyday phrases", async () => {
   M.reset(); M.ai.setKey("");
   const d = async s => { const r = await M.food.describe(s, { slot: "Lunch" }); assert.strictEqual(r.method, "local"); assert.deepStrictEqual(r.unmatched, [], s + " unmatched " + JSON.stringify(r.unmatched)); return r.items; };
@@ -861,13 +875,18 @@ t("describe (no Claude): the six everyday phrases", async () => {
   assert.ok(/slice/.test(it[1].servingLabel));
   assert.ok(/^butter/i.test(it[2].name) && it[2].servings === 1 && /tbsp/.test(it[2].servingLabel));
   near(kcalOf(it[2]), 100, 5, "1 tbsp butter");
+  /* Nick's rule: chicken breast grams are RAW grams unless they say "cooked" */
   it = await d("6 oz chicken breast");
   assert.strictEqual(it.length, 1);
   assert.ok(/chicken breast/i.test(it[0].name));
   near(it[0].g * it[0].servings, 170, 1.5, "6 oz grams");
   assert.ok(/^6 oz/.test(it[0].servingLabel), it[0].servingLabel);
-  near(kcalOf(it[0]), 281, 30, "6 oz cooked chicken breast");
-  if (cookOf(it[0].foodId)) { assert.strictEqual(it[0].state, "cooked"); assert.ok(it[0].cook && it[0].cook.y > 0); }
+  near(kcalOf(it[0]), 170.1 * kcalPerG(it[0].foodId, "raw"), 3, "6 oz raw chicken breast");
+  near(kcalOf(it[0]), 190, 45, "6 oz raw chicken breast (USDA 204, the Kirkland label a bit lower)");
+  if (cookOf(it[0].foodId)) { assert.strictEqual(it[0].state, "raw"); assert.ok(it[0].cook && it[0].cook.y > 0 && it[0].cook.word === "raw"); }
+  it = await d("6 oz cooked chicken breast");
+  near(it[0].g * it[0].servings, 170, 1.5, "6 oz cooked grams");
+  if (cookOf(it[0].foodId)) { assert.strictEqual(it[0].state, "cooked"); near(kcalOf(it[0]), 170.1 * kcalPerG(it[0].foodId, "cooked"), 4, "6 oz cooked chicken breast"); }
   it = await d("1.5 cups rice");
   assert.ok(/white rice/i.test(it[0].name), it[0].name);
   assert.strictEqual(it[0].servings, 1.5);
@@ -895,18 +914,22 @@ t("describe (no Claude): the person's own saved foods win by name; raw when they
   const r = await M.food.describe("6 oz chicken breast", {});
   assert.strictEqual(r.items[0].foodId, mine.id, "saved food first: " + r.items[0].name);
   near(r.items[0].g, 170.1, 1);
-  /* a scanned raw chicken saved before cook info existed borrows the built-in chicken's y, so
-     "6 oz chicken breast" (what was on the plate) is 6 oz COOKED: 170 g ÷ 0.7258 raw × 1.16 */
-  assert.strictEqual(r.items[0].state, "cooked");
+  /* a scanned raw chicken saved before cook info existed borrows the built-in chicken's y.
+     Nick's rule: chicken breast grams are RAW unless they say cooked → 170 g × 1.16 */
+  assert.strictEqual(r.items[0].state, "raw");
   assert.ok(r.items[0].cook && Math.abs(r.items[0].cook.y - 0.7258) < 0.001, JSON.stringify(r.items[0].cook));
-  near(kcalOf(r.items[0]), 272, 4, "from the saved food's per 100 g, cooked");
+  near(kcalOf(r.items[0]), 197, 4, "from the saved food's per 100 g, raw");
+  const rc = await M.food.describe("6 oz cooked chicken breast", {});
+  assert.strictEqual(rc.items[0].foodId, mine.id);
+  assert.strictEqual(rc.items[0].state, "cooked");
+  near(kcalOf(rc.items[0]), 272, 4, "6 oz COOKED: 170 g ÷ 0.7258 raw × 1.16");
   const bread = M.foods.add({ name: "Good Seed Thin-Sliced", brand: "Dave's Killer Bread", source: "off", serving: { qty: 1, unit: "slice", g: 28 }, per: { cal: 70, p: 3, c: 13, f: 1.5, fiber: 2, sugar: 2, sodium: 105 } });
   const b = await M.food.describe("2 slices dave's bread", {});
   assert.strictEqual(b.items[0].foodId, bread.id, "their own Dave's loaf beats the built-in one");
   M.foods.remove(mine.id);
   const raw = await M.food.describe("8 oz raw chicken breast", {});
   assert.ok(/chicken breast/i.test(raw.items[0].name));
-  if (cookOf(raw.items[0].foodId)) { assert.strictEqual(raw.items[0].state, "raw"); near(kcalOf(raw.items[0]), 272, 30, "8 oz raw"); }
+  if (cookOf(raw.items[0].foodId)) { assert.strictEqual(raw.items[0].state, "raw"); near(kcalOf(raw.items[0]), 226.8 * kcalPerG(raw.items[0].foodId, "raw"), 4, "8 oz raw"); }
   const un = await M.food.describe("1 cup rice\nxyzzy plumbus", {});
   assert.deepStrictEqual(un.unmatched, ["xyzzy plumbus"]);
   assert.deepStrictEqual((await M.food.describe("", {})).items, []);
@@ -954,7 +977,7 @@ t("photo.estimate / estimateByName (Claude): item shapes, base64 image block, so
   global.fetch = async (url, o) => {
     last = JSON.parse(o.body);
     const txt = last.messages[0].content.map(b => b.text || "").join(" ");
-    if (/photo of food/i.test(txt)) return claudeReply({ items: [{ name: "Grilled chicken breast", servingLabel: "6 oz (170 g)", g: 170, per: { cal: 280, p: 52, c: 0, f: 6, fiber: 0, sugar: 0, sodium_mg: 125 } }, { name: "Steamed broccoli", servingLabel: "1 cup (156 g)", g: 156, per: { cal: 55, p: 4, c: 11, f: 0.5, fiber: 5, sugar: 2, sodium_mg: 64 } }], note: "Portions look like a standard dinner plate." });
+    if (/photo of food/i.test(txt)) return claudeReply({ items: [{ name: "Grilled salmon", servingLabel: "6 oz (170 g)", g: 170, per: { cal: 280, p: 52, c: 0, f: 6, fiber: 0, sugar: 0, sodium_mg: 125 } }, { name: "Steamed broccoli", servingLabel: "1 cup (156 g)", g: 156, per: { cal: 55, p: 4, c: 11, f: 0.5, fiber: 5, sugar: 2, sodium_mg: 64 } }], note: "Portions look like a standard dinner plate." });
     return claudeReply({ name: "Costco chicken bake", brand: "Kirkland", serving: { qty: 1, unit: "bake", g: 300 }, per: { cal: 770, p: 46, c: 70, f: 30, fiber: 3, sugar: 4, sodium_mg: 1790 }, alts: [{ label: "1/2 bake", g: 150 }] });
   };
   const fakeFile = { type: "image/jpeg", size: 3, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
@@ -1059,7 +1082,7 @@ t("suggest with Claude: 3 ideas last (source claude, ids ai_…), prompt uses th
   global.fetch = async (u, o) => {
     prompt = JSON.parse(o.body).messages[0].content[0].text;
     return claudeReply({ suggestions: [
-      { name: "Cottage cheese and pineapple", desc: "Easy.", store: "Costco", prepMin: 2, items: [{ name: "Cottage cheese 2%", servingLabel: "1 cup (226 g)", g: 226, per: { cal: 180, p: 24, c: 8, f: 5, fiber: 0, sugar: 8, sodium_mg: 700 } }, { name: "Pineapple", servingLabel: "1/2 cup (80 g)", g: 80, per: { cal: 40, p: 0, c: 10, f: 0, fiber: 1, sugar: 8, sodium_mg: 1 } }] },
+      { name: "Cottage cheese and pineapple", desc: "Easy.", store: "Costco", prepMin: 2, items: [{ name: "Greek yogurt, plain", servingLabel: "1 cup (226 g)", g: 226, per: { cal: 180, p: 24, c: 8, f: 5, fiber: 0, sugar: 8, sodium_mg: 700 } }, { name: "Pineapple", servingLabel: "1/2 cup (80 g)", g: 80, per: { cal: 40, p: 0, c: 10, f: 0, fiber: 1, sugar: 8, sodium_mg: 1 } }] },
       { name: "Two", desc: "d", store: "King Soopers", prepMin: 5, items: [{ name: "A", servingLabel: "1 serving", g: null, per: { cal: 300, p: 30, c: 20, f: 10, fiber: 2, sugar: 3, sodium_mg: 400 } }] },
       { name: "Three", desc: "d", store: "wherever", prepMin: 5, items: [{ name: "B", servingLabel: "1 serving", g: null, per: { cal: 250, p: 25, c: 20, f: 8, fiber: 2, sugar: 3, sodium_mg: 300 } }] },
       { name: "Four (dropped)", desc: "d", store: "Costco", prepMin: 5, items: [{ name: "C", servingLabel: "1 serving", g: null, per: { cal: 250, p: 25, c: 20, f: 8, fiber: 2, sugar: 3, sodium_mg: 300 } }] }
@@ -1233,19 +1256,25 @@ t("UX2-03 scanned raw meat / dry rice / pasta get the built-in food's cook info 
   const codes = C.map((c, i) => upc("0111100000" + i));
   const cases = {}; codes.forEach((k, i) => { cases[k] = off("0" + k, C[i][0], C[i][1], C[i][2], C[i][3]); });
   global.fetch = async url => { const k = codes.find(c => url.indexOf("/0" + c + ".json") >= 0); return k ? reply(cases[k]) : { ok: false, status: 404, json: async () => OFF_NOT_FOUND }; };
-  const y = id => M.DB.generic.find(f => f.id === id).cook.y;
+  /* the plain chicken breast may be merged into the Kirkland breast (m-data, Nick's rule): resolve like the app does */
+  const gen = id => M.DB.generic.find(f => f.id === id) || (M.DB.alias && M.DB.alias[id] ? M.DB.generic.find(f => f.id === M.DB.alias[id].id) : null) ||
+    (id === "g_chicken_breast" ? M.DB.generic.find(f => f.alwaysRaw === true && /chicken/i.test(f.name)) : null);
+  const y = id => gen(id).cook.y;
   const ch = (await M.food.lookup(codes[0])).food;
   assert.ok(ch.cook, "raw chicken breast gets cook info");
   assert.strictEqual(ch.cook.word, "raw");
   near(ch.cook.y, y("g_chicken_breast"), 1e-6);
   near(ch.cook.per100gCooked.cal, 110 / y("g_chicken_breast"), 0.6, "cooked = this label's raw ÷ y");
   assert.strictEqual(M.foods.get(ch.id).cook.word, "raw", "saved with it");
+  assert.strictEqual(M.foods.get(ch.id).alwaysRaw, true, "Nick's rule: a scanned raw chicken breast is weighed raw, like the built-in one");
   const rice = (await M.food.lookup(codes[1])).food;
   assert.ok(rice.cook && rice.cook.word === "dry" && Math.abs(rice.cook.y - y("g_white_rice")) < 1e-6);
   assert.ok(!(await M.food.lookup(codes[2])).food.cook, "ready rice is already cooked");
   const pasta = (await M.food.lookup(codes[3])).food;
   assert.ok(pasta.cook && pasta.cook.word === "dry");
-  assert.ok(!(await M.food.lookup(codes[4])).food.cook, "grilled strips are already cooked");
+  const strips = (await M.food.lookup(codes[4])).food;
+  assert.ok(!strips.cook, "grilled strips are already cooked");
+  assert.ok(!strips.alwaysRaw, "and aren't weighed raw");
   near((await M.food.lookup(codes[5])).food.cook.y, y("g_ground_beef_93"), 1e-6, "93% lean → the 93/7 beef");
   if (M.cook && typeof M.cook.unitsFor === "function") assert.ok(M.cook.unitsFor(M.foods.get(ch.id), "us").some(o => o.state === "cooked"), "raw and cooked units offered");
   delete global.fetch;
@@ -1257,7 +1286,8 @@ t("BEF-03/UX2-18 describe (no Claude): the thing they ate must be in the name; '
   const name = s => { const r = d(s); return r.items.length ? r.items[0].name : "(none) " + r.unmatched.join(","); };
   assert.ok(/^avocado$/i.test(name("avocado").split(",")[0]) || !/oil/i.test(name("avocado")), "avocado → " + name("avocado"));
   assert.ok(!/oil/i.test(name("half an avocado")));
-  assert.ok(/ground turkey/i.test(name("turkey")) && !/bacon/i.test(name("4 oz turkey")), name("turkey"));
+  /* Nick's rule: plain "turkey" is their sliced turkey (Hillshire Farm), not ground turkey or turkey bacon */
+  assert.ok(/turkey/i.test(name("turkey")) && !/ground|bacon/i.test(name("turkey")) && !/bacon/i.test(name("4 oz turkey")), name("turkey"));
   assert.deepStrictEqual(d("two tacos").unmatched, ["two tacos"], "not the taco seasoning");
   assert.deepStrictEqual(d("9 oz chicken veggie bake").unmatched, ["9 oz chicken veggie bake"], "an unknown dish isn't plain chicken");
   assert.deepStrictEqual(d("a turkey sandwich").unmatched, ["a turkey sandwich"]);
@@ -1338,13 +1368,14 @@ t("staples: describe picks the food they buy on near-ties (never over the food t
 
 t("staples: built-in meal ideas made of foods they buy score higher", () => {
   const rem = { cal: 700, p: 50, c: 70, f: 25 };
-  const idea = M.DB.suggest.find(s => s.id === "s_eggs_dkb_toast");
-  const ids = idea.items.map(it => it.foodId).filter(id => M.DB.generic.some(f => f.id === id));
+  const builtInIds = s => s.items.map(it => it.foodId).filter(id => M.DB.generic.some(f => f.id === id));
+  const idea = M.DB.suggest.find(s => s.id === "s_eggs_dkb_toast") || M.DB.suggest.find(s => /breakfast/i.test(s.slot) && new Set(builtInIds(s)).size >= 2);
+  const ids = Array.from(new Set(builtInIds(idea)));
   const score = () => M.food.suggestBuiltin({ slot: "Breakfast", remaining: rem, jitter: 0, n: 99 }).find(s => s.id === idea.id).score;
   const plain = withStaples([], score);
   const all = withStaples(ids, score);
   const some = withStaples(ids.slice(0, 1), score);
-  near(all - plain, 8 * ids.length / idea.items.length, 0.11, "all its built-in foods are staples");
+  near(all - plain, 8 * idea.items.filter(it => ids.indexOf(it.foodId) >= 0).length / idea.items.length, 0.11, "all its built-in foods are staples");
   assert.ok(some > plain && some < all, [plain, some, all].join(" "));
 });
 
@@ -1374,14 +1405,19 @@ t("UX2-03 scanned cod / shrimp / scallops / quinoa take the cook info of a match
   M.reset();
   const G = M.DB.generic, n0 = G.length;
   const add = (id, name, word, y, per100g) => G.push({ id, name, brand: "", barcode: "", source: "generic", serving: { qty: 4, unit: "oz", g: 113 }, per: per100g, per100g, alts: [], cook: { y, word, per100gCooked: Object.keys(per100g).reduce((o, k) => (o[k] = per100g[k] / y, o), {}) }, uses: 0, lastUsed: 0, createdAt: 0, updatedAt: 0, pid: null });
-  add("g_t_cod", "Cod, raw", "raw", 0.8, { cal: 82, p: 18, c: 0, f: 0.7, fiber: 0, sugar: 0, sodium: 54 });
-  add("g_t_shrimp", "Shrimp, raw", "raw", 0.85, { cal: 85, p: 20, c: 0, f: 0.5, fiber: 0, sugar: 0, sodium: 119 });
-  add("g_t_scallops", "Scallops, raw", "raw", 0.8, { cal: 69, p: 12, c: 3, f: 0.5, fiber: 0, sugar: 0, sodium: 392 });
-  add("g_t_quinoa", "Quinoa, dry", "dry", 2.6, { cal: 368, p: 14, c: 64, f: 6, fiber: 7, sugar: 0, sodium: 5 });
+  /* m-data's own cod / shrimp / scallops / quinoa when it has them (F7 adds them), else stand-ins */
+  const real = re => G.find(f => !f.brand && isObjT(f.cook) && f.cook.y > 0 && re.test(f.name));
+  const ensure = (re, id, name, word, y, per100g) => real(re) || (add(id, name, word, y, per100g), G[G.length - 1]);
+  const cod = ensure(/^cod\b/i, "g_t_cod", "Cod, raw", "raw", 0.8, { cal: 82, p: 18, c: 0, f: 0.7, fiber: 0, sugar: 0, sodium: 54 });
+  const shrimp = ensure(/^shrimp\b/i, "g_t_shrimp", "Shrimp, raw", "raw", 0.85, { cal: 85, p: 20, c: 0, f: 0.5, fiber: 0, sugar: 0, sodium: 119 });
+  const scal = ensure(/^scallops?\b/i, "g_t_scallops", "Scallops, raw", "raw", 0.8, { cal: 69, p: 12, c: 3, f: 0.5, fiber: 0, sugar: 0, sodium: 392 });
+  const quin = ensure(/^quinoa\b/i, "g_t_quinoa", "Quinoa, dry", "dry", 2.6, { cal: 368, p: 14, c: 64, f: 6, fiber: 7, sugar: 0, sodium: 5 });
   try {
     const cf = (name, kcal) => M.food.cookFor({ name, per100g: { cal: kcal, p: 15, c: 1, f: 1, fiber: 0, sugar: 0, sodium: 100 } });
-    assert.deepStrictEqual([cf("Wild Caught Cod Fillets", 80), cf("Raw Shrimp 31-40 Count", 90), cf("Sea Scallops", 70), cf("Organic Tri-Color Quinoa", 370)].map(c => c && c.word + " " + c.y), ["raw 0.8", "raw 0.85", "raw 0.8", "dry 2.6"]);
-    near(cf("Wild Caught Cod Fillets", 80).per100gCooked.cal, 100, 0.01, "this label's raw ÷ y");
+    const want = f => (f.cook.word === "dry" ? "dry" : "raw") + " " + f.cook.y;
+    assert.deepStrictEqual([cf("Wild Caught Cod Fillets", 80), cf("Raw Shrimp 31-40 Count", 90), cf("Sea Scallops", 70), cf("Organic Tri-Color Quinoa", 370)].map(c => c && c.word + " " + c.y), [want(cod), want(shrimp), want(scal), want(quin)]);
+    assert.strictEqual(quin.cook.word, "dry");
+    near(cf("Wild Caught Cod Fillets", 80).per100gCooked.cal, 80 / cod.cook.y, 0.01, "this label's raw ÷ y");
     assert.deepStrictEqual([cf("Cooked Shrimp", 99), cf("Shrimp Cocktail", 99), cf("Breaded Cod Fillets", 200), cf("Quinoa Chips", 450)], [null, null, null, null], "already cooked or not the plain food");
   } finally { G.length = n0; }
 });
@@ -1503,6 +1539,196 @@ t("OFL-11/BEF-17 suggest never waits long for Claude: onClaude gets Claude's ide
     for (let i = 0; i < 50 && late === null; i++) await new Promise(r => setTimeout(r, 10));
     assert.ok(/key is wrong/.test(late), "onClaude gets the note too: " + late);
   } finally { delete NAV.onLine; delete global.fetch; M.ai.setKey(""); }
+});
+
+/* ======================================================================= */
+/* Nick's food rules (22:20–22:34): Kirkland chicken breast raw, and the three products they buy */
+/* m-data (F7) adds the branded foods; until it does, test copies with the same words / flags
+   stand in (found by words and flags, never by id). Removed again at the end. */
+function namedFixtures() {
+  const G = M.DB.generic, added = [];
+  const has = re => G.find(f => re.test(f.name + " " + (f.brand || "")));
+  const add = (re, f) => { const got = has(re); if (got) return got; const food = Object.assign({ barcode: "", source: "generic", staple: true, uses: 0, lastUsed: 0, createdAt: 0, updatedAt: 0, pid: null }, f); G.push(food); added.push(food); return food; };
+  const hill = add(/hillshire/i, { id: "g_test_hillshire", name: "Turkey slices, oven roasted", brand: "Hillshire Farm", serving: { qty: 2, unit: "oz", g: 56 }, per: { cal: 50, p: 10, c: 1, f: 0.5, fiber: 0, sugar: 1, sodium: 470 }, per100g: { cal: 89, p: 17.9, c: 1.8, f: 0.9, fiber: 0, sugar: 1.8, sodium: 839 }, alts: [{ label: "1 slice", g: 9.3 }, { label: "100 g", g: 100 }] });
+  const jam = add(/smucker/i, { id: "g_test_smuckers", name: "Strawberry fruit spread, natural", brand: "Smucker's", serving: { qty: 1, unit: "tbsp", g: 19 }, per: { cal: 50, p: 0, c: 13, f: 0, fiber: 0, sugar: 12, sodium: 0 }, per100g: { cal: 263, p: 0, c: 68.4, f: 0, fiber: 0, sugar: 63.2, sodium: 0 }, alts: [{ label: "100 g", g: 100 }] });
+  const daisy = add(/daisy/i, { id: "g_test_daisy", name: "Cottage cheese, 2% low fat", brand: "Daisy", serving: { qty: 0.5, unit: "cup", g: 113 }, per: { cal: 90, p: 13, c: 5, f: 2.5, fiber: 0, sugar: 4, sodium: 390 }, per100g: { cal: 80, p: 11.5, c: 4.4, f: 2.2, fiber: 0, sugar: 3.5, sodium: 345 }, alts: [{ label: "1 cup", g: 226 }, { label: "100 g", g: 100 }] });
+  return { hill, jam, daisy, done: () => added.forEach(f => { const i = G.indexOf(f); if (i >= 0) G.splice(i, 1); }) };
+}
+t("Nick's rules, describe (no Claude): chicken = the Kirkland breast, RAW, 175 g per breast; typed grams raw unless 'cooked'", async () => {
+  M.reset(); M.ai.setKey("");
+  const d = async s => { const r = await M.food.describe(s, { slot: "Dinner" }); assert.strictEqual(r.method, "local"); assert.deepStrictEqual(r.unmatched, [], s); assert.strictEqual(r.items.length, 1, s); return r.items[0]; };
+  const G = M.DB.generic;
+  const alias = M.DB.alias && M.DB.alias.g_chicken_breast;
+  const breast = G.find(f => f.alwaysRaw === true && /chicken/i.test(f.name)) || (alias && G.find(f => f.id === alias.id)) || G.find(f => f.id === "g_kirkland_organic_chicken");
+  assert.ok(breast && /chicken breast/i.test(breast.name) && /kirkland/i.test(breast.name + breast.brand), "one Kirkland breast food");
+  const kcalG = breast.per100g.cal / 100;
+  for (const s of ["chicken", "chicken breast", "grilled chicken", "a chicken breast", "1 breast"]) {
+    const it = await d(s);
+    assert.strictEqual(it.foodId, breast.id, s + " → " + it.name);
+    near(it.g, 175, 1, s + ": one breast is 175 g raw");
+    assert.ok(/breast/.test(it.servingLabel) && /175 g/.test(it.servingLabel), s + ": " + it.servingLabel);
+    if (cookOf(breast.id)) assert.strictEqual(it.state, "raw", s);
+    near(kcalOf(it), 175 * kcalG, 2, s);
+  }
+  let it = await d("2 chicken breasts");
+  assert.strictEqual(it.foodId, breast.id);
+  assert.strictEqual(it.servings, 2);
+  near(it.g, 350, 1, "2 breasts (item g = the whole portion)");
+  near(kcalOf(it), 350 * kcalG, 3, "2 breasts raw");
+  it = await d("200 g chicken");
+  assert.strictEqual(it.foodId, breast.id);
+  near(it.g, 200, 1, "200 g");
+  near(kcalOf(it), 200 * kcalG, 2, "200 g raw");
+  if (cookOf(breast.id)) assert.strictEqual(it.state, "raw");
+  it = await d("200 g cooked chicken breast");
+  if (cookOf(breast.id)) { assert.strictEqual(it.state, "cooked"); near(kcalOf(it), 200 * kcalPerG(breast.id, "cooked"), 3, "200 g cooked"); }
+  it = await d("200 g raw chicken");
+  if (cookOf(breast.id)) assert.strictEqual(it.state, "raw");
+  /* other chicken stays itself */
+  assert.ok(/thigh/i.test((await d("chicken thigh")).name));
+  /* their own saved chicken breast still wins, weighed raw */
+  const mine = M.foods.add({ name: "Chicken breast", brand: "Kirkland Signature", source: "off", serving: { qty: 4, unit: "oz", g: 112 }, per: { cal: 110, p: 23, c: 0, f: 2, fiber: 0, sugar: 0, sodium: 65 }, per100g: { cal: 98, p: 20.5, c: 0, f: 1.8, fiber: 0, sugar: 0, sodium: 58 } });
+  it = await d("200 g chicken breast");
+  assert.strictEqual(it.foodId, mine.id);
+  if (cookOf(breast.id)) assert.strictEqual(it.state, "raw");
+  near(kcalOf(it), 196, 3, "their own label, raw");
+  M.foods.remove(mine.id);
+});
+t("Nick's rules, describe (no Claude): turkey slices → Hillshire Farm, jam / jelly → Smucker's, cottage cheese → Daisy 2%", async () => {
+  M.reset(); M.ai.setKey("");
+  const fx = namedFixtures();
+  try {
+    const d = async s => { const r = await M.food.describe(s, { slot: "Lunch" }); assert.deepStrictEqual(r.unmatched, [], s); assert.strictEqual(r.items.length, 1, s); return r.items[0]; };
+    for (const s of ["turkey slices", "turkey", "sliced turkey", "deli turkey", "lunch meat", "turkey breast slices", "Hillshire turkey"]) assert.strictEqual((await d(s)).foodId, fx.hill.id, s);
+    let it = await d("4 slices turkey");
+    assert.strictEqual(it.foodId, fx.hill.id);
+    const slice = (fx.hill.alts || []).find(a => /^1 slice/.test(a.label));
+    if (slice) { near(it.g, 4 * slice.g, 0.6, "4 slices"); assert.ok(it.servings === 4 && /^1 slice/.test(it.servingLabel), "4 × 1 slice: " + it.servings + " × " + it.servingLabel); }
+    assert.deepStrictEqual(M.food.describeLocal("a turkey sandwich").unmatched, ["a turkey sandwich"], "a sandwich is more than the slices");
+    for (const s of ["ground turkey", "turkey bacon"]) assert.notStrictEqual((await d(s)).foodId, fx.hill.id, s + " is its own food");
+    for (const s of ["jam", "jelly", "strawberry jam", "strawberry jelly", "1 tbsp jam", "Smucker's jam"]) assert.strictEqual((await d(s)).foodId, fx.jam.id, s);
+    it = await d("2 tbsp jelly");
+    assert.strictEqual(it.foodId, fx.jam.id);
+    near(kcalOf(it), 2 * fx.jam.per.cal / (fx.jam.serving.qty || 1), 3, "2 tbsp");
+    for (const s of ["cottage cheese", "1 cup cottage cheese", "2% cottage cheese", "daisy cottage cheese"]) assert.strictEqual((await d(s)).foodId, fx.daisy.id, s);
+    /* a size that reads right: "1 cup" is 1 × 1 cup (not 2 × 1/2 cup) when the food has a 1 cup size */
+    if ((fx.daisy.alts || []).some(a => /^1 cup\b/.test(a.label))) { it = await d("1 cup cottage cheese"); assert.ok(it.servings === 1 && /^1 cup/.test(it.servingLabel), it.servings + " × " + it.servingLabel); near(it.g, 226, 1); }
+    it = await d("4% cottage cheese");
+    if (M.DB.generic.some(f => /cottage cheese/i.test(f.name) && /4%/.test(f.name))) assert.notStrictEqual(it.foodId, fx.daisy.id, "they said 4%");
+    assert.strictEqual(it.servings, 1, "'4%' is part of the name, not 4 servings");
+    /* "peanut butter and jelly": the jelly is theirs */
+    const pbj = await M.food.describe("peanut butter and jelly", {});
+    assert.strictEqual(pbj.items[1].foodId, fx.jam.id);
+    /* their own saved turkey still wins */
+    const mine = M.foods.add({ name: "Turkey slices", brand: "Kroger", source: "off", serving: { qty: 2, unit: "oz", g: 56 }, per: { cal: 60, p: 11, c: 1, f: 1, fiber: 0, sugar: 1, sodium: 500 } });
+    assert.strictEqual((await d("turkey slices")).foodId, mine.id);
+    M.foods.remove(mine.id);
+  } finally { fx.done(); }
+});
+t("Nick's rules in every Claude prompt (photo, label, describe, name estimate, suggest): Kirkland chicken in raw grams, Daisy 2%, Smucker's, Hillshire; suggest lists staples and what they never eat", async () => {
+  M.reset(); M.ai.setKey("sk-ant-test");
+  const seen = {};
+  let kind = "";
+  global.fetch = async (u, o) => {
+    const c = JSON.parse(o.body).messages[0].content;
+    seen[kind] = (Array.isArray(c) ? c : [{ type: "text", text: c }]).filter(x => x.type === "text").map(x => x.text).join("\n");
+    if (kind === "label") return claudeReply({ found: true, name: "Cottage cheese", brand: "Daisy", servingText: "1/2 cup (113g)", servingQty: 0.5, servingUnit: "cup", servingG: 113, basis: "serving", cal: 90, f: 2.5, sodium_mg: 390, c: 5, fiber: 0, sugar: 4, p: 13 });
+    if (kind === "name") return claudeReply({ name: "Cottage cheese", brand: "Daisy", serving: { qty: 0.5, unit: "cup", g: 113 }, per: { cal: 90, p: 13, c: 5, f: 2.5, fiber: 0, sugar: 4, sodium_mg: 390 }, alts: [] });
+    if (kind === "suggest") return claudeReply({ suggestions: [] });
+    return claudeReply({ items: [{ name: "Chicken breast", servingLabel: "1 breast (175 g raw)", g: 175, per: { cal: 210, p: 39, c: 0, f: 4.6, fiber: 0, sugar: 0, sodium_mg: 79 } }], note: "Sure." });
+  };
+  const photo = { type: "image/jpeg", size: 3, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+  try {
+    kind = "photo"; await M.food.photo.estimate(photo, { slot: "Dinner" });
+    kind = "label"; await M.food.label.fromImage(photo);
+    kind = "describe"; await M.food.describe("chicken and rice", { slot: "Dinner" });
+    kind = "name"; await M.food.estimateByName("cottage cheese");
+    kind = "suggest"; await M.food.suggest({ slot: "Dinner", remaining: { cal: 700, p: 50, c: 70, f: 25 } });
+    for (const k of ["photo", "label", "describe", "name", "suggest"]) {
+      const p = seen[k] || "";
+      assert.ok(p, k + " asked Claude");
+      assert.ok(/Kirkland organic chicken breast/i.test(p), k + ": Kirkland chicken");
+      assert.ok(/175 g raw/i.test(p) && /raw/i.test(p), k + ": raw chicken grams, one breast ≈ 175 g");
+      assert.ok(/Daisy 2% cottage cheese/.test(p) && /Smucker's Natural strawberry/.test(p) && /Hillshire Farm oven roasted turkey/.test(p), k + ": the three products");
+    }
+    const sp = seen.suggest;
+    ["pork tenderloin", "Dave's Killer Bread", "cod", "shrimp", "scallops", "quinoa", "Greek yogurt 2%", "asparagus", "bell pepper", "cucumber", "corn on the cob", "agave"].forEach(w => assert.ok(sp.indexOf(w) >= 0, "staple listed: " + w));
+    const never = /never eat:([^\n]*)/i.exec(sp);
+    assert.ok(never, "the never-eat line");
+    ["other cheese", "oats", "cereal", "shakes", "bars", "protein powder", "restaurant"].forEach(w => assert.ok(never[1].indexOf(w) >= 0, "never: " + w));
+    assert.ok(!/cottage cheese too/i.test(sp) && /cottage cheese is fine/i.test(never[1]), "cottage cheese is NOT banned (Daisy 2% is theirs)");
+    assert.ok(/agave, not honey/i.test(sp));
+  } finally { delete global.fetch; M.ai.setKey(""); }
+});
+
+t("BEF-11 Open Food Facts entries with calories but no protein, carbs or fat: a plain warning on the lookup (not saved on the food); last in search", async () => {
+  M.reset();
+  const upc = b => b + M.food.gtin.check(b);
+  const prod = (code, name, n) => ({ code, product_name: name, brands: "Kroger", serving_size: "1 cup (240 ml)", serving_quantity: 240, nutriments: n });
+  const bad = prod("0111200000001", "Sparkling Juice", { "energy-kcal_100g": 45 });
+  const ok = prod("0111200000002", "Orange Juice", { "energy-kcal_100g": 45, carbohydrates_100g: 10.4, proteins_100g: 0.7, fat_100g: 0.2 });
+  const water = prod("0111200000003", "Seltzer water", { "energy-kcal_100g": 0, proteins_100g: 0, carbohydrates_100g: 0, fat_100g: 0 });
+  assert.ok(/no protein, carbs or fat/.test(M.food.fromOFF(bad).warning || ""), "flagged");
+  assert.strictEqual(M.food.fromOFF(ok).warning, undefined);
+  assert.strictEqual(M.food.fromOFF(water).warning, undefined, "0 kcal water isn't flagged");
+  const code = upc("01112000000");
+  global.fetch = async url => (url.indexOf("/api/v2/product/") >= 0 ? reply({ code, product: Object.assign({}, bad, { code }), status: 1 }) : reply({ products: [bad, ok] }));
+  try {
+    const r = await M.food.lookup(code);
+    assert.strictEqual(r.status, "found");
+    assert.ok(/Check them against the label/.test(r.warning || ""), JSON.stringify(r.warning));
+    assert.strictEqual(r.food.warning, undefined);
+    assert.strictEqual(M.foods.get(r.food.id).warning, undefined, "the flag isn't saved on the food");
+    const list = await M.food.searchOFF("juice");
+    assert.deepStrictEqual(list.map(f => f.name), ["Orange Juice", "Sparkling Juice"]);
+    assert.ok(list.every(f => f.warning === undefined));
+  } finally { delete global.fetch; }
+});
+
+t("Nick's rules on Claude's answers: chicken breast and the named products take the app's own numbers for their grams (raw unless 'cooked'); other items stay as Claude gave them", async () => {
+  M.reset(); M.ai.setKey("sk-ant-test");
+  const fx = namedFixtures();
+  const G = M.DB.generic;
+  const breast = G.find(f => f.alwaysRaw === true && /chicken/i.test(f.name)) || G.find(f => f.id === "g_kirkland_organic_chicken");
+  const P = (cal, p, c, f, na) => ({ cal, p, c, f, fiber: 0, sugar: 0, sodium_mg: na });
+  const items = [
+    { name: "Grilled chicken breast", servingLabel: "1 breast (175 g raw)", g: 175, per: P(300, 50, 0, 8, 150) },
+    { name: "Chicken breast", servingLabel: "5 oz cooked (142 g)", g: 142, per: P(300, 50, 0, 8, 150) },
+    { name: "Daisy 2% cottage cheese", servingLabel: "1 cup (226 g)", g: 226, per: P(250, 20, 10, 10, 900) },
+    { name: "Smucker's Natural strawberry jam", servingLabel: "1 tbsp (19 g)", g: 19, per: P(60, 0, 15, 0, 5) },
+    { name: "Hillshire Farm oven roasted turkey breast slices", servingLabel: "3 slices (28 g)", g: 28, per: P(40, 6, 1, 1, 300) },
+    { name: "White rice", servingLabel: "1 cup (158 g)", g: 158, per: P(205, 4, 45, 0.4, 2) },
+    { name: "Chicken breast", servingLabel: "1 serving", g: null, per: P(300, 50, 0, 8, 150) }
+  ];
+  global.fetch = async (u, o) => {
+    const txt = JSON.stringify(JSON.parse(o.body).messages);
+    if (/Suggest 3/.test(txt)) return claudeReply({ suggestions: [{ name: "Chicken and rice", desc: "d", store: "Costco", prepMin: 20, items: [items[0], items[5]] }] });
+    return claudeReply({ items, note: "ok" });
+  };
+  try {
+    const kc = (id, state) => kcalPerG(id, state);
+    const check = (out, label) => {
+      const [ch, ck, cc, jam, tur, rice, nog] = out;
+      assert.strictEqual(ch.foodId, breast.id, label + ": chicken → the Kirkland breast");
+      near(ch.per.cal, 175 * kc(breast.id, "raw"), 1.5, label + ": raw numbers");
+      if (cookOf(breast.id)) { assert.strictEqual(ch.state, "raw"); assert.strictEqual(ch.cook.word, "raw"); }
+      assert.strictEqual(ch.servingLabel, "1 breast (175 g raw)");
+      if (cookOf(breast.id)) { assert.strictEqual(ck.state, "cooked"); near(ck.per.cal, 142 * kc(breast.id, "cooked"), 1.5, label + ": 'cooked' said"); }
+      assert.strictEqual(cc.foodId, fx.daisy.id); near(cc.per.cal, 226 * fx.daisy.per100g.cal / 100, 1.5, label + ": Daisy's numbers");
+      assert.strictEqual(jam.foodId, fx.jam.id); near(jam.per.cal, 19 * fx.jam.per100g.cal / 100, 1, label + ": Smucker's numbers");
+      assert.strictEqual(tur.foodId, fx.hill.id); near(tur.per.cal, 28 * fx.hill.per100g.cal / 100, 1, label + ": Hillshire's numbers");
+      assert.strictEqual(rice.per.cal, 205, label + ": other foods stay as Claude gave them"); assert.strictEqual(rice.foodId, undefined);
+      assert.strictEqual(nog.per.cal, 300, label + ": no grams → left alone");
+    };
+    check((await M.food.photo.estimate({ type: "image/jpeg", size: 3, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }, {})).items, "photo");
+    const dsc = await M.food.describe("a chicken breast, rice and some other stuff I made", {});
+    assert.strictEqual(dsc.method, "ai");
+    check(dsc.items, "describe");
+    const sug = (await M.food.suggest({ slot: "Dinner", remaining: { cal: 800, p: 60, c: 80, f: 25 } })).filter(s => s.source === "claude");
+    assert.strictEqual(sug.length, 1);
+    assert.strictEqual(sug[0].items[0].foodId, breast.id);
+    near(sug[0].per.cal, Math.round(175 * kc(breast.id, "raw")) + 205, 2, "the idea's total uses the Kirkland numbers");
+  } finally { fx.done(); delete global.fetch; M.ai.setKey(""); }
 });
 
 /* ---- run ---- */
