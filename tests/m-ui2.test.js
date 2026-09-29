@@ -827,6 +827,128 @@ t("alwaysRaw: ideas, saved meals and the builder show the chicken in raw grams, 
   });
 });
 
+/* ================================================================ C2b (partner check) */
+t("C2b barcode hit with calories but no protein, carbs or fat: the amount screen says so in plain words", async () => {
+  reset();
+  const saved = M.food.lookup;
+  const WARN = "Open Food Facts has calories but no protein, carbs or fat for this. Check them against the label.";
+  M.food.lookup = code => Promise.resolve({ status: "found", code, saved: false, warning: WARN, food: { id: "off_" + code, name: "Sparkling tea", brand: "Acme", barcode: code, source: "off", serving: { qty: 1, unit: "can", g: 355 }, per: { cal: 90, p: 0, c: 0, f: 0 }, per100g: { cal: 25, p: 0, c: 0, f: 0 }, alts: [{ label: "100 g", g: 100 }] } });
+  try {
+    M.ui.openAdd({ slot: "Lunch", date: M.today() });
+    const sc = M.food.scanner.start; M.food.scanner.start = () => new Promise(() => {});
+    click(q('.m-tools [data-m="open-scan"]'));
+    M.food.scanner.start = sc;
+    $("m-code").value = "012345678905";
+    click(q('[data-m="code-lookup"]'));
+    await sleep(20);
+    const w = $("m-off-warn");
+    assert.ok(w && w.textContent === WARN, "warning shown: " + (w && w.textContent));
+    assert.strictEqual(w.getAttribute("role"), "status");
+    assert.ok($("m-det-go"), "still on the amount screen, can log it");
+    /* changing the unit re-draws the amount box; the warning stays */
+    const sel = q('[data-m="det-unit"]'); if (sel) { change(sel, sel.options[sel.options.length - 1].value); assert.ok($("m-off-warn"), "warning kept after a unit change"); }
+    M.ui.close();
+    /* a normal hit shows no warning */
+    M.food.lookup = code => Promise.resolve({ status: "found", code, saved: true, food: { id: "off_" + code, name: "Yogurt", brand: "", barcode: code, source: "off", serving: { qty: 1, unit: "cup", g: 170 }, per: { cal: 100, p: 17, c: 6, f: 0 }, alts: [] } });
+    M.ui.openAdd({ slot: "Lunch", date: M.today() });
+    M.food.scanner.start = () => new Promise(() => {});
+    click(q('.m-tools [data-m="open-scan"]'));
+    M.food.scanner.start = sc;
+    $("m-code").value = "036000291452";
+    click(q('[data-m="code-lookup"]'));
+    await sleep(20);
+    assert.ok($("m-det-go") && !$("m-off-warn"), "no warning for a food with protein");
+    /* a store price sticker gets its own words, not "isn't in Open Food Facts yet" */
+    M.ui.close();
+    M.food.lookup = code => Promise.resolve({ status: "not_found", code, store: true, message: "This is a store price sticker. Scan the label or type it in once. After that, this sticker finds it." });
+    M.ui.openAdd({ slot: "Lunch", date: M.today() });
+    M.food.scanner.start = () => new Promise(() => {});
+    click(q('.m-tools [data-m="open-scan"]'));
+    M.food.scanner.start = sc;
+    $("m-code").value = "212345012345";
+    click(q('[data-m="code-lookup"]'));
+    await sleep(20);
+    assert.strictEqual($("sheetT").textContent, "Not found");
+    assert.ok(/store price sticker/.test($("sheetB").textContent) && !/Open Food Facts yet/.test($("sheetB").textContent), $("sheetB").textContent);
+    assert.ok(q('#sheetB [data-m="open-label"]') && q('#sheetB [data-m="open-form"]'), "Scan label / Type it in still offered");
+  } finally { M.food.lookup = saved; if (M.ui.sheetOpen()) M.ui.close(); }
+});
+
+t("C2b deleting a saved meal or a food can be undone from the Foods tab (same id, same items)", () => {
+  reset();
+  const m = M.meals.add({ name: "Chicken rice bowl", desc: "Meal prep, Sunday", slot: "Lunch", servingsMade: 1, items: [egg()] });
+  openFoods("meals");
+  click(q('[data-m="meal"][data-id="' + m.id + '"]'));
+  const del = q('[data-m="meal-del"]');
+  click(del); assert.ok(M.meals.get(m.id), "first tap only arms");
+  click(del);
+  assert.ok(!M.meals.get(m.id), "deleted");
+  assert.ok(!ctx.toasts.some(x => /^Deleted/.test(x)), "no second 'Deleted' message on top of the bar");
+  const bar = q(".m-undo");
+  assert.ok(bar && /Chicken rice bowl/.test(bar.textContent), "undo bar on Saved meals");
+  click(q('[data-m="undo-del"]'));
+  const back = M.meals.get(m.id);
+  assert.ok(back, "same id back");
+  assert.strictEqual(back.desc, "Meal prep, Sunday");
+  assert.strictEqual(back.items.length, 1);
+  assert.ok(!q(".m-undo"), "bar gone after undo");
+  assert.ok(q('[data-m="meal"][data-id="' + m.id + '"]'), "listed again");
+  /* foods too; the bar only shows on the list the item came from */
+  const f = M.foods.add({ name: "Sparkling tea", brand: "", serving: { qty: 1, unit: "can", g: 355 }, per: { cal: 90, p: 0, c: 22, f: 0 } });
+  openFoods("foods");
+  click(q('[data-m="food"][data-id="' + f.id + '"]'));
+  const fd = q('[data-m="ff-del"]'); click(fd); click(fd);
+  assert.ok(!M.MS.foods[f.id], "food deleted");
+  assert.ok(q(".m-undo"), "undo bar on My foods");
+  openFoods("meals");
+  assert.ok(!q(".m-undo"), "no food undo bar on Saved meals");
+  openFoods("foods");
+  click(q('[data-m="undo-del"]'));
+  assert.ok(M.MS.foods[f.id] && M.MS.foods[f.id].name === "Sparkling tea", "food back with its id");
+  /* old deletes expire */
+  M.ui.undoDel = { kind: "food", data: { id: "x", name: "Old" }, at: Date.now() - 5 * 60000, pid: M.pid() };
+  M.ui.render();
+  assert.ok(!q(".m-undo"), "no bar for a delete from minutes ago");
+  /* another person's delete on this phone never shows here */
+  M.ui.undoDel = { kind: "food", data: { id: "y", name: "Hers" }, at: Date.now(), pid: M.pid() === "kat" ? "nick" : "kat" };
+  M.ui.render();
+  assert.ok(!q(".m-undo"), "no bar for the other person's delete");
+  M.ui.undoDel.pid = M.pid(); M.ui.render();
+  assert.ok(q(".m-undo"), "bar for this person's delete");
+  M.ui.undoDel = null;
+});
+
+t("C2b describe rows: '2 chicken breasts' reads '2 breasts (350 g raw)' even in US units (stepper counts breasts)", async () => {
+  reset();
+  const f = M.foods.get("g_kirkland_organic_chicken");
+  assert.ok(f && f.alwaysRaw === true, "Kirkland breast in the data");
+  const wa = M.ui._.wholeAmount;
+  const c = M.cook.of(f);
+  const it = { name: f.name, foodId: f.id, servingLabel: "1 breast (175 g)", g: 350, servings: 2, per: { cal: 172 }, state: "raw", cook: { y: c.y, word: c.word } };
+  assert.strictEqual(wa(it, true), "2 breasts (350 g raw)");
+  const oz = M.cook.unitsFor(f, "us").find(o => o.key === "oz-raw");
+  assert.ok(/^6 oz raw/.test(wa({ name: f.name, foodId: f.id, servingLabel: "1 oz raw", g: oz.g, servings: 6, per: { cal: 1 }, state: "raw", cook: { y: c.y, word: c.word } }, true)), "oz rows keep oz");
+  /* "cottage cheese with jam": one ½-cup serving reads like its diary row */
+  assert.strictEqual(wa({ name: "Cottage cheese, 2%", servingLabel: "½ cup (113 g)", g: 113, servings: 1, per: { cal: 90 } }, true), "½ cup (113 g)");
+  assert.strictEqual(wa({ name: "Cottage cheese, 2%", servingLabel: "½ cup (113 g)", g: 113, servings: 2, per: { cal: 90 } }, true), "1 cup (226 g)");
+});
+
+t("C2b meal description is a two-line box (whole text shows), capped at 120, saved with the meal", () => {
+  reset(); newMeal("Turkey cucumber plate");
+  const d = q('[data-m="mb"][data-k="desc"]');
+  assert.strictEqual(d.tagName, "TEXTAREA");
+  assert.strictEqual(d.getAttribute("maxlength"), "120");
+  input(d, "4 turkey slices, 1 cucumber, cut up. Quick snack.");
+  M.ui.draft.items.push(egg());
+  click(q('[data-m="mb-save"]'));
+  const m = M.meals.list().find(x => x.name === "Turkey cucumber plate");
+  assert.ok(m && m.desc === "4 turkey slices, 1 cucumber, cut up. Quick snack.", m && m.desc);
+  /* editing shows the saved text in the box */
+  openFoods("meals"); click(q('[data-m="meal"][data-id="' + m.id + '"]')); click(q('[data-m="meal-edit"]'));
+  assert.strictEqual(q('[data-m="mb"][data-k="desc"]').value, m.desc);
+  M.ui.close();
+});
+
 (async () => {
   let pass = 0, fail = 0;
   for (const x of tests) {

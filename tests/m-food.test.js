@@ -1731,6 +1731,81 @@ t("Nick's rules on Claude's answers: chicken breast and the named products take 
   } finally { fx.done(); delete global.fetch; M.ai.setKey(""); }
 });
 
+t("C4 describe (no Claude): '10 shrimp' is 10 shrimp (not 10 × 4 oz); amounts after the food with raw/dry/cooked; ears of corn and fish fillets", () => {
+  M.reset();
+  const G = M.DB.generic;
+  const one = s => { const r = M.food.describeLocal(s); assert.strictEqual(r.unmatched.length, 0, s + " unmatched"); assert.strictEqual(r.items.length, 1, s); return r.items[0]; };
+  const shrimp = G.find(f => f.id === "g_shrimp");
+  if (shrimp && (shrimp.alts || []).some(a => /large shrimp/i.test(a.label))) {
+    const s10 = one("10 shrimp");
+    assert.strictEqual(s10.foodId, "g_shrimp");
+    assert.ok(/large shrimp/.test(s10.servingLabel), "a count uses the per-shrimp size: " + s10.servingLabel);
+    assert.strictEqual(s10.servings, 10);
+    assert.ok(s10.g > 80 && s10.g < 250, "10 shrimp weigh about 150 g, got " + s10.g);
+    const r10 = one("10 raw shrimp");
+    assert.strictEqual(r10.state, "raw"); assert.ok(r10.g > s10.g, "raw shrimp weigh more than cooked");
+  }
+  const qn = G.find(f => f.id === "g_quinoa");
+  if (qn && qn.cook) {
+    for (const s of ["quinoa 1/4 cup dry", "1/4 cup dry quinoa"]) {
+      const it = one(s);
+      assert.strictEqual(it.foodId, "g_quinoa", s); assert.strictEqual(it.state, "raw", s); assert.strictEqual(it.cook.word, "dry", s);
+      near(it.g, 42.5, 1, s);
+    }
+    assert.strictEqual(one("quinoa 1 cup cooked").state, "cooked");
+  }
+  const ch = one("chicken 200g raw");
+  assert.ok(/chicken breast/i.test(ch.name)); assert.strictEqual(ch.g, 200); if (ch.cook) assert.strictEqual(ch.state, "raw");
+  const ck = one("chicken breast 200 g cooked");
+  assert.strictEqual(ck.g, 200); if (ck.cook) assert.strictEqual(ck.state, "cooked");
+  const corn = G.find(f => f.id === "g_corn");
+  if (corn) {
+    const c1 = one("1 ear corn"); assert.strictEqual(c1.foodId, "g_corn"); assert.strictEqual(c1.servings, 1); near(c1.g, corn.serving.g, 0.5);
+    const c2 = one("2 ears of corn"); assert.strictEqual(c2.foodId, "g_corn"); near(c2.g, 2 * corn.serving.g, 0.5);
+    assert.strictEqual(one("1 large ear of corn").foodId, "g_corn");
+  }
+  if (G.find(f => f.id === "g_cod")) { assert.strictEqual(one("1 cod fillet").foodId, "g_cod"); assert.strictEqual(one("a fillet of cod").foodId, "g_cod"); }
+  /* how it was made isn't the food: "toasted" bread, a lemon "juiced" */
+  const toasted = one("2 slices of daves killer bread toasted");
+  assert.ok(/dave/i.test(toasted.brand + " " + toasted.name), "Dave's bread: " + toasted.name); assert.strictEqual(toasted.servings, 2);
+  const lj = G.find(f => f.id === "g_lemon_juice");
+  if (lj) { const it = one("1 lemon juiced"); assert.strictEqual(it.foodId, "g_lemon_juice"); assert.strictEqual(it.servings, 1); }
+  /* "2x chicken breast" is two breasts */
+  const two = one("2x chicken breast");
+  assert.ok(/chicken breast/i.test(two.name)); near(two.g, 2 * ch.g / 200 * 175, 1, "2x = two breasts");
+  /* "2 turkey slices" on a "6 slices" serving → 2 × 1 slice (the stepper counts slices, not 0.33 servings) */
+  const tk = G.find(f => f.id === "g_deli_turkey");
+  if (tk && (tk.alts || []).some(a => /^1 slice\b/.test(a.label)) && tk.serving && tk.serving.qty > 1) {
+    const it = one("2 turkey slices");
+    assert.strictEqual(it.servings, 2); assert.ok(/^1 slice\b/.test(it.servingLabel), it.servingLabel);
+    near(it.g, 2 * tk.alts.find(a => /^1 slice\b/.test(a.label)).g, 0.2);
+  }
+});
+
+t("C4 Claude's chicken breast with a count but no grams ('2 breasts') gets 175 g raw per breast; '1 serving' stays as Claude gave it", async () => {
+  M.reset(); M.ai.setKey("sk-ant-test");
+  const P = cal => ({ cal, p: 50, c: 0, f: 6, fiber: 0, sugar: 0, sodium_mg: 100 });
+  global.fetch = async () => claudeReply({ items: [
+    { name: "Chicken breast", servingLabel: "2 breasts", g: null, per: P(600) },
+    { name: "Chicken breast", servingLabel: "½ breast", per: P(150) },
+    { name: "Chicken breast", servingLabel: "1 serving", per: P(300) },
+    { name: "Chicken thigh", servingLabel: "2 thighs", per: P(300) }
+  ] });
+  try {
+    const out = await M.food.describe("chicken and more", {});
+    assert.strictEqual(out.method, "ai");
+    const [two, half, srv, thigh] = out.items;
+    const breast = M.DB.generic.find(f => f.alwaysRaw === true && /chicken/i.test(f.name)) || M.DB.generic.find(f => f.id === "g_kirkland_organic_chicken");
+    const one = (breast.serving && /breast/.test(breast.serving.unit)) ? breast.serving.g : 175;
+    assert.strictEqual(two.foodId, breast.id); near(two.g, 2 * one, 0.5); assert.strictEqual(two.servings, 1);
+    near(two.per.cal, 2 * one * breast.per100g.cal / 100, 1.5, "raw Kirkland numbers, counted once");
+    if (breast.cook) assert.strictEqual(two.state, "raw");
+    assert.strictEqual(half.foodId, breast.id); near(half.g, one / 2, 0.5);
+    assert.strictEqual(srv.foodId, undefined); assert.strictEqual(srv.per.cal, 300);
+    assert.strictEqual(thigh.foodId, undefined); assert.strictEqual(thigh.per.cal, 300);
+  } finally { delete global.fetch; M.ai.setKey(""); }
+});
+
 /* ---- run ---- */
 (async () => {
   let pass = 0, fail = 0;

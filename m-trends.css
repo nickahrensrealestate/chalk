@@ -166,7 +166,7 @@
 .mt-join>.hint{margin:0 0 8px}
 .mt-joinrow{display:flex;gap:8px;align-items:center}
 .mt-joinrow input{flex:1;min-width:0;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--sur2);color:var(--ink);padding:0 10px;font-family:"Barlow Condensed","Barlow",sans-serif;font-size:19px;font-weight:600;letter-spacing:.03em;text-transform:uppercase}
-.mt-joinrow input::placeholder{color:var(--mut);opacity:.75}
+.mt-joinrow input::placeholder{color:var(--mut);opacity:.75;text-transform:none;letter-spacing:0;font-family:"Barlow",sans-serif;font-size:16px;font-weight:400}
 .mt-joinrow .btn{flex:none;padding:0 16px}
 #mt-join-msg{margin:8px 0 0}
 

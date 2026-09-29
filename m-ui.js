@@ -387,7 +387,7 @@ window.M = window.M || {};
     const id = pid(); if (!id) return "";
     let p = null; try { p = M.person(id); } catch (e) { return ""; }
     if (!p || !p.setupAt) return "";
-    const t = M.log.totals(today(), id), tg = p.targets || {};
+    const t = dayShown(today(), id), tg = p.targets || {};
     const cell = (v, g, unit, k, cls) => {
       const pct = num(g) > 0 ? Math.min(100, num(v) / num(g) * 100) : 0, over = num(g) > 0 && num(v) > num(g);
       return '<div class="m-ts-c ' + cls + (over ? " over" : "") + '"><div class="m-ts-v num"><b>' + r0(num(v)) + '</b> / ' + r0(num(g)) + unit + '</div><div class="m-ts-k">' + k + '</div><div class="m-ts-bar"><i style="width:' + pct.toFixed(1) + '%"></i></div></div>';
@@ -397,6 +397,14 @@ window.M = window.M || {};
   };
   /* "44 left" / "6 over" (rounded the same way as the numbers beside it) */
   function leftText(v, g) { const d = r0(num(g)) - r0(num(v)); return d >= 0 ? d + " left" : -d + " over"; }
+  /* Round once (BEC-16 / UX2-24): each row shows whole numbers, and the meal, the day and
+     "left" add up those same whole numbers, so what's on screen always adds up. */
+  function shownTotals(list) {
+    const o = M.foodMath.blank();
+    (Array.isArray(list) ? list : []).forEach(e => { if (!isObj(e)) return; const t = entryTotals(e); NUT.forEach(k => { o[k] += r0(num(t[k])); }); });
+    return o;
+  }
+  const dayShown = (d, id) => { try { const x = M.dayOf(d, id); return shownTotals(x && Array.isArray(x.entries) ? x.entries : []); } catch (e) { return M.log.totals(d, id); } };
   /* From Train (e.g. a check-in card's Update), a tab button switches to Macros first. */
   A.tab = el => {
     const v = el.dataset.v || "diary";
@@ -427,8 +435,8 @@ window.M = window.M || {};
     cal = num(cal); target = num(target);
     const r = 52, Cc = 2 * Math.PI * r;
     const pct = target > 0 ? Math.min(1, cal / target) : 0;
-    const over = target > 0 && cal > target;
-    const left = r0(target - cal);
+    const over = target > 0 && r0(cal) > r0(target);
+    const left = r0(target) - r0(cal);   /* the two numbers beside the ring, subtracted */
     return '<svg class="m-ring' + (over ? " over" : "") + '" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="' + (over ? Math.abs(left) + " calories over" : left + " calories left") + '">' +
       '<circle class="m-ring-bg" cx="60" cy="60" r="' + r + '"/>' +
       '<circle class="m-ring-fg" cx="60" cy="60" r="' + r + '" stroke-dasharray="' + Cc.toFixed(1) + '" stroke-dashoffset="' + (Cc * (1 - pct)).toFixed(1) + '" transform="rotate(-90 60 60)"/>' +
@@ -456,13 +464,13 @@ window.M = window.M || {};
   }
   function slotCard(slot) {
     const list = M.log.slotEntries(date(), slot);
-    const tot = M.foodMath.sum(list);
+    const tot = shownTotals(list);
     return '<div class="card m-slot"><div class="hd"><h3>' + slot + '</h3><div class="m-slot-r"><span class="m-slot-kcal num">' + (list.length ? kcal(tot.cal) + " kcal" : "") + '</span><button class="icon" data-m="slot-menu" data-slot="' + slot + '" aria-label="' + slot + ' menu">…</button></div></div>' +
       (list.length ? '<div class="ex-list">' + list.map(entryRow).join("") + "</div>" : "") +
       '<div class="m-slot-add"><button class="btn ghost block" data-m="add" data-slot="' + slot + '">+ Add</button></div></div>';
   }
   function dayCard() {
-    const p = M.person(), tg = p.targets || {}, t = M.log.totals(date());
+    const p = M.person(), tg = p.targets || {}, t = dayShown(date());
     const d = M.dayOf(date()); const water = d ? num(d.water) : 0;
     const goalOz = num(tg.water, 64), metric = units() === "metric";
     /* water is stored in whole oz; metric shows ml (to the nearest 50) and steps by 250 ml (a glass) */
@@ -601,7 +609,15 @@ window.M = window.M || {};
   }
   function unitControl() {
     if (det.cookMode && det.opts.length <= 3) return '<div class="seg m-useg" role="group" aria-label="Unit">' + det.opts.map(x => '<button data-m="det-useg" data-v="' + x.key + '" aria-pressed="' + (x.key === det.unit) + '"' + (x.key === det.unit ? ' class="on"' : "") + '>' + esc(x.unit) + '</button>').join("") + '</div>';
-    return '<select class="sel" data-m="det-unit" aria-label="Unit">' + det.opts.map(x => '<option value="' + x.key + '"' + (x.key === det.unit ? " selected" : "") + '>' + esc(x.grams ? "grams" : x.label) + (!det.cookMode && x.g && !x.grams && !/\(\s*[\d.]+\s*g\s*\)/i.test(x.label) ? " (" + fmtQty(x.g) + " g)" : "") + '</option>').join("") + '</select>';
+    return '<select class="sel" data-m="det-unit" aria-label="Unit">' + det.opts.map(x => '<option value="' + x.key + '"' + (x.key === det.unit ? " selected" : "") + '>' + esc(unitOptText(x)) + '</option>').join("") + '</select>';
+  }
+  /* One unit choice: "1 oz (28 g)", "1 cup (240 g)"; "100 g" and labels that already say their grams stay as they are. */
+  function unitOptText(x) {
+    if (x.grams) return "grams";
+    const gTxt = g => (g >= 10 ? String(r0(g)) : fmtQty(r1(g)));
+    const l = tidyLabel(x.label).replace(/(\d+\.\d+)(\s*g\s*\))/i, (m, n, rest) => gTxt(num(n)) + rest);   /* "(28.35 g)" → "(28 g)" */
+    if (det.cookMode || !(num(x.g) > 0) || /\d\s*g\s*\)/i.test(l) || /^[\d.\/\s½¼¾]*\s*(g|grams?)$/i.test(l)) return l;
+    return l + " (" + gTxt(num(x.g)) + " g)";
   }
   /* "Move to yesterday" for today's entries, "Move to today" for any other day */
   function dayMoveHTML() {
@@ -649,8 +665,10 @@ window.M = window.M || {};
         amt = { g: num(sv.g) > 0 ? num(sv.g) : M.cook.portionG(units()), state: "raw" };
       }
       if (!key) key = has(fam + "-" + (amt ? amt.state : "raw")) ? fam + "-" + (amt ? amt.state : "raw") : ck.opts[0].key;
-      /* F2b: an alwaysRaw food (Kirkland chicken breast) goes into a saved meal or a batch in raw grams */
-      if (det.mode === "pick" && ck.food && ck.food.alwaysRaw === true && has("g-raw")) key = "g-raw";
+      /* An alwaysRaw food (Kirkland chicken breast) opens in raw grams, whatever the units:
+         from search, from Recent, and into a saved meal or a batch ("175 g raw (127 g cooked)").
+         Editing a logged entry keeps the unit it was saved in. */
+      if (det.mode !== "edit" && !opt.unitKey && ck.food && ck.food.alwaysRaw === true && has("g-raw")) key = "g-raw";
       det.unit = key;
       const o = curOpt();
       if (amt) {
@@ -823,10 +841,21 @@ window.M = window.M || {};
   /* add = { slot, date, onPick, q, seg:"recent"|"meals"|"foods", req, tLocal, tOff, off:[] } */
   function resultRow(r, i) {
     let per = r.per || M.foodMath.blank(), amount = esc(r.sub || "1 serving");
+    /* the chicken breast reads the way it opens: "175 g raw (127 g cooked)" */
+    const fid = r.foodId || (r.kind === "generic" || r.kind === "food" ? r.id : null);
+    if (r.kind !== "recent" && fid && M.cook) {
+      try { const f = M.foods.get(fid), c = f && f.alwaysRaw === true ? M.cook.of(f) : null; if (c && num(f.serving && f.serving.g) > 0) amount = esc(M.cook.label(num(f.serving.g), "raw", { y: c.y, word: c.word }, "g")); } catch (e) {}
+    }
     /* a recent shows the amount logged last time, which is what tapping it pre-fills */
     if (r.kind === "recent" && isObj(r.ref)) {
       const rc = Object.assign({}, r.ref, { foodId: r.foodId, mealId: r.mealId, state: r.state, cook: r.cook });
       per = M.foodMath.scale(r.ref.per || r.per, servingsOf(r.ref)); amount = amountLabel(rc);
+      /* the chicken breast reopens in raw grams, so its row reads in raw grams too */
+      try {
+        const f = r.foodId && M.cook ? M.foods.get(r.foodId) : null, info = f && f.alwaysRaw === true ? M.cook.entryInfo(rc) : null;
+        const ck = info && (info.cook || M.cook.of(f));
+        if (ck && info.grams > 0) amount = esc(M.cook.label(info.state === "cooked" ? info.grams / ck.y : info.grams, "raw", { y: ck.y, word: ck.word }, "g"));
+      } catch (e) {}
     }
     const desc = r.kind === "meal" && r.desc ? '<div class="t m-clamp">' + esc(r.desc) + "</div>" : "";
     const lines = r.batch
@@ -1063,12 +1092,15 @@ window.M = window.M || {};
     const find = M.food.lookup ? M.food.lookup(code) : M.food.barcode(code).then(f => (f ? { status: "found", food: f } : { status: "not_found" }));
     return find.then(r => {
       if (r.status === "no_nutrition") { noNutrition(code, r.product || {}, ctx); return true; }
-      if (r.status !== "found" || !r.food) { notFound(code, ctx); return true; }
+      if (r.status !== "found" || !r.food) { notFound(code, ctx, r.store && r.message ? String(r.message) : ""); return true; }
       const f = r.food;
       let saved = f;
       if (!M.MS.foods[f.id]) { const have = M.foods.findByBarcode(f.barcode || code); saved = have || M.foods.add(f); }
       UI.close(); keepCtx(ctx);
       UI.openDetail(Object.assign({ kind: "food", foodId: saved.id, sub: M.fmtServing(saved.serving), ref: saved }, saved), { slot: ctx.slot, date: ctx.date, onPick: ctx.onPick, mode: ctx.onPick ? "pick" : "log" });
+      /* F4: calories but no protein, carbs or fat — say so above the amount (stays when the unit changes) */
+      const warn = String(r.warning || (f.warning && !M.MS.foods[f.id] ? f.warning : "") || "").trim();
+      if (warn) { const box = $("m-det-box"); if (box) box.insertAdjacentHTML("beforebegin", '<p class="m-offwarn" id="m-off-warn" role="status">' + esc(warn) + '</p>'); }
       return true;
     }, e => { if (st) st.textContent = errMsg(e); else UI.toast(errMsg(e)); return false; });
   }
@@ -1081,10 +1113,10 @@ window.M = window.M || {};
     const st = $("m-label-status");
     if (st) st.textContent = (product.name ? product.name + ": " : "") + "Open Food Facts has no nutrition numbers for this. Take a photo of the label.";
   }
-  function notFound(code, ctx) {
+  function notFound(code, ctx, msg) {
     UI.close();
     keepCtx(ctx);
-    UI.sheet("Not found", '<div class="card m-inner"><div class="bd"><p class="hint" style="font-size:15px">Barcode <b class="num">' + esc(code) + '</b> isn\'t in Open Food Facts yet. Scan the Nutrition Facts label instead, or type it in.</p>' +
+    UI.sheet("Not found", '<div class="card m-inner"><div class="bd"><p class="hint" style="font-size:15px">' + (msg ? esc(msg) : 'Barcode <b class="num">' + esc(code) + '</b> isn\'t in Open Food Facts yet. Scan the Nutrition Facts label instead, or type it in.') + '</p>' +
       '<div class="m-btnrow"><button class="btn primary" data-m="open-label" data-code="' + esc(code) + '">Scan label</button><button class="btn" data-m="open-form" data-code="' + esc(code) + '">Type it in</button></div></div></div>');
   }
   A["code-lookup"] = () => { const inp = $("m-code"); const code = inp ? inp.value.replace(/\D/g, "") : ""; if (!code) { UI.toast("Type the numbers under the bars"); return; } const st = $("m-scan-status"); if (st) st.textContent = "Looking up " + code + "…"; lookupCode(code, scanCtx()); };
@@ -1312,7 +1344,12 @@ window.M = window.M || {};
     UI.toast("Added to " + ctx.slot + dayNote(ctx.date));
     UI.render();
   };
-  A["ff-del"] = el => { if (!confirmTap(el, "delete")) return; if (ff.id) M.foods.remove(ff.id); UI.close(); UI.toast("Deleted"); UI.render(); };
+  A["ff-del"] = el => {
+    if (!confirmTap(el, "delete")) return;
+    const f = ff && ff.id ? M.MS.foods[ff.id] : null;
+    if (f) { UI.undoDel = { kind: "food", data: M.cp(f), at: Date.now(), pid: pid() }; M.foods.remove(f.id); }
+    UI.close(); if (!f || UI.tab !== "foods") UI.toast(f ? 'Deleted "' + f.name + '"' : "Deleted"); UI.render();   /* on Foods the Undo bar says it */
+  };
 
   /* ----------------------------------------------------------------- label */
   A["open-label"] = el => {
@@ -1356,7 +1393,7 @@ window.M = window.M || {};
   }
   /* An alwaysRaw food (Kirkland chicken breast) always reads in raw grams, whatever the units:
      "1 breast (175 g raw)", or "170 g raw (124 g cooked)" for a weight. "" for other foods. */
-  function rawGramsText(it) {
+  function rawGramsText(it, countOnly) {
     try {
       const f = isObj(it) && it.foodId && M.cook ? M.foods.get(it.foodId) : null;
       if (!f || f.alwaysRaw !== true) return "";
@@ -1367,14 +1404,17 @@ window.M = window.M || {};
         const fr = Math.abs(r - 0.5) < 1e-6 ? "½" : Math.abs(r - 0.25) < 1e-6 ? "¼" : Math.abs(r - 0.75) < 1e-6 ? "¾" : "";
         return (fr ? (w || "") + fr : fmtQty(q)) + " " + (q > 1 + 1e-9 ? plural(u) : u) + " (" + r0(info.grams) + " g " + (info.state === "cooked" ? "cooked" : (info.cook && info.cook.word) || "raw") + ")";
       }
-      return M.cook.label(info.grams, info.state, info.cook, "g");
+      return countOnly ? "" : M.cook.label(info.grams, info.state, info.cook, "g");
     } catch (e) { return ""; }
   }
   /* noRaw: describe / photo rows keep the amount their stepper counts in */
   function wholeAmount(it, noRaw) {
-    const rg = noRaw ? "" : rawGramsText(it); if (rg) return rg;
+    /* describe / photo rows: "2 breasts (350 g raw)" when the stepper counts breasts; oz rows stay oz */
+    const rg = rawGramsText(it, !!noRaw); if (rg) return rg;
     const c = cookText(it); if (c) return c;
     const s = rawServings(it), sv = M.parseServing(tidyLabel(it && it.servingLabel) || "1 serving");
+    /* one serving of a "½ cup (113 g)" label reads the same as its diary row, not "0.5 cup" */
+    if (Math.abs(s - 1) < 1e-9 && /[¼½¾⅓⅔]/.test(String(it && it.servingLabel || ""))) return tidyLabel(it.servingLabel);
     const q = (sv.qty || 1) * s, g = num(sv.g) > 0 ? num(sv.g) * s : 0, unit = String(sv.unit || "serving").trim() || "serving";
     if (/^(g|grams?)$/i.test(unit)) return fmtQty(q) + " g";
     return fmtQty(q) + " " + (q > 1 + 1e-9 ? plural(unit) : unit) + (g > 0 ? " (" + (g >= 10 ? r0(g) : r1(g)) + " g)" : "");
@@ -1611,7 +1651,20 @@ window.M = window.M || {};
     const meals = UI.foodsSeg === "meals";
     return '<div class="seg scope m-seg" role="group" aria-label="Show"><button data-m="foods-seg" data-v="meals" aria-pressed="' + (meals ? "true" : "false") + '"' + (meals ? ' class="on"' : "") + '>Saved meals</button><button data-m="foods-seg" data-v="foods" aria-pressed="' + (meals ? "false" : "true") + '"' + (meals ? "" : ' class="on"') + '>My foods</button></div>' +
       '<div class="m-foodsbar"><input class="m-search" type="search" data-m="foods-q" placeholder="' + (meals ? "Search meals" : "Search My foods") + '" aria-label="' + (meals ? "Search meals" : "Search My foods") + '" value="' + esc(UI.foodsQ) + '" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"><button class="btn" data-m="' + (meals ? "meal-new" : "food-new") + '">' + (meals ? "+ New meal" : "+ New food") + '</button></div>' +
-      '<div id="m-foods-list">' + foodsListHTML() + '</div>';
+      undoBarHTML(meals ? "meal" : "food") + '<div id="m-foods-list">' + foodsListHTML() + '</div>';
+  };
+  /* "Deleted "Chicken bowl". Undo" for 2 minutes after a delete, on the list it came from */
+  function undoBarHTML(kind) {
+    const u = UI.undoDel;
+    if (!isObj(u) || u.kind !== kind || !isObj(u.data) || u.pid !== pid() || Date.now() - num(u.at) > 120000) return "";
+    return '<div class="m-undo" role="status"><span>Deleted “' + esc(u.data.name || (kind === "meal" ? "meal" : "food")) + '”.</span><button class="btn" data-m="undo-del">Undo</button></div>';
+  }
+  A["undo-del"] = () => {
+    const u = UI.undoDel; UI.undoDel = null;
+    if (!isObj(u) || !isObj(u.data)) { UI.render(); return; }
+    const back = u.kind === "meal" ? (M.meals.get(u.data.id) || M.meals.add(u.data)) : (M.MS.foods[u.data.id] || M.foods.add(u.data));
+    UI.toast(back ? '"' + back.name + '" is back' : "Couldn't undo");
+    UI.render();
   };
   A["foods-seg"] = el => { UI.foodsSeg = el.dataset.v; UI.foodsQ = ""; UI.render(); };
   I["foods-q"] = el => { UI.foodsQ = el.value; clearTimeout(UI._fq); UI._fq = setTimeout(() => { const box = $("m-foods-list"); if (box) box.innerHTML = foodsListHTML(); }, 120); };
@@ -1663,7 +1716,12 @@ window.M = window.M || {};
   };
   A["meal-edit"] = () => { const m = M.meals.get(mealSheet.id); if (!m) return; det = null; UI.draft = { id: m.id, kind: "edit", name: m.name, desc: m.desc, slot: m.slot, servingsMade: m.servingsMade, batch: draftBatch(m), items: M.cp(m.items) }; UI.openBuilder(); };
   A["meal-dup"] = () => { const m = M.meals.get(mealSheet.id); if (!m) return; const c = M.meals.add({ name: m.name + " (copy)", desc: m.desc, slot: m.slot, servingsMade: m.servingsMade, batch: isObj(m.batch) ? { cookedG: m.batch.cookedG } : null, items: M.cp(m.items) }); UI.close(); UI.toast('Duplicated as "' + c.name + '"'); UI.render(); };
-  A["meal-del"] = el => { if (!confirmTap(el, "delete")) return; M.meals.remove(mealSheet.id); UI.close(); UI.toast("Deleted"); UI.render(); };
+  A["meal-del"] = el => {
+    if (!confirmTap(el, "delete")) return;
+    const m = M.meals.get(mealSheet.id);
+    if (m) { UI.undoDel = { kind: "meal", data: M.cp(m), at: Date.now(), pid: pid() }; M.meals.remove(m.id); }
+    UI.close(); if (!m || UI.tab !== "foods") UI.toast(m ? 'Deleted "' + m.name + '"' : "Deleted"); UI.render();   /* on Foods the Undo bar says it */
+  };
 
   /* ---------------------------------------------------------- meal builder */
   /* UI.draft = { id|null, name, desc, slot, servingsMade, items:[Entry-like], editIdx,
@@ -1748,7 +1806,7 @@ window.M = window.M || {};
     if (!isObj(d.batch)) d.batch = draftBatch(null);
     const resume = d.kind === "new" && d.resumed ? '<div class="m-resume" role="status"><span>Unsaved meal from before</span><button class="btn ghost" data-m="mb-fresh">Start over</button></div>' : "";
     UI.sheet(d.id ? "Edit meal" : "New meal", '<div class="m-form">' + resume + '<label class="m-f"><span>Name</span><input type="text" data-m="mb" data-k="name" value="' + esc(d.name) + '" placeholder="e.g. Chicken rice bowl" autocomplete="off"></label>' +
-      '<label class="m-f"><span>Description</span><input type="text" data-m="mb" data-k="desc" value="' + esc(d.desc) + '" placeholder="optional" autocomplete="off"></label>' +
+      '<label class="m-f"><span>Description</span><textarea class="m-ta m-mbdesc" data-m="mb" data-k="desc" rows="2" maxlength="120" placeholder="Optional. What\'s in it, or how you make it" aria-label="Description">' + esc(d.desc) + '</textarea></label>' +
       '<div class="m-f3 m-mbrow' + (d.batch.on ? " batch" : "") + '" id="m-mb-row"><label class="m-f m-mbslot"><span>When</span><select class="sel" data-m="mb" data-k="slot" aria-label="When you eat it">' + M.SLOTS.concat(["Any"]).map(s => '<option value="' + s + '"' + (s === d.slot ? " selected" : "") + '>' + slotName(s) + '</option>').join("") + '</select></label><label class="m-f m-mbsm"><span>Servings it makes</span><input type="number" inputmode="decimal" step="any" min="0.25" data-m="mb" data-k="servingsMade" value="' + esc(fmtQty(d.servingsMade)) + '" aria-label="Servings it makes"></label></div>' +
       '<div id="m-mb-items">' + builderItemsHTML() + '</div>' + batchHTML() + '<div class="m-itot num" id="m-mb-live"></div>' +
       '<div id="m-mb-edit" hidden class="m-mbedit"></div>' +

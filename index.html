@@ -690,14 +690,16 @@ let bootRaw=null; try{ bootRaw=localStorage.getItem(KEY); }catch(e){}
 function load(t){ if(t===undefined){ try{ t=localStorage.getItem(KEY); }catch(e){ t=null; } } try{ const s=JSON.parse(t); if(s&&s.v===1) return s; }catch(e){ try{ if(t) localStorage.setItem("chalk.bad",t); }catch(e2){} } return null; }
 /* daily backup of the save exactly as it was before this launch touched it; skipped (and any old twin removed) when the save is huge so the backup can't fill the quota */
 try{ const d=new Date().toISOString().slice(0,10); if(localStorage.getItem("chalk.bak.d")!==d){ const cur=bootRaw||""; if(cur.length>600000) localStorage.removeItem("chalk.bak"); else localStorage.setItem("chalk.bak",cur); localStorage.setItem("chalk.bak.d",d);} }catch(e){}
-let S = load(bootRaw) || fresh();
-const boot0=bootRaw!=null&&S.v===1?bootRaw:null;
+const booted=load(bootRaw);
+let S = booted || fresh();
+/* a save this version can't read is left in place at launch (as the live app did); only a real change writes over it */
+const boot0=booted?bootRaw:JSON.stringify(S);
 upgrade(S);
 /* write back only when the key was missing or upgrade() actually changed something */
 try{ const now=JSON.stringify(S); if(bootRaw==null||now!==boot0) localStorage.setItem(KEY,now); }catch(e){}
 let saveT=null;
 let saveWarned=false;
-function save(){ S.updatedAt=Date.now(); try{ localStorage.setItem(KEY,JSON.stringify(S)); saveWarned=false; }catch(e){ if(!saveWarned){ saveWarned=true; if(typeof toast==="function") toast("Couldn't save — storage full. Copy a backup in Settings"); } } clearTimeout(saveT); saveT=setTimeout(dbPush,600); }
+function save(){ S.updatedAt=Date.now(); try{ localStorage.setItem(KEY,JSON.stringify(S)); saveWarned=false; }catch(e){ if(!saveWarned){ saveWarned=true; if(typeof toast==="function") toast("Couldn't save. Phone storage is full. Save a backup in Settings."); } } clearTimeout(saveT); saveT=setTimeout(dbPush,600); }
 
 function getEx(id){ return LIB[id] || S.custom[id] || {n:id,m:"Other",t:"mc",inc:5,rest:75,guess:50}; }
 function exState(id){ return S.ex[id] || (S.ex[id]={w:null,miss:0,best:0,hist:[]}); }
@@ -1705,8 +1707,8 @@ function viewSettings(){
       const L=getEx(it.ex); return `<div class="prog-slot"><div><div class="n">${esc(L.n)}</div><div class="t">${esc(it.sets)} × ${esc(it.lo)}–${esc(it.hi)} · ${esc(L.m)}</div></div>${arrows}<button data-a="prog-sets" data-wid="${esc(wid)}" data-i="${i}">Sets</button><button data-a="prog-swap" data-wid="${esc(wid)}" data-i="${i}">Swap</button><button data-a="prog-rm" data-wid="${esc(wid)}" data-i="${i}">Remove</button></div>`; }).join("")}</div>
       <div class="bd entry"><button class="btn block ghost" data-a="prog-add" data-wid="${esc(wid)}">+ Exercise</button><button class="btn block ghost" data-a="prog-add-block" data-wid="${esc(wid)}">+ HIIT block</button></div></div>`; });
   h+=`<h2 class="sec">Your data</h2><div class="card">
-    <div class="srow"><div><div class="l">Back up</div><div class="s">Copies everything as text. Save it in Notes.</div></div><button class="btn" data-a="export">Copy</button></div>
-    <div class="srow"><div><div class="l">Restore from backup</div></div><button class="btn" data-a="import">Paste</button></div>
+    <div class="srow"><div><div class="l">Back up</div><div class="s">Saves a copy of everything. Keep it in Files or Notes.</div></div><button class="btn" data-a="export">Save</button></div>
+    <div class="srow"><div><div class="l">Restore from backup</div><div class="s">Pick the backup file or paste the text.</div></div><button class="btn" data-a="import">Open</button></div>
     ${S.active?"":`<div class="srow"><div><div class="l">Switch person</div><div class="s">Now: ${esc((PRESETS[S.profile]||PRESETS.nick).name)}. History stays.</div></div><button class="btn" data-a="switch-profile">Switch</button></div>`}
     <div class="srow"><div><div class="l">Erase everything</div></div><button class="btn danger" data-a="wipe">Erase</button></div></div>
     <p class="hint" style="text-align:center">Chalk · your data lives on this phone${dbOn?" and syncs to your Claude account":""}.</p>`;
@@ -1931,7 +1933,7 @@ document.addEventListener("click",e=>{
       if(id==="__create"){ id=createCustom(); if(!id) break; }
       A.items[bi].moves.push(newMove(id)); save(); closeSheet(); render(); break; }
     case "badd-block": { const d=defaultBlock(); const at=insertBeforeAbs(A.items,{...d,moves:d.moves.map(m=>newMove(m.ex)),done:0,status:"idle",skipped:false}); save(); render(); setTimeout(()=>{ const el=document.getElementById("blk"+at); el&&el.scrollIntoView({behavior:"smooth",block:"nearest"}); },50); break; }
-    case "wipe": openSheet("Erase everything?",`<p class="hint">This deletes everything on this phone: workouts, weights, program, food logs, saved meals, your foods, weigh-ins and your Claude key. Copy a backup first.</p><button class="btn block danger" data-a="wipe-do" style="margin-top:8px">Erase</button>`); break;
+    case "wipe": openSheet("Erase everything?",`<p class="hint">This deletes everything on this phone: workouts, weights, program, food logs, saved meals, your foods, weigh-ins and your Claude key. Save a backup first.</p><button class="btn block danger" data-a="wipe-do" style="margin-top:8px">Erase</button>`); break;
     case "wipe-do": (S.log||[]).forEach(r=>dbDelete(r.id)); clearInterval(ctTick); CT=null; wakeOff(); S=fresh(); stopRest(); tab="today"; save(); if(window.M&&M.reset) M.reset(); try{ localStorage.removeItem("chalk.ai.key"); }catch(e){} applyTheme(); closeSheet(); render(); break;
   }
 });
@@ -1989,14 +1991,16 @@ if(S.active) wakeOn();
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "Updated. Tap to reload". APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
 const APP_VERSION=16, BOOT_AT=Date.now();
-let updReady=false, updCheckAt=0;
+var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){} return true; }
 function reloadApp(){ try{ location.reload(); }catch(e){} }
-function placeUpd(){ const u=document.getElementById("upd"); if(!u||u.hidden) return; const tabs=document.getElementById("tabs"), cta=document.getElementById("cta"); u.style.bottom=((tabs?tabs.offsetHeight:0)+(cta&&cta.classList.contains("on")?cta.offsetHeight:0)+12)+"px"; }
+/* the button waits while a workout runs (a stray tap mid-set would drop the rest clock) and shows once it's done */
+function placeUpd(){ const u=document.getElementById("upd"); if(!u) return; const show=updReady&&!S.active&&!T&&!CT; if(u.hidden===show) u.hidden=!show; if(!show) return;
+  const tabs=document.getElementById("tabs"), cta=document.getElementById("cta"); u.style.bottom=((tabs?tabs.offsetHeight:0)+(cta&&cta.classList.contains("on")?cta.offsetHeight:0)+12)+"px"; }
 function updateReady(){
   if(updReady) return; updReady=true;
   if(quietNow()&&Date.now()-BOOT_AT<10000){ reloadApp(); return; }
-  const u=document.getElementById("upd"); if(!u) return; u.hidden=false; placeUpd();
+  placeUpd();
 }
 /* only a newer version counts: "chalk-v17" while this page is 16 */
 function swNewer(d){ const m=d&&typeof d.cache==="string"&&/^chalk-v(\d+)$/.exec(d.cache); return !!m&&+m[1]>APP_VERSION; }

@@ -228,9 +228,31 @@ t("suggest: items reference generic foods with matching macros (cooked items use
 /* old raw/cooked pairs that became one food (their old ids alias to it) */
 const PAIRS = { chicken_thigh: "raw", ground_beef_80: "raw", ground_beef_85: "raw", ground_beef_90: "raw", ground_beef_93: "raw", ground_turkey_93: "raw", pork_tenderloin: "raw", salmon: "raw", white_rice: "dry", pasta: "dry" };
 /* cook yield y (cooked g per raw/dry g) from each USDA pair: raw ÷ cooked protein (meat, fish), dry ÷ cooked kcal (grains) */
-const Y = { kirkland_organic_chicken: 22.5 / 31, pork_tenderloin: 21 / 26, cod: 17.8 / 22.8, shrimp: 20.1 / 24, scallops: 12.1 / 20.5, salmon: 20.4 / 22.1,
-  chicken_thigh: 19.7 / 24.8, ground_beef_80: 17.2 / 25, white_rice: 365 / 130, pasta: 371 / 158, quinoa: 368 / 120 };
-t("cook foods: ONE food with raw (or dry) and cooked profiles; y from the USDA pair; cooked = raw ÷ y (BEC-14)", () => {
+const Y = { kirkland_organic_chicken: 22.5 / 31, pork_tenderloin: 21 / 26.2, cod: 17.8 / 22.8, shrimp: 20.1 / 24, scallops: 12.1 / 20.5, salmon: 20.4 / 22.1,
+  chicken_thigh: 19.7 / 24.8, ground_beef_80: 17.2 / 27, white_rice: 365 / 130, pasta: 371 / 158, quinoa: 368 / 120 };
+/* USDA's own cooked numbers per 100 g (what MyFitnessPal shows): fat melts off, so these are NOT raw ÷ y.
+   [kcal, protein, carbs, fat, sodium] */
+const USDA_COOKED = { ground_beef_80: [272, 27, 0, 17.4, 91], ground_beef_85: [256, 27.7, 0, 15.3, 89], ground_beef_90: [230, 28.5, 0, 12, 87],
+  ground_beef_93: [209, 28.9, 0, 9.5, 86], ground_turkey_93: [213, 27.1, 0, 11.6, 90], chicken_thigh: [179, 24.8, 0, 8.2, 106], salmon: [206, 22.1, 0, 12.4, 61],
+  pork_tenderloin: [143, 26.2, 0, 3.5, 57], cod: [105, 22.8, 0, 0.9, 78], shrimp: [99, 24, 0.2, 0.3, 111], scallops: [111, 20.5, 5.4, 0.8, 667],
+  white_rice: [130, 2.7, 28.2, 0.3, 1], pasta: [158, 5.8, 31, 0.9, 1], quinoa: [120, 4.4, 21.3, 1.9, 7] };
+t("cooked profile: USDA pairs use USDA's cooked numbers (MyFitnessPal); only the Kirkland label breast is raw ÷ y", () => {
+  const byId = new Map(M.DB.generic.map(f => [f.id, f]));
+  const cooks = M.DB.generic.filter(f => f.cook);
+  cooks.forEach(f => {
+    const slug = f.id.slice(2), c = f.cook.per100gCooked;
+    if (slug === "kirkland_organic_chicken") return;
+    const u = USDA_COOKED[slug]; assert.ok(u, slug + ": cooked numbers come from a USDA pair");
+    [["cal", 0], ["p", 1], ["c", 2], ["f", 3], ["sodium", 4]].forEach(([k, i]) => near(c[k], u[i], k === "cal" || k === "sodium" ? 0.5 : 0.05, slug + " cooked " + k));
+  });
+  /* the bug this fixes: raw ÷ y made cooked 80/20 beef 369 kcal per 100 g */
+  near(byId.get("g_ground_beef_80").cook.per100gCooked.cal, 272, 0.5, "cooked 80/20 beef");
+  /* Kirkland: no published cooked numbers, so cooked = the label's raw ÷ y (same piece, same calories) */
+  const k = byId.get("g_kirkland_organic_chicken");
+  NUT.forEach(n => near(k.cook.per100gCooked[n], k.per100g[n] / k.cook.y, n === "cal" || n === "sodium" ? 0.51 : 0.051, "Kirkland cooked " + n));
+  near(k.cook.per100gCooked.cal, 135, 0.5, "Kirkland cooked ≈ 135 kcal / 100 g");
+});
+t("cook foods: ONE food with raw (or dry) and cooked profiles; y from the USDA pair", () => {
   const byId = new Map(M.DB.generic.map(f => [f.id, f]));
   const cooks = M.DB.generic.filter(f => f.cook);
   ["kirkland_organic_chicken", "cod", "shrimp", "scallops", "quinoa"].concat(Object.keys(PAIRS)).forEach(slug => assert.ok(byId.get("g_" + slug) && byId.get("g_" + slug).cook, "cook food g_" + slug));
@@ -240,11 +262,9 @@ t("cook foods: ONE food with raw (or dry) and cooked profiles; y from the USDA p
     assert.ok((c.word === "raw" || c.word === "dry") && c.per100gCooked && Array.isArray(c.alts), slug + " cook");
     assert.ok(c.word === "dry" ? c.y > 1 : c.y < 1, slug + ": meat weighs less cooked, grains more");
     if (Y[slug]) near(c.y, Y[slug], 1e-4, slug + " y");
-    /* the same piece of meat shows the same calories weighed raw or cooked */
-    NUT.forEach(k => {
-      assert.ok(isNum(c.per100gCooked[k]) && c.per100gCooked[k] >= 0, slug + " cooked " + k);
-      near(c.per100gCooked[k], f.per100g[k] / c.y, k === "cal" || k === "sodium" ? 0.51 : 0.051, slug + " cooked " + k + " = raw ÷ y");
-    });
+    NUT.forEach(k => assert.ok(isNum(c.per100gCooked[k]) && c.per100gCooked[k] >= 0, slug + " cooked " + k));
+    /* protein carries over: cooked protein ≈ raw protein ÷ y (that is how y was found) */
+    if (c.word === "raw") near(c.per100gCooked.p, f.per100g.p / c.y, 0.06, slug + " cooked protein = raw ÷ y");
     /* serving / per / per100g stay the raw (dry) state */
     near(f.per.cal, f.per100g.cal * f.serving.g / 100, Math.max(2, 0.02 * f.per.cal), slug + " per is raw");
   });
@@ -417,6 +437,84 @@ t("suggest: only foods they eat — no other cheese, oats, cereal, shakes, bars,
   ["g_kirkland_organic_chicken", "g_pork_tenderloin", "g_cod", "g_shrimp", "g_scallops", "g_quinoa", "g_greek_yogurt_2", "g_cottage_cheese_2", "g_deli_turkey",
     "g_dkb_21_grains", "g_jam", "g_corn", "g_agave", "g_asparagus", "g_bell_pepper", "g_cucumber"].forEach(id => assert.ok(ids.has(id), "some idea uses " + id));
   assert.ok(M.DB.suggest.length >= 12, "12+ ideas");
+});
+
+/* The ideas sheet shows a one-serving label as written only when it uses ½ ¼ ¾ (else it
+   prints "0.5 cup"), so plain items write fractions the way the diary does. */
+t("suggest: plain item labels use ½ ¼ ¾ (not 1/2) and their grams match the item", () => {
+  M.DB.suggest.forEach(s => s.items.forEach(x => {
+    if (x.state) return;   /* cook items: m-core writes "6 oz raw (4.4 oz cooked)" */
+    assert.ok(!/\b\d\/\d\b/.test(x.servingLabel), s.id + ": " + x.servingLabel);
+    const m = /\(([\d.]+) g\)$/.exec(x.servingLabel);
+    assert.ok(m && Math.abs(parseFloat(m[1]) - x.g) < 0.051, s.id + ": grams in " + x.servingLabel + " = " + x.g);
+  }));
+});
+
+/* ---- old ids in real diaries (live d757f4b storage format) ---- */
+/* Every generic id that was live (d757f4b) is still a food or an alias, except
+   g_cottage_cheese_4, which was removed on purpose: its entries keep their own numbers. */
+const LIVE_IDS_GONE = ["g_chicken_breast", "g_chicken_breast_raw", "g_chicken_breast_cooked", "g_cod_cooked", "g_shrimp_cooked", "g_quinoa_cooked"];
+t("old ids: a live-format diary and saved meal load, resolve and keep their own numbers", () => {
+  const ctx = { console, Date, Math, JSON, setTimeout, clearTimeout, Intl };
+  ctx.window = ctx; ctx.self = ctx;
+  ctx.localStorage = { store: {}, getItem(k) { return this.store[k] ?? null; }, setItem(k, v) { this.store[k] = String(v); }, removeItem(k) { delete this.store[k]; }, key(i) { return Object.keys(this.store)[i] ?? null; }, get length() { return Object.keys(this.store).length; } };
+  ctx.S = { profile: "nick" }; ctx.PRESETS = { nick: { name: "Nick" }, kat: { name: "Katerina" } };
+  vm.createContext(ctx);
+  /* entries exactly as the live app wrote them (servingLabel, servings, g, per, foodId, state/cook on cook foods) */
+  const P = (cal, p, c, f) => ({ cal, p, c, f, fiber: 0, sugar: 0, sodium: 0 });
+  const E = (id, foodId, name, servingLabel, servings, g, per, extra) => Object.assign({ id, name, brand: "", slot: "Lunch", servingLabel, servings, g, per, foodId, at: 1790000000000 }, extra || {});
+  const today = (() => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); })();
+  const entries = [
+    E("e1", "g_chicken_breast_cooked", "Chicken breast, cooked", "1 oz cooked", 6, 28.35, P(46.8, 8.8, 0, 1), { state: "cooked", cook: { y: 0.7258, word: "raw" } }),
+    E("e2", "g_chicken_breast", "Chicken breast, boneless skinless", "1 oz raw", 8, 28.35, P(34, 6.4, 0, 0.7), { state: "raw", cook: { y: 0.7258, word: "raw" } }),
+    E("e3", "g_chicken_breast_raw", "Chicken breast, raw", "4 oz (113 g)", 1, 113, P(136, 25.4, 0, 3)),
+    E("e4", "g_cod_cooked", "Cod, cooked", "4 oz (113 g)", 1, 113, P(119, 25.8, 0, 1)),
+    E("e5", "g_shrimp_cooked", "Shrimp, cooked", "3 oz (85 g)", 1, 85, P(84, 20.4, 0.2, 0.2)),
+    E("e6", "g_quinoa_cooked", "Quinoa, cooked", "1 cup (185 g)", 1, 185, P(222, 8.1, 39.4, 3.6)),
+    E("e7", "g_cottage_cheese_4", "Cottage cheese, 4%", "1/2 cup (113 g)", 1, 113, P(110, 12, 5, 5)),
+    E("e8", "g_ground_beef_80_cooked", "Ground beef 80/20, cooked", "4 oz (113 g)", 1, 113, P(283, 28.3, 0, 18.1))
+  ];
+  const saved = entries.map(e => JSON.parse(JSON.stringify(e)));
+  const meal = { id: "m_live1", name: "Chicken bowl", slot: "Lunch", items: [entries[0], entries[5], entries[6]].map(e => JSON.parse(JSON.stringify(e))), per: P(378.8, 28.9, 44.4, 9.6), uses: 3, lastUsed: 1790000000000, createdAt: 1780000000000, updatedAt: 1790000000000, pid: "nick" };
+  const live = { v: 1, updatedAt: 1790000000000, ui: { mode: "macros", person: "nick", date: today, tab: "diary" },
+    profiles: { nick: { id: "nick", name: "Nick", sex: "m", age: 40, heightIn: 71, weightLb: 185, setupAt: 1780000000000, lastBody: 1790000000000, targets: { cal: 2200, p: 180, c: 200, f: 70 }, updatedAt: 1790000000000 } },
+    foods: {}, meals: { m_live1: meal }, days: { ["nick|" + today]: { id: "nick|" + today, pid: "nick", date: today, entries, water: 0, note: "", updatedAt: 1790000000000 } }, body: {} };
+  ctx.localStorage.setItem("chalk.macros.v1", JSON.stringify(live));
+  try { ["m-core.js", "m-data.js"].forEach(f => vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8"), ctx, { filename: f })); }
+  catch (e) { console.log("       (skipped: m-core did not load: " + e.message + ")"); return; }
+  const C = ctx.M;
+  if (!C || !C.foods || !C.dayOf) { console.log("       (skipped: no M.dayOf)"); return; }
+  if (typeof C.load === "function") C.load();
+  /* every old id resolves to the merged food, with the right state */
+  LIVE_IDS_GONE.forEach(id => { const f = C.foods.get(id); assert.ok(f && f.id === M.DB.alias[id].id, id + " → " + (f && f.id)); });
+  assert.strictEqual(C.cook.alias("g_chicken_breast_cooked").state, "cooked");
+  assert.strictEqual(C.foods.get("g_cottage_cheese_4"), null, "removed id: no food (the entry keeps its own numbers)");
+  /* the day's entries keep exactly the numbers they were saved with */
+  const d = C.dayOf(today, "nick");
+  assert.ok(d && d.entries.length === saved.length, "all " + saved.length + " entries load");
+  saved.forEach(s => {
+    const e = d.entries.find(x => x.id === s.id); assert.ok(e, s.id + " kept");
+    ["cal", "p", "c", "f"].forEach(k => assert.strictEqual(e.per[k], s.per[k], s.id + " " + k + " unchanged"));
+    assert.strictEqual(e.servings, s.servings, s.id + " servings"); assert.strictEqual(e.servingLabel, s.servingLabel, s.id + " label");
+  });
+  const tot = C.log.totals(today, "nick"), want = saved.reduce((a, s) => a + s.per.cal * s.servings, 0);
+  near(tot.cal, want, 1, "day total = the saved numbers");
+  /* cooked chicken from before the merge still reads raw (cooked) */
+  const i1 = C.cook.entryInfo(d.entries.find(x => x.id === "e1"));
+  assert.ok(i1 && i1.state === "cooked" && Math.abs(i1.cook.y - 0.7258) < 1e-4, "old cooked chicken keeps its state and y");
+  /* the saved meal still holds its items and numbers */
+  const m = C.meals.get("m_live1");
+  assert.ok(m && m.items.length === 3, "saved meal kept");
+  near(m.per.cal, 378.8, 0.05, "saved meal total unchanged");
+  /* recents: live foods rebuild (chicken comes back raw); the removed 4% cottage cheese keeps its snapshot */
+  if (typeof C.recents === "function") {
+    const rs = C.recents("nick", 30);
+    const cc = rs.find(r => r.foodId === "g_cottage_cheese_4");
+    assert.ok(cc && cc.per.cal === 110 && cc.name === "Cottage cheese, 4%", "gone food: recent keeps its snapshot");
+    const ch = rs.filter(r => r.foodId === "g_kirkland_organic_chicken");
+    assert.ok(ch.length >= 1 && ch.every(r => r.state === "raw"), "old chicken recents come back as the Kirkland breast, raw");
+    rs.forEach(r => NUT.forEach(k => assert.ok(isNum(r.per[k]), "recent " + r.name + " " + k)));
+  }
 });
 
 /* ---- run ---- */

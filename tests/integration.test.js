@@ -288,6 +288,12 @@ t("sw.js: CACHE differs from the live one whenever a CORE file differs from what
   assert.deepStrictEqual(problem(edited, liveCache), ["m-ui.js"], "an edit without a bump is caught");
   assert.strictEqual(problem(edited, "chalk-v" + (SWV + 1)), null, "the same edit with a bump passes");
 });
+t("Settings backup rows say what they do now (a file on iPhone, a paste or a file to restore)", () => {
+  assert.ok(HTML.includes('Saves a copy of everything. Keep it in Files or Notes.</div></div><button class="btn" data-a="export">Save</button>'));
+  assert.ok(HTML.includes('Pick the backup file or paste the text.</div></div><button class="btn" data-a="import">Open</button>'));
+  assert.ok(!/Copies everything as text|Copy a backup/.test(HTML), "every hint names the Save button");
+  assert.ok(HTML.includes("Save a backup in Settings.") && HTML.includes("Save a backup first."));
+});
 t("manifest.json description", () => {
   const m = JSON.parse(read("manifest.json"));
   assert.strictEqual(m.description, "Gym log and macro tracker.");
@@ -713,6 +719,17 @@ async function runF6Pass() {
       });
     } finally { dom.window.close(); }
   }
+  for (const bad of ["{\"v\":1,\"log\":[{\"id\":\"cut", "{\"v\":2,\"log\":[]}"]) {
+    const { dom, w, errors } = boot({ real: true, hook: swHook, store: { "chalk.v1": bad, "chalk.bak.d": "2000-01-01" } });
+    try {
+      t("a save this version can't read stays in place at launch (" + bad.slice(0, 12) + "…)", () => {
+        assert.strictEqual(w.localStorage.getItem("chalk.v1"), bad, "not written over at launch");
+        assert.strictEqual(w.localStorage.getItem("chalk.bak"), bad, "today's backup holds it");
+        assert.ok(w.eval("S.v===1 && Array.isArray(S.log)"), "the app still opens");
+        assert.deepStrictEqual(errors, []);
+      });
+    } finally { dom.window.close(); }
+  }
   const { dom, w, d, errors } = boot({ real: true, hook(win) {
     swHook(win); win.scrollTo = () => {};   /* jsdom has no scrolling; the focusout handler calls it */
     const gi = win.Storage.prototype.getItem; win.__reads = 0;
@@ -788,11 +805,17 @@ async function runF6Pass() {
       assert.strictEqual(d.getElementById("sheetT").textContent, "Program updated"); assert.ok(!w.eval("S.flash"));
       w.closeSheet(); await sleep(300);
     });
-    t("update during a workout: no reload, a button says so; tapping it reloads", () => {
+    t("update during a workout: no reload and no button mid-set; the button shows once the workout is done; tapping it reloads", () => {
       let n = 0; w.reloadApp = () => { n++; };
       swSays(w, { type: "chalk-version", cache: "chalk-v" + (APPV + 1) });
-      assert.strictEqual(n, 0); const u = d.getElementById("upd"); assert.ok(!u.hidden); assert.strictEqual(u.textContent, "Updated. Tap to reload");
+      const u = d.getElementById("upd");
+      assert.strictEqual(n, 0); assert.ok(w.eval("!!S.active")); assert.ok(u.hidden, "no button while the workout runs");
+      w.eval("render()"); assert.ok(u.hidden, "still waiting after a redraw");
+      w.eval("window.__act=S.active; S.active=null; render()");
+      assert.ok(!u.hidden, "workout over: the button shows"); assert.strictEqual(u.textContent, "Updated. Tap to reload");
       click(w, u); assert.strictEqual(n, 1);
+      swSays(w, { type: "chalk-version", cache: "chalk-v" + (APPV + 1) }); assert.strictEqual(n, 1, "only once");
+      w.eval("S.active=window.__act; delete window.__act; render()"); assert.ok(u.hidden);
     });
     t("Switch person is hidden during a workout; a Switch from elsewhere says finish first (UIT-10/TRN-03)", () => {
       tab("settings"); assert.ok(!q(d, '#app [data-a="switch-profile"]'));

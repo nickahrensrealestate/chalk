@@ -39,7 +39,7 @@ window.M = window.M || {};
      SB_URL: the Supabase project URL, like "https://abcd1234.supabase.co"
      SB_KEY: the project's PUBLISHABLE key ("sb_publishable_…"), never a secret key.
              It goes only in the apikey header (it is not a JWT). */
-  const SB_URL = ""; const SB_KEY = "";
+  const SB_URL = "https://jjyrlxiywqcchknkajir.supabase.co"; const SB_KEY = "sb_publishable_J2DJ7_IGpPZ3xWhTrD67TQ_BnWiAM6K";
   /* ===================================================================================== */
 
   /* ------------------------------------------------------------- constants */
@@ -589,6 +589,8 @@ window.M = window.M || {};
   }
   /* join doesn't try again by itself */
   const joinErr = e => errText(e).replace(/ We'll try again(?: soon| later)?\.$/, " Try again in a minute.");
+  /* Delete cloud copy couldn't start: say why, and that nothing was deleted */
+  const notDeleted = r => String((r && r.error) || "Sync didn't work.").replace(/ We'll (?:keep trying|try again(?: soon| later)?)\.$/, "").replace(/, then tap Sync now\.$/, ".") + " Nothing was deleted. Try again in a minute.";
 
   /* ------------------------------------------------------------------ pull */
   function forget(key) { delete st.hashes[key]; delete st.gone[key]; delete st.base[key]; delete st.bad[key]; delete st.fail[key]; rcache.delete(key); }
@@ -649,6 +651,17 @@ window.M = window.M || {};
       if (isObj(m) && Array.isArray(m.items)) m.items.forEach(it => { if (isObj(it) && it.foodId === from) it.foodId = to; });
     });
   }
+  /* How many days of this person's diary (with food logged) this phone made itself and hasn't
+     synced yet (days that just came down from the cloud don't count). */
+  function usedDays(pid) {
+    const days = isObj(M.MS) && isObj(M.MS.days) ? M.MS.days : {};
+    let n = 0;
+    for (const id of Object.keys(days)) {
+      const d = days[id];
+      if (id.indexOf(pid + "|") === 0 && st.hashes["day|" + id] === undefined && isObj(d) && Array.isArray(d.entries) && d.entries.length && ++n >= 3) break;
+    }
+    return n;
+  }
   function applyRow(r, ch) {
     if (!isObj(r)) return;
     if (r.household != null && r.household !== st.code) return;     /* never another household's row */
@@ -666,7 +679,7 @@ window.M = window.M || {};
     const local = has(coll, id) && isObj(coll[id]) ? coll[id] : undefined;
     const synced = st.hashes[key];
     /* the other person's diary and weigh-ins stay in the cloud */
-    if ((kind === "day" || kind === "body") && local === undefined && synced === undefined && pidOfId(id) !== curPid()) return;
+    if ((kind === "day" || kind === "body") && local === undefined && synced === undefined && pidOfId(id) !== curPid() && !keepAll) return;
     if (r.deleted === true || r.deleted === "true") {
       if (local === undefined) { forget(key); return; }
       /* a delete wins over a copy nobody touched here since the last sync, and (first join,
@@ -689,8 +702,9 @@ window.M = window.M || {};
         /* a profile nobody set up never replaces a real one; ours goes back up */
         if (!rs && ls) { delete st.hashes[key]; return; }
         /* a phone that never synced this person takes the profile the cloud already set up:
-           a new phone's first-day setup must not overwrite real targets */
-        if (synced === undefined && rs && !(ls && num(local.setupAt) < num(data.setupAt))) { take(data); return; }
+           a new phone's first-day setup must not overwrite real targets. A phone that has been
+           this person's for a while (days of diary here) is no new phone: the newer edit wins. */
+        if (synced === undefined && rs && !(ls && num(local.setupAt) < num(data.setupAt)) && !(ls && usedDays(id) >= 3)) { take(data); return; }
       }
       if (synced !== undefined && lh === synced) {
         /* Unchanged here since our last push. If that push carried edits the other phone hadn't
@@ -843,6 +857,17 @@ window.M = window.M || {};
     saveSt();
     return ch.applied;
   }
+  /* Before the cloud copy goes away (Delete cloud copy, Change code), this phone takes back every
+     diary day and weigh-in it doesn't hold: the other person's, or its own after a switch of
+     person. Then nothing lives only in the cloud. */
+  let keepAll = false;
+  async function takeAll(gen) {
+    const ch = { applied: 0 };
+    keepAll = true;
+    try { await pages(gen, "&kind=in.(day,body)", EPOCH, applier(gen, ch, false)); }
+    finally { keepAll = false; if (ch.applied && gen === epoch) safeRerender(); }
+    return ch.applied;
+  }
   /* Each phone keeps only its own person's diary days and weigh-ins. The other person's rows
      that already match the cloud leave this phone (they stay in the cloud, and switching
      person pulls them back); rows changed here go up first. Their sync memory is written
@@ -869,12 +894,55 @@ window.M = window.M || {};
     return drop.length;
   }
 
+  /* ------------------------------------------------ records lost on this phone */
+  /* Records that vanish from this phone without the app deleting them (a damaged save that fell
+     back to the daily backup copy, storage cleared, a bug) must never go up as deletes: that
+     would empty the cloud copy and delete them on the other phone too. The app never deletes a
+     diary day or a profile, and people delete foods, meals and weigh-ins one at a time. So when
+     records go missing like that, this phone forgets what it knew about them and reads the
+     whole household again; for each record the newest copy wins, and nothing is deleted. */
+  const LOST_MANY = 10;
+  let lostChecked = false;   /* the "damaged save" check runs once per page load */
+  function guardLost() {
+    const MS = M.MS;
+    if (!isObj(MS) || !st.code) return false;
+    let keys = [];
+    if (!lostChecked) {
+      lostChecked = true;
+      const s = M.storage;
+      /* m-core read the backup copy (or nothing): every record here may be older than the cloud's */
+      if (isObj(s) && (s.restoredFrom || (Array.isArray(s.damaged) && s.damaged.length))) keys = Object.keys(st.hashes).filter(k => !!COLL[kindOf(k)]);
+    }
+    if (!keys.length) {
+      const lost = Object.keys(st.hashes).filter(key => {
+        const cn = COLL[kindOf(key)];
+        if (!cn) return false;
+        const coll = MS[cn], id = idOf(key);
+        return !(isObj(coll) && has(coll, id) && isObj(coll[id]));
+      });
+      /* deletes noticed one by one (st.gone) were real; most of a kind vanishing at once was not */
+      const fresh = lost.filter(k => !st.gone[k]);
+      const crowd = Object.keys(COLL).some(kind => {
+        const n = fresh.filter(k => kindOf(k) === kind).length;
+        return n >= LOST_MANY && n * 2 >= Object.keys(st.hashes).filter(k => kindOf(k) === kind).length;
+      });
+      if (lost.some(k => kindOf(k) === "day" || kindOf(k) === "profile") || crowd)
+        keys = lost.filter(k => kindOf(k) === "day" || kindOf(k) === "profile" || !st.gone[k]);
+    }
+    if (!keys.length) return false;
+    keys.forEach(forget);
+    st.cursor = "";           /* read everything again: the lost records come back */
+    saveSt();                 /* at once: a restart must not find the old memory again */
+    return true;
+  }
+
   /* ------------------------------------------------------------------ push */
   function due(b, opts) { return !!(opts && opts.manual) || now() - num(b.at) > (b.k === "aside" ? ASIDE_AGAIN : REFUSED_AGAIN); }
   function scan(opts) {
     const out = { changed: [], removed: [], stuck: 0 };
     const MS = M.MS;
     if (!isObj(MS)) return out;
+    guardLost();
     const seen = new Set();
     Object.keys(COLL).forEach(kind => {
       const coll = MS[COLL[kind]];
@@ -1167,11 +1235,13 @@ window.M = window.M || {};
     await request("POST", upsertURL(), "[" + tomb("meta", "household", { v: 1, gone: why, at: t }) + "]", code, PREFER);
     for (let pass = 0; pass < 2; pass++) {
       const keys = [];
-      for (let off = 0; off < 1e6; off += 1000) {
+      /* page by what came back: a server that caps pages below 1000 rows still gets every row */
+      for (let off = 0; off < 1e6;) {
         const rows = await request("GET", endpoint() + "?select=household,kind,id&deleted=eq.false&order=kind.asc,id.asc&limit=1000&offset=" + off, null, code);
         if (!Array.isArray(rows)) throw { code: "bad" };
         rows.forEach(r => { if (isObj(r) && r.household === code && ORDER[r.kind] !== undefined && !(r.kind === "meta" && r.id === "household")) keys.push(tomb(String(r.kind), String(r.id), {})); });
-        if (rows.length < 1000) break;
+        if (!rows.length) break;
+        off += rows.length;
       }
       if (!keys.length) break;
       for (let i = 0; i < keys.length; i += CHUNK_ROWS) await request("POST", upsertURL(), "[" + keys.slice(i, i + CHUNK_ROWS).join(",") + "]", code, PREFER);
@@ -1218,17 +1288,19 @@ window.M = window.M || {};
         if (gen !== epoch) return stopped;
       }
       let applied = 0;
+      guardLost();
       if (opts.pull !== false) {
         applied = await pull(gen);
         if (gen !== epoch) return isOn() ? stopped : { ok: false, error: st.note || "Sync stopped." };
         const p = curPid();
         if (p && p !== st.pp) { applied += await catchUp(gen, p); if (gen !== epoch) return stopped; }
+        if (opts.all) { applied += await takeAll(gen); if (gen !== epoch) return stopped; }
         if (st.joining) st.joining = false;
       }
       const pushed = await push(gen, opts);
       if (gen !== epoch) return stopped;
       const who = curPid();
-      if (who && who === st.pp) trimOther(who);
+      if (who && who === st.pp && !opts.all) trimOther(who);
       st.lastSync = now(); st.lastError = stuckLine() || badNote; retryN = 0; st.retryAt = 0;
       clearTimeout(retryT); retryT = null;
       if (!saveSt()) st.lastError = errText({ code: "storage" });
@@ -1257,7 +1329,10 @@ window.M = window.M || {};
         const q = { opts: Object.assign({}, opts), p: null };
         queued = q;
         q.p = inflight.then(() => { if (queued === q) queued = null; return cycle(q.opts); });
-      } else if (opts.manual) queued.opts.manual = true;
+      } else {
+        if (opts.manual) queued.opts.manual = true;
+        if (opts.all) queued.opts.all = true;
+      }
       return queued.p;
     }
     inflight = runCycle(opts).then(r => { inflight = null; return r; }, e => { inflight = null; return { ok: false, error: errText(e) }; });
@@ -1486,12 +1561,17 @@ window.M = window.M || {};
     deleteCloud() {
       try {
         if (!isOn()) return Promise.resolve({ ok: false, error: configured() ? "Sync is off." : "Cloud sync isn't set up yet." });
-        st.old = st.old.filter(j => j.code !== st.code).concat({ code: st.code, why: "deleted", at: now() });
-        resetFor("");
-        st.note = "Your cloud copy is deleted. Everything is still on this phone.";
-        saveSt(); notify();
-        return finishOld().then(done => (done && !st.old.length ? { ok: true, error: "" }
-          : { ok: false, later: true, error: "Couldn't reach the cloud. We'll finish deleting when you're online." }));
+        /* First everything comes down to this phone (both people's diaries and weigh-ins), so
+           nothing lived only in the cloud. Can't do that (offline, phone full): nothing is deleted. */
+        return cycle({ reason: "manual", manual: true, all: true }).then(r0 => {
+          if (!r0 || !r0.ok || !isOn()) return { ok: false, error: notDeleted(r0) };
+          st.old = st.old.filter(j => j.code !== st.code).concat({ code: st.code, why: "deleted", at: now() });
+          resetFor("");
+          st.note = "Your cloud copy is deleted. Everything is still on this phone.";
+          saveSt(); notify();
+          return finishOld().then(done => (done && !st.old.length ? { ok: true, error: "" }
+            : { ok: false, later: true, error: "Couldn't reach the cloud. We'll finish deleting when you're online." }));
+        }).catch(e => ({ ok: false, error: notDeleted({ error: errText(e) }) }));
       } catch (e) { return Promise.resolve({ ok: false, error: errText(e) }); }
     },
     /* Change code: a new household gets everything from this phone; once it's all up, the old
@@ -1500,7 +1580,7 @@ window.M = window.M || {};
       try {
         if (!isOn()) return Promise.resolve({ ok: false, error: configured() ? "Sync is off." : "Cloud sync isn't set up yet." });
         /* First bring in what the other phone added (like her profile), so the new code gets it too. */
-        return cycle({ reason: "manual", manual: true }).then(r0 => {
+        return cycle({ reason: "manual", manual: true, all: true }).then(r0 => {
           if (!r0 || !r0.ok || !isOn()) return { ok: false, code: st.code, error: (r0 && r0.error) || "Sync is off." };
           const old = st.code, t = now();
           resetFor(rand(20));

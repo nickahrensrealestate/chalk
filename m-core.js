@@ -88,24 +88,67 @@ window.M = window.M || {};
   /* --------------------------------------------------------------- servings */
   /* {qty:1, unit:"cup", g:240} <-> "1 cup (240 g)". Amounts read as fractions ("¼ cup",
      "1 ½ cups" stays "1 ½ cup"), a gram label never repeats itself ("100 g", not
-     "100 g (100 g)") and grams go inside a bracket the unit already has
-     ("1 container (6 oz, 170 g)"). parseServing reads all of these, the old
-     "0.25 cup (46 g)" / "1 oz (23 almonds) (28 g)" labels too. */
+     "100 g (100 g)"). parseServing reads these, "1 container (6 oz, 170 g)" and the
+     old "0.25 cup (46 g)" / "1 oz (23 almonds) (28 g)" labels too. */
   const FRAC = [[0.25, "¼"], [1 / 3, "⅓"], [0.5, "½"], [2 / 3, "⅔"], [0.75, "¾"]];
   const FRAC_V = { "¼": 0.25, "⅓": 1 / 3, "½": 0.5, "⅔": 2 / 3, "¾": 0.75, "⅛": 0.125, "⅜": 0.375, "⅝": 0.625, "⅞": 0.875, "⅕": 0.2, "⅖": 0.4, "⅗": 0.6, "⅘": 0.8, "⅙": 1 / 6, "⅚": 5 / 6 };
-  function qtyText(q) {
+  /* Metric amounts (g, ml, kg, l) read as decimals ("12.5 g", never "12 ½ g"). */
+  const METRIC_UNIT = /^(g|grams?|kg|kilograms?|ml|milliliters?|millilitres?|l|liters?|litres?)$/i;
+  function qtyText(q, unit) {
+    if (unit && METRIC_UNIT.test(String(unit).trim())) return String(+q.toFixed(1));
     const w = Math.floor(q + 1e-9), rem = q - w;
     if (rem > 1e-6) for (const f of FRAC) if (Math.abs(rem - f[0]) <= 0.02) return (w ? w + " " : "") + f[1];
     return String(+q.toFixed(2));
   }
-  const GRAM_UNIT = /^(g|grams?)$/i;
-  M.fmtServing = s => {
+  /* Drinks and other pourable foods. food.liquid (true / false) wins over the name. */
+  const LIQ_WORDS = /\b(milk|buttermilk|juice|coffee|cold brew|espresso|latte|tea|beer|ipa|lager|wine|whiskey|vodka|tequila|rum|gin|seltzer|soda|cola|water|drinks?|gatorade|kefir|creamer|broth|smoothie|lemonade|kombucha)\b/i;
+  const NOT_LIQ = /\b(milk chocolate|dark chocolate|chocolate (bar|chips?)|powder|packets?|bars?|cheese|bread|ice cream|in water|chestnuts?|mix|jerky|cake|baking|beans|grounds|yogh?urt|cottage|pudding|cereal|oats|oatmeal|butter)\b/i;
+  M.isLiquid = food => {
+    if (!isObj(food)) return false;
+    if (food.liquid === true || food.liquid === false) return food.liquid;
+    const name = String(food.name || "");
+    return LIQ_WORDS.test(name) && !NOT_LIQ.test(name);
+  };
+  /* ml in one serving of a liquid, from the serving's own volume words ("12 fl oz",
+     "12 oz", "1 cup", "1 tbsp"); without them ("1 bottle (591 g)") about 1 ml a gram. */
+  const ML_OF = { "fl oz": 29.5735, oz: 29.5735, cup: 240, tbsp: 15, tsp: 5, ml: 1, l: 1000, pint: 473, quart: 946, gallon: 3785 };
+  function volWord(unit) {
+    const u = String(unit || "").toLowerCase().replace(/\(.*$/, "").replace(/,.*$/, "").trim();
+    if (/^fl\.?\s*oz\b|^fluid ounces?\b/.test(u)) return "fl oz";
+    if (/^(oz|ounces?)\b/.test(u)) return "oz";          /* "12 oz", "12 oz can", "1 ½ oz shot" */
+    if (/^cups?\b/.test(u)) return "cup";
+    if (/^(tbsp|tablespoons?)\b/.test(u)) return "tbsp";
+    if (/^(tsp|teaspoons?)\b/.test(u)) return "tsp";
+    if (/^(ml|milliliters?|millilitres?)$/.test(u)) return "ml";
+    if (/^(l|liters?|litres?)$/.test(u)) return "l";
+    const m = /^(pint|quart|gallon)s?\b/.exec(u);
+    return m ? m[1] : null;
+  }
+  M.servingMl = (s, food) => {
+    s = s || {};
+    if (!M.isLiquid(food)) return null;
+    const v = volWord(s.unit), k = ML_OF[v];
+    const ml = k ? (num(s.qty, 1) || 1) * k : num(s.g);
+    if (!(ml > 0)) return null;
+    return ml >= 10 ? Math.round(ml) : +ml.toFixed(1);
+  };
+  /* Pass the food as the 2nd argument and a liquid reads in ml: "1 cup (240 ml)",
+     "12 oz (355 ml)"; a unit that already names its volume keeps its own words
+     ("1 can (355 ml)"). Without the food the label is the same as before. */
+  M.fmtServing = (s, food) => {
     s = s || {};
     const qty = num(s.qty, 1) || 1, unit = String(s.unit || "serving").trim() || "serving", g = num(s.g);
-    const head = qtyText(qty) + " " + unit;
-    if (!(g > 0) || GRAM_UNIT.test(unit)) return head;
-    const gs = String(+g.toFixed(1)) + " g";
-    return /\)$/.test(unit) && unit.indexOf("(") > 0 ? head.slice(0, -1) + ", " + gs + ")" : head + " (" + gs + ")";
+    const head = qtyText(qty, unit) + " " + unit;
+    if (METRIC_UNIT.test(unit)) return head;
+    const liq = food !== undefined && M.isLiquid(food);
+    if (liq && /\d\s*(ml|l|fl\.?\s*oz)\b/i.test(unit)) return head;
+    const ml = liq ? M.servingMl(s, food) : null;
+    if (!(g > 0) && ml == null) return head;
+    const gs = ml != null ? ml + " ml" : String(+g.toFixed(1)) + " g";
+    /* grams always in a bracket of their own at the end ("1 container (6 oz) (170 g)"):
+       the diary row takes that last bracket off before it adds the amount's grams, so
+       "(6 oz, 170 g)" read "1 container (6 oz, 170 g) (170 g)" there. */
+    return head + " (" + gs + ")";
   };
   function parseQty(s) {
     s = String(s || "").trim(); if (!s) return null;
@@ -132,7 +175,7 @@ window.M = window.M || {};
   /* A serving label without its grams: "1 container (6 oz, 170 g)" → "1 container (6 oz)". */
   M.servingText = label => {
     const p = M.parseServing(label);
-    return qtyText(p.qty) + " " + p.unit;
+    return qtyText(p.qty, p.unit) + " " + p.unit;
   };
 
   /* ------------------------------------------------------------------ state */
@@ -301,10 +344,15 @@ window.M = window.M || {};
       if (isObj(b) && validState(b.data)) { s = b.data; M.storage.restoredFrom = String(b.day || "backup"); }
     }
     M.MS = shape(s);
-    /* taps on Train | Macros live in their own small key */
+    /* taps on Train | Macros live in their own small key. The newer copy wins: an
+       older build (after a rollback) only writes mode/person into the main key. */
     lastUi = null;
     const uiStr = lsGet(M.UI_KEY), ui = parseJSON(uiStr);
-    if (isObj(ui)) { applyUi(M.MS.ui, ui); lastUi = uiStr; }
+    if (isObj(ui)) {
+      const mainAt = num(s && s.updatedAt), uiAt = num(ui.at);
+      if (!(mainAt > uiAt + 1000 && uiAt > 0 && !M.storage.restoredFrom)) applyUi(M.MS.ui, ui);
+      lastUi = uiStr.replace(/,"at":\d+\}$/, "}");
+    }
     M.storage.bytes = raw && s && !M.storage.restoredFrom ? raw.length : 0;
     return M.MS;
   };
@@ -320,11 +368,12 @@ window.M = window.M || {};
   }
   let lastUi = null;
   function uiJSON() { const u = M.MS.ui || {}; return JSON.stringify({ mode: u.mode === "macros" ? "macros" : "train", person: isPid(u.person) ? u.person : null, tab: isStr(u.tab) && u.tab ? u.tab : "diary", date: u.date || null }); }
-  /* Writes only the small ui key (mode, person, tab, date). Never a full save. */
+  /* Writes only the small ui key (mode, person, tab, date, at). Never a full save.
+     "at" lets M.load() tell it apart from a newer main key written by an older build. */
   M.saveUi = function () {
     const s = uiJSON();
     if (s === lastUi) return true;
-    if (lsWrite(M.UI_KEY, s)) return false;
+    if (lsWrite(M.UI_KEY, s.slice(0, -1) + ',"at":' + num(M.now()) + "}")) return false;
     lastUi = s;
     return true;
   };
@@ -538,7 +587,22 @@ window.M = window.M || {};
       const p = num(per && per.p) * 4, c = num(per && per.c) * 4, f = num(per && per.f) * 9, t = p + c + f;
       if (!(t > 0)) return { p: 0, c: 0, f: 0 };
       return { p: r0(p / t * 100), c: r0(c / t * 100), f: r0(f / t * 100) };
-    }
+    },
+    /* Round once: every row shows whole numbers and the total adds up the rows as
+       shown, so the rows on screen always add up to the total on screen.
+       rows(list) → { rows: [{cal, p, …} | null], total }. */
+    rows(list) {
+      const total = M.foodMath.blank(), rows = [];
+      (Array.isArray(list) ? list : []).forEach(it => {
+        if (!isObj(it)) { rows.push(null); return; }
+        const s = it.servings == null ? 1 : num(it.servings, 1), per = isObj(it.per) ? it.per : it, o = {};
+        M.NUT.forEach(k => { o[k] = Math.round(num(per[k]) * s); total[k] += o[k]; });
+        rows.push(o);
+      });
+      return { rows, total };
+    },
+    /* What's left, from the two numbers on screen: round(target) − round(eaten). */
+    left(target, eaten) { return Math.round(num(target)) - Math.round(num(eaten)); }
   };
 
   /* ---------------------------------------------------------- cooked weight */
@@ -1171,7 +1235,7 @@ window.M = window.M || {};
       o.state = "raw";
       o.servingLabel = (oz ? "1 oz " : "1 g ") + c.word;
       o.g = oz ? OZ_G : 1;
-      o.servings = oz ? r1(rawG / OZ_G) || 0.1 : Math.max(1, Math.round(rawG));
+      o.servings = oz ? r2(rawG / OZ_G) || 0.01 : Math.max(1, Math.round(rawG));   /* 2 places: 6 oz cooked stays 170 g, not 171 */
       o.per = perExact(f, "raw", o.g) || o.per;
       return o;
     }
@@ -1318,7 +1382,7 @@ window.M = window.M || {};
   const NAMED = 60;      /* a built-in food they named for these words (chicken, turkey, jam, cottage cheese) */
   function foodResult(kind, f) {
     const serving = normServing(f.serving);
-    const r = { kind, id: f.id, name: f.name, brand: f.brand || "", sub: M.fmtServing(serving), per: normPer(f.per), serving, alts: normAlts(f.alts), foodId: f.id, mealId: null, ref: f };
+    const r = { kind, id: f.id, name: f.name, brand: f.brand || "", sub: M.fmtServing(serving, f), per: normPer(f.per), serving, alts: normAlts(f.alts), foodId: f.id, mealId: null, ref: f };
     const c = M.cook.of(f);
     if (c) { r.cook = c; r.state = "raw"; const l = M.cook.servingLabel(f); if (l) r.sub = l; }
     return r;

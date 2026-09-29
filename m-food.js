@@ -1984,7 +1984,8 @@ window.M = window.M || {};
     ml: ["ml", "milliliter", "milliliters", "millilitre", "millilitres"], "fl oz": ["floz", "fl", "fluid"],
     slice: ["slice", "slices"], piece: ["piece", "pieces", "pc", "pcs"], scoop: ["scoop", "scoops"], serving: ["serving", "servings", "portion", "portions"],
     small: ["small", "sm"], medium: ["medium", "med"], large: ["large", "lg"], can: ["can", "cans"], bottle: ["bottle", "bottles"], bar: ["bar", "bars"],
-    egg: ["egg", "eggs"], handful: ["handful", "handfuls"], bag: ["bag", "bags"], packet: ["packet", "packets", "pack"], link: ["link", "links"], stick: ["stick", "sticks"]
+    egg: ["egg", "eggs"], handful: ["handful", "handfuls"], bag: ["bag", "bags"], packet: ["packet", "packets", "pack"], link: ["link", "links"], stick: ["stick", "sticks"],
+    ear: ["ear", "ears"]
   };
   const UNIT_LOOKUP = {}; Object.keys(UNIT_WORDS).forEach(u => UNIT_WORDS[u].forEach(w => { UNIT_LOOKUP[w] = u; }));
   const WORD_NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, dozen: 12 };
@@ -1995,6 +1996,7 @@ window.M = window.M || {};
     const raw = s;
     let qty = null, unit = null;
     s = s.replace(/(\d)\s*-\s*(?=(oz|ounce|g|gram|lb|cup|tbsp|tsp|ml)\b)/i, "$1 ");          /* "5-oz" → "5 oz" */
+    s = s.replace(/^(\d+(?:\.\d+)?)\s*[x×]\s+(?=[a-z])/i, "$1 ");                            /* "2x chicken breast" → "2 chicken breast" */
     /* "2% cottage cheese" and "80/20 ground beef" name the food; they aren't amounts */
     const partOfName = /^\d+(?:[.,]\d+)?\s*%/.test(s) || /^\d{2,}\s*\/\s*\d{1,2}\b/.test(s);
     const m = partOfName ? null : /^(\d+\s*[½¼¾⅓⅔⅛]|[½¼¾⅓⅔⅛])\s*/.exec(s)
@@ -2013,8 +2015,8 @@ window.M = window.M || {};
     }
     const xm = /\s*[x×]\s*(\d+(?:\.\d+)?)\s*$/i.exec(s);
     if (xm) { qty = (qty == null ? 1 : qty) * num(xm[1], 1); s = s.slice(0, xm.index); }
-    if (qty == null) {                                   /* trailing amount: "chicken thigh 8 oz", "rice (1 cup)" */
-      const tm = /\s*\(?\s*(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)\s*([a-zA-Z]+)?\.?\s*\)?\s*$/.exec(s);
+    if (qty == null) {                                   /* trailing amount: "chicken thigh 8 oz", "rice (1 cup)", "quinoa 1/4 cup dry" */
+      const tm = /\s*\(?\s*(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)\s*([a-zA-Z]+)?\.?(?:\s+(?:raw|dry|uncooked|cooked))?\s*\)?\s*$/i.exec(s);
       if (tm && tm.index > 0) {
         qty = qtyOf(tm[1]);
         const uw = lc(tm[2] || "");
@@ -2078,8 +2080,17 @@ window.M = window.M || {};
     const u = q.unit;
     if (!u) {
       if (!q.explicitQty) return own(1);                                  /* "broccoli" → one normal serving */
-      if (!isVolUnit(svUnit) && !isWeightUnit(svUnit)) return own(q.qty / svQty);   /* "2 eggs" on "1 large egg" */
-      const count = alts.find(a => { const p = M.parseServing ? M.parseServing(a.label) : null; return p && COUNTISH.test(unitBase(p.unit)); });
+      if (!isVolUnit(svUnit) && !isWeightUnit(svUnit)) {                /* "2 eggs" on "1 large egg" */
+        /* "2 turkey slices" on a "6 slices" food → 2 × "1 slice" (not 0.33 × 6 slices) */
+        if (Math.abs(svQty - 1) > 1e-6) {
+          const base = u2 => unitBase(u2).replace(/s$/, "");
+          const single = alts.find(a => { const p = M.parseServing ? M.parseServing(a.label) : null; return p && Math.abs((p.qty || 1) - 1) < 1e-6 && base(p.unit) === base(svUnit); });
+          if (single) { const r = altRow(single, q.qty); if (r) return r; }
+        }
+        return own(q.qty / svQty);
+      }
+      /* "10 shrimp" on a "4 oz" food → 10 × "1 large shrimp", not 10 × 4 oz */
+      const count = alts.find(a => { const p = M.parseServing ? M.parseServing(a.label) : null; return p && (COUNTISH.test(unitBase(p.unit)) || /^(large|medium|small|jumbo)\s+[a-z]/.test(unitBase(p.unit))); });
       if (count) { const p = M.parseServing(count.label); const r = altRow(count, q.qty / (p.qty || 1)); if (r) return r; }
       return own(q.qty);
     }
@@ -2132,7 +2143,7 @@ window.M = window.M || {};
   const OTHER_FOOD = /^(oil|water|bacon|seasoning|sauce|dressing|powder|milk|juice|butter|flour|syrup|spread|dip|jerky|sausage|broth|soup|mix|chip|cracker|cake|bar|cereal|vinegar|paste|jam|jelly|candy|cooky|cookie|creamer|stock|shake|drink|smoothie)$/i;
   const PACK_WORD = /^(packet|package|pack|can|bottle|jar|bag|box|pouch|container|tub|carton|piece|slice)$/i;
   /* How it was served, not what it is ("2 eggs over easy", "a bowl of rice", "big salad"). */
-  const STYLE = /^(over|easy|scrambled|hard|soft|sunny|side|up|big|little|hot|cold|iced|warm|homemade|bowl|plate|glass|mug|handful|portion|bit|chunk|bunch)$/i;
+  const STYLE = /^(over|easy|scrambled|hard|soft|sunny|side|up|big|little|hot|cold|iced|warm|homemade|bowl|plate|glass|mug|handful|portion|bit|chunk|bunch|toasted)$/i;
   const STOP = /^(of|the|some|with|and|a|an|my|plain|cooked|fresh|whole)$/i;
   const singular = w => (w.length > 3 && /s$/.test(w) && !/ss$/.test(w) ? w.replace(/(ie)s$/, "y").replace(/(o|ch|sh|x)es$/, "$1").replace(/s$/, "") : w);
   /* Words of a name or a phrase: M.searchTokens (m-core) when it is there, so describe and search
@@ -2382,8 +2393,14 @@ window.M = window.M || {};
      say "cooked"). Anything else, or an item without grams, stays as Claude gave it. */
   function snapToOwn(it) {
     try {
-      if (!isObj(it) || !(num(it.g) > 0)) return it;
+      if (!isObj(it)) return it;
       const words = String(it.name || "");
+      /* "1 breast" / "2 breasts" with no grams: one breast is 175 g raw (Nick's rule) */
+      if (!(num(it.g) > 0) && saysChicken(words)) {
+        const q = M.food.parseQuantity(String(it.servingLabel || "")), b = chickenBreast();
+        if (b && q.qty > 0 && /^(whole\s+)?breasts?\b/i.test(q.words) && !saysCookedWord(String(it.servingLabel || ""))) it = Object.assign({}, it, { g: r1(q.qty * breastServing(b).g) });
+      }
+      if (!(num(it.g) > 0)) return it;
       let food = null, chicken = false;
       if (saysChicken(words)) { food = chickenBreast(); chicken = !!food; }
       else { const np = namedProduct(words); if (np) food = np.food; }
@@ -2431,6 +2448,10 @@ window.M = window.M || {};
       if (!food && words) food = M.food.matchLocal(part);
       /* toast is bread ("2 slices of toast", "sourdough toast") */
       if (!food && /\btoast\b/i.test(words || part)) food = M.food.matchLocal(String(words || part).replace(/\btoast\b/gi, "bread"));
+      /* "1 lemon juiced" is lemon juice */
+      if (!food && /\bjuiced\b/i.test(words || part)) food = M.food.matchLocal(String(words || part).replace(/\bjuiced\b/gi, "juice"));
+      /* "1 cod fillet", "1 large ear of corn": the piece word isn't the food */
+      if (!food && words && /\b(fillets?|filets?|ears?)\b/i.test(words)) { const w2 = words.replace(/\b(fillets?|filets?|ears?)\b(\s+of\b)?/gi, " ").replace(/\s+/g, " ").trim(); if (w2) food = M.food.matchLocal(w2); }
       /* chicken breast = the Kirkland breast, raw (Nick's rule) */
       if (saysChicken(words || part) && (!food || builtIn(food) || !/\bbreast/i.test(food.name))) { const b = chickenBreast(); if (b) food = b; }
       if (food && isBreastFood(food)) {
@@ -2717,7 +2738,7 @@ window.M = window.M || {};
     (prefs && prefs.noCook ? " No cooking." : "") + (prefs && prefs.lowCarb ? " Keep carbs low." : "") + (prefs && prefs.quick ? " Under 10 minutes." : "") + "\n" +
     (foods.length ? "Build the meals mostly from foods they already eat (their pantry):\n" + foods.join("\n") + "\nYou may add simple King Soopers or Costco staples.\n" : "Use simple whole foods from King Soopers or Costco.\n") +
     "Foods they buy (use these most): " + STAPLES + ". Olive oil, garlic, spices, soy sauce and rice are fine as small add-ons.\n" +
-    "They never eat: " + NEVER_EAT + ". Use agave, not honey.\n" + FOOD_NOTE + "\n" +
+    "They never eat: " + NEVER_EAT + ". Use agave, not honey.\n" + CHICKEN_NOTE + " For the Daisy, Smucker's and Hillshire foods, use the numbers on the package.\n" +
     "Name and describe each meal in plain words a middle-schooler understands.\n" +
     "Reply with ONLY this JSON, no prose, no code fences:\n{\"suggestions\":[{\"name\": string, \"desc\": string (one plain sentence), \"store\": \"King Soopers\" or \"Costco\" or \"Either\", \"prepMin\": number, " +
     "\"items\":[{\"name\": string, \"servingLabel\": string like \"6 oz (170 g)\", \"g\": number or null, \"per\": {\"cal\": number, \"p\": number, \"c\": number, \"f\": number, \"fiber\": number, \"sugar\": number, \"sodium_mg\": number}}]}]}\n" +

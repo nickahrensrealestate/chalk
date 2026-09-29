@@ -1377,7 +1377,9 @@ t("Delete my cloud data, Change code, and the code stays out of URLs (SEC-03)", 
   assert.ok(CODE_RE.test(c.code) && c.code !== code);
   assert.strictEqual(N.M.cloud.status().code, c.code);
   const kinds = SERVER.all(c.code).filter(x => !x.deleted).reduce((o, x) => { o[x.kind] = (o[x.kind] || 0) + 1; return o; }, {});
-  assert.deepStrictEqual(kinds, { food: 3, meal: 2, day: 5, body: 5, profile: 2, meta: 1, train: 1 }, "all of it in the new household");
+  /* C5: her diary and weigh-in too (they came down to this phone first), not only what this phone kept */
+  assert.deepStrictEqual(kinds, { food: 3, meal: 2, day: 8, body: 6, profile: 2, meta: 1, train: 1 }, "all of it in the new household");
+  assert.strictEqual(rowsOf(N, "days", "kat").length, 0, "and her rows left his phone again once they were in the new household");
   assert.ok(SERVER.all(code).every(x => x.deleted === true), "old household: every row marked deleted");
   assert.ok(SERVER.all(code).filter(x => x.kind !== "meta").every(x => x.data === "{}"), "and emptied");
   const kr = await K.sync();
@@ -1386,14 +1388,19 @@ t("Delete my cloud data, Change code, and the code stays out of URLs (SEC-03)", 
   assert.strictEqual(K.M.cloud.status().note, "Sync is off. The other phone deleted the cloud copy or changed the code. Everything is still on this phone.");
   assert.strictEqual(Object.keys(K.M.MS.foods).length, kFoods, "her data stays");
   assert.ok((await K.M.cloud.join(c.code)).ok, "she joins with the new code");
-  /* Delete my cloud data (offline first: it finishes when the phone is back online) */
+  /* Delete my cloud data. Offline first (C5): everything must come down to this phone before the
+     cloud copy goes, so offline nothing is deleted and sync stays on. */
   N.offline(true);
+  const d0 = await N.M.cloud.deleteCloud();
+  assert.strictEqual(d0.ok, false);
+  assert.strictEqual(d0.error, "Can't reach the internet. Nothing was deleted. Try again in a minute.");
+  assert.strictEqual(N.M.cloud.status().on, true, "sync stays on");
+  assert.ok(SERVER.all(c.code).some(x => !x.deleted), "nothing deleted");
+  N.offline(false);
   const d = await N.M.cloud.deleteCloud();
-  assert.strictEqual(d.ok, false); assert.strictEqual(d.later, true);
-  assert.strictEqual(d.error, "Couldn't reach the cloud. We'll finish deleting when you're online.");
-  assert.strictEqual(N.M.cloud.status().on, false, "sync is off on this phone right away");
-  N.offline(false); N.fire("online");
-  for (let i = 0; i < 100 && SERVER.all(c.code).some(x => !x.deleted); i++) await sleep(20);
+  assert.ok(d.ok, JSON.stringify(d));
+  assert.strictEqual(N.M.cloud.status().on, false, "sync is off on this phone");
+  assert.strictEqual(rowsOf(N, "days", "kat").length, 3, "her diary is on this phone too now");
   assert.ok(SERVER.all(c.code).every(x => x.deleted === true), "every row marked deleted");
   assert.ok(SERVER.all(c.code).filter(x => x.kind !== "meta").every(x => x.data === "{}"), "and emptied");
   assert.strictEqual(N.M.cloud.status().note, "Your cloud copy is deleted. Everything is still on this phone.");
@@ -1486,6 +1493,123 @@ t("smaller fixes: field merge, use counts, clock skew, Retry-After, duplicates o
   const keptId = Object.values(Y.M.MS.foods).find(f => f.barcode === food.barcode).id;
   assert.strictEqual(Y.M.MS.days["kat|" + Y.M.today()].entries[0].foodId, keptId, "her diary points at the kept food");
   X.M.cloud.leave(); Y.M.cloud.leave();
+});
+
+/* C5: a damaged save that falls back to the daily backup, or records that vanish from the
+   phone without the app deleting them, must never go up as deletes (that would empty the
+   cloud copy and delete them on the other phone). The phone reads everything again instead. */
+t("records lost on this phone (damaged save, backup copy) are brought back, never deleted in the cloud (C5)", async () => {
+  const { P: N, code } = await household("c5-nick");
+  const K = katPhone("c5-kat");
+  assert.ok((await K.M.cloud.join(code)).ok);
+  assert.ok((await N.sync()).ok);
+  const nFoods = foodNames(N), nMeals = mealNames(N), nDays = rowsOf(N, "days", "nick").length, nBody = rowsOf(N, "body", "nick").length;
+  assert.ok(nFoods.length >= 3 && nDays >= 5 && nBody >= 5);
+  /* today's edit that the daily backup copy doesn't have */
+  const lastFood = Object.values(N.M.MS.foods).find(f => f.name === "Zucchini");
+  N.M.foods.update ? N.M.foods.update(lastFood.id, { name: "Zucchini, green" }) : Object.assign(N.M.MS.foods[lastFood.id], { name: "Zucchini, green", updatedAt: Date.now() });
+  N.M.save();
+  assert.ok((await N.sync()).ok);
+  /* the main copy gets damaged; the next start falls back to the backup copy (an older, smaller state) */
+  const store = Object.fromEntries(N.store);   /* the phone's storage as it is (sync still on) */
+  N.M.cloud.leave();   /* the old page is gone */
+  const bak = JSON.parse(store["chalk.macros.v1.bak"] || "null");
+  const small = { v: 1, ui: {}, profiles: J(N.M.MS.profiles), foods: {}, meals: {}, days: {}, body: {} };
+  const oldZ = Object.assign(J(N.M.MS.foods[lastFood.id]), { name: "Zucchini", updatedAt: Date.now() - DAY });
+  small.foods[lastFood.id] = oldZ;
+  store["chalk.macros.v1.bak"] = JSON.stringify({ bak: 1, day: (bak && bak.day) || N.M.today(), at: Date.now() - DAY, data: small });
+  store["chalk.macros.v1"] = "{broken";
+  assert.ok(Object.keys(JSON.parse(store["chalk.sync.v1"]).hashes).length > 15, "the phone knew what the cloud holds");
+  const N2 = phone("c5-nick-2", { store, train: trainState("nick", ["w1", "w2", "w3"]) });
+  assert.ok(N2.M.storage.restoredFrom, "m-core used the backup copy");
+  N2.M.cloud._.scan();   /* the first look (a save timer) already forgets, on disk too: a restart can't undo it */
+  const disk = JSON.parse(N2.store.get("chalk.sync.v1"));
+  assert.ok(!Object.keys(disk.hashes).some(k => /^(food|meal|day|body|profile)\|/.test(k)), "sync memory of the damaged records is gone on disk");
+  assert.strictEqual(disk.cursor, "", "and the next sync reads everything");
+  const r = await N2.sync();
+  assert.ok(r.ok, JSON.stringify(r));
+  const live = SERVER.all(code).filter(x => x.kind !== "meta" && x.kind !== "train");
+  assert.strictEqual(live.filter(x => x.deleted).length, 0, "nothing was deleted in the cloud: " + live.filter(x => x.deleted).map(x => x.kind + "|" + x.id).join(", "));
+  assert.deepStrictEqual(foodNames(N2), nFoods.map(n => n === "Zucchini" ? "Zucchini, green" : n).sort(), "his foods came back, with today's edit");
+  assert.deepStrictEqual(mealNames(N2), nMeals, "his meals came back");
+  assert.strictEqual(rowsOf(N2, "days", "nick").length, nDays, "his diary came back");
+  assert.strictEqual(rowsOf(N2, "body", "nick").length, nBody, "his weigh-ins came back");
+  assert.strictEqual(Object.values(SERVER.all(code)).find(x => x.kind === "food" && x.id === lastFood.id).deleted, false);
+  assert.ok(JSON.parse(SERVER.get(code, "food", lastFood.id).data).name === "Zucchini, green", "the older backup copy didn't overwrite the cloud");
+  assert.ok((await K.sync()).ok);
+  assert.deepStrictEqual(foodNames(K), foodNames(N2), "her phone kept every food");
+  assert.strictEqual(mealNames(K).length, nMeals.length, "and every meal");
+  /* a phone whose synced records vanish without the app deleting them (storage cleared, a bug): no deletes either */
+  const ids = Object.keys(N2.M.MS.days).filter(k => k.startsWith("nick|"));
+  ids.forEach(id => { delete N2.M.MS.days[id]; });
+  Object.keys(N2.M.MS.foods).forEach(id => { delete N2.M.MS.foods[id]; });
+  N2.M.save();
+  assert.ok((await N2.sync()).ok);
+  assert.strictEqual(SERVER.all(code).filter(x => x.deleted && x.kind !== "meta").length, 0, "still nothing deleted in the cloud");
+  assert.ok((await N2.sync()).ok);
+  assert.strictEqual(rowsOf(N2, "days", "nick").length, nDays, "his diary came back again");
+  assert.strictEqual(foodNames(N2).length, nFoods.length, "and his foods");
+  /* one food deleted on purpose still goes: a delete of one food is a real delete */
+  const one = Object.values(N2.M.MS.foods).find(f => f.name === "Zucchini, green");
+  N2.M.foods.remove(one.id);
+  assert.ok((await N2.sync()).ok);
+  assert.strictEqual(SERVER.get(code, "food", one.id).deleted, true, "a real delete still reaches the cloud");
+  assert.ok((await K.sync()).ok);
+  assert.ok(!foodNames(K).includes("Zucchini, green"), "and the other phone");
+  /* a clean-up of many foods at once (fewer than half of them) is real too, even with sync off meanwhile */
+  const made = []; for (let i = 0; i < 24; i++) made.push(N2.M.foods.add({ name: "Extra food " + i }).id);
+  assert.ok((await N2.sync()).ok);
+  made.slice(0, 11).forEach(id => N2.M.foods.remove(id));
+  assert.ok((await N2.sync()).ok);
+  assert.strictEqual(made.slice(0, 11).filter(id => SERVER.get(code, "food", id).deleted === true).length, 11, "11 foods deleted in the cloud");
+  assert.strictEqual(foodNames(N2).filter(n => /^Extra food/.test(n)).length, 13, "and they stay deleted here");
+  N2.M.cloud.leave(); K.M.cloud.leave();
+});
+
+/* C5: tonight both phones already hold real data. If Nick's phone once set up a profile for
+   Katerina, her own phone (with weeks of her diary) must keep her newer profile on joining. */
+t("joining with a phone that is already hers keeps her newer profile (C5)", async () => {
+  const H = phone("c5b-nick", {});
+  seedNick(H);
+  const old = H.M.person("kat");
+  Object.assign(old, { sex: "f", age: 35, heightIn: 65, weightLb: 150, goalWeightLb: 140, activity: "light", pace: -1, setupAt: Date.now() - 30 * DAY, updatedAt: Date.now() - 30 * DAY, lastBody: Date.now() - 30 * DAY });
+  H.M.calc.applyTargets(old); H.M.save();
+  const code = H.M.cloud.create(); assert.ok((await H.sync()).ok);
+  assert.strictEqual(JSON.parse(SERVER.get(code, "profile", "kat").data).weightLb, 150, "his phone's old copy of her profile is in the cloud");
+  const K = katPhone("c5b-kat");   /* set up later on her own phone, 3 days of her diary, edited since */
+  const kp = K.M.person("kat"); kp.setupAt = Date.now() - 20 * DAY; kp.updatedAt = Date.now() - DAY; K.M.save();
+  assert.ok((await K.M.cloud.join(code)).ok);
+  assert.strictEqual(K.M.MS.profiles.kat.weightLb, 135, "her phone kept her own profile");
+  assert.strictEqual(JSON.parse(SERVER.get(code, "profile", "kat").data).weightLb, 135, "and the cloud has hers now");
+  assert.ok((await H.sync()).ok);
+  assert.strictEqual(H.M.MS.profiles.kat.weightLb, 135, "his phone took hers");
+  assert.strictEqual(H.M.MS.profiles.nick.weightLb, 185, "his own profile is untouched");
+  H.M.cloud.leave(); K.M.cloud.leave();
+});
+
+/* C5: after "Switch person", a phone holds only the new person's diary; its own person's lives in
+   the cloud. Delete cloud copy and Change code must bring that back first, or it is gone. */
+t("Delete cloud copy and Change code on a phone that switched person keep every diary (C5)", async () => {
+  const { P: N, code } = await household("c5c-nick");
+  const K = katPhone("c5c-kat");
+  assert.ok((await K.M.cloud.join(code)).ok);
+  assert.ok((await N.sync()).ok);
+  N.ctx.S.profile = "kat";           /* Katerina borrows Nick's phone */
+  assert.ok((await N.sync()).ok);
+  assert.strictEqual(rowsOf(N, "days", "nick").length, 0, "his diary left his phone (it's in the cloud)");
+  /* Change code while switched: his diary goes to the new household too */
+  const c = await N.M.cloud.changeCode();
+  assert.ok(c.ok, JSON.stringify(c));
+  assert.strictEqual(SERVER.all(c.code).filter(x => x.kind === "day" && /^nick\|/.test(x.id) && !x.deleted).length, 5, "his 5 days are in the new household");
+  assert.strictEqual(SERVER.all(c.code).filter(x => x.kind === "body" && /^nick\|/.test(x.id) && !x.deleted).length, 5, "and his weigh-ins");
+  /* Delete cloud copy while switched: his diary comes back to his phone first */
+  const d = await N.M.cloud.deleteCloud();
+  assert.ok(d.ok, JSON.stringify(d));
+  assert.strictEqual(rowsOf(N, "days", "nick").length, 5, "his diary is on his phone");
+  assert.strictEqual(rowsOf(N, "body", "nick").length, 5, "and his weigh-ins");
+  assert.strictEqual(rowsOf(N, "days", "kat").length, 3, "hers too");
+  N.ctx.S.profile = "nick";
+  K.M.cloud.leave();
 });
 
 /* =================================================================== run */

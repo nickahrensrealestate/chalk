@@ -362,13 +362,15 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     } else {
       const latest = all[all.length - 1];
       const a7 = avgAll[avgAll.length - 1].v;
+      /* one weigh-in in the week: "latest 0.0" says nothing */
+      const inWeek = all.filter(x => M.daysBetween(x.date, latest.date) <= 6).length;
       const rate = M.body.ratePerWeek(id);
       const steady = rate != null && Math.abs(rate) < STEADY;
       const goal = isNum(p.goalWeightLb) && p.goalWeightLb > 0 ? p.goalWeightLb : null;
       const conv1 = lb => (u === "metric" ? M.units.lb2kg(lb) : lb);
       const stats = `<div class="stats">
         ${tile(dispW(latest.v, u), "Latest", wUnit(u), esc(fmtShort(latest.date)))}
-        ${tile(dispW(a7, u), "7-day average", wUnit(u), "latest " + signed(conv1(latest.v - a7), 1))}
+        ${tile(dispW(a7, u), "7-day average", wUnit(u), inWeek < 2 ? "1 weigh-in" : "latest " + signed(conv1(latest.v - a7), 1))}
         ${tile(rate == null ? "—" : steady ? "Steady" : signed(conv1(rate), u === "metric" ? 2 : 1), "Per week", rate == null || steady ? "" : wUnit(u), rate == null ? "needs 2 weeks" : rateSpan(all))}
       </div>`;
       let goalLine;
@@ -405,7 +407,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       const stats = `<div class="stats">
         ${tile(r0(latest.v), "Latest", "bpm", esc(fmtShort(latest.date)))}
         ${tile(avg, "7-day average", "bpm", week.length + " reading" + (week.length === 1 ? "" : "s"))}
-        ${tile(signed(latest.v - avg, 0), "Vs average", "bpm")}
+        ${week.length < 2 ? tile("—", "Vs average") : tile(signed(latest.v - avg, 0), "Vs average", "bpm")}
       </div>`;
       const from = chartFrom(all, range);
       const to = range > 0 ? M.today() : all[all.length - 1].date;
@@ -511,10 +513,18 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   function targetsHold(p) {
     try {
       if (p.targetsManual || !M.calc.complete(p)) return false;
-      const w = num(p.weightLb), t = p.targets || {};
-      const at = x => M.calc.targets(Object.assign({}, p, { weightLb: x }));
-      const a = at(w - 2), b = at(w + 2);
-      return ["cal", "p", "c", "f"].every(k => { const v = num(t[k], NaN); return isNum(v) && v >= Math.min(a[k], b[k]) - 0.5 && v <= Math.max(a[k], b[k]) + 0.5; });
+      const w = num(p.weightLb), t = p.targets || {}, K = ["cal", "p", "c", "f"];
+      if (!(w > 0) || !K.every(k => isNum(t[k]))) return false;
+      /* The saved targets hold when they are exactly what some weight under 2 lb away gives.
+         (Checking between the targets at −2 and +2 lb fails: in high protein the carbs barely
+         move and round up and down, so every weigh-in nudged the targets.) */
+      for (let i = -39; i <= 39; i++) {
+        const x = Math.round((w + i * 0.05) * 100) / 100;
+        if (!(x > 0)) continue;
+        const a = M.calc.targets(Object.assign({}, p, { weightLb: x }));
+        if (K.every(k => a[k] === t[k])) return true;
+      }
+      return false;
     } catch (e) { return false; }
   }
   M.trends.targetsHold = targetsHold;
@@ -830,9 +840,12 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   function syncCardHTML() {
     const head = `<div class="hd"><h3>Sync &amp; backup</h3></div>`;
     const C = cloud();
-    const join = wantJoin; wantJoin = false;
+    const want = wantJoin; wantJoin = false;
     if (!C || !C.configured()) return `<div class="card mt-card mt-sync" id="mt-sync">${head}<div class="bd"><p class="mt-text mt-quiet">Cloud sync isn't set up yet.</p></div></div>`;
     const s = C.status();
+    /* The other phone changed the code (or deleted the copy): joining again is the next step here.
+       Starting would make a second code, and the phones would quietly stop sharing. */
+    const join = want || (!s.on && /other phone/i.test(String(s.note || "")));
     if (!s.on) {
       justOnAt = 0; joinedAt = 0; codeShown = false; moreOpen = false;
       const note = s.note ? `<p class="mt-next">${esc(s.note)}</p>` : "";
@@ -843,7 +856,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
         <div class="mt-join" id="mt-join"${join ? "" : " hidden"}>
           <label class="lbl" for="mt-join-code">Code from the first phone</label>
           <p class="hint">It's on the first phone under You → Sync &amp; backup. Codes never use the letters I or O, or the numbers 0 or 1.</p>
-          <div class="mt-joinrow"><input id="mt-join-code" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go" placeholder="20 letters and numbers"><button class="btn primary" data-m="t-sync-join">Join</button></div>
+          <div class="mt-joinrow"><input id="mt-join-code" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go" placeholder="Type the code"><button class="btn primary" data-m="t-sync-join">Join</button></div>
           <p class="small mt-warn" id="mt-join-msg" role="status" hidden></p>
         </div>
         ${undoHTML()}
@@ -946,7 +959,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     if (!M.calc.complete(d)) return `<div class="mt-preview"><span class="small mut">Fill in sex, age, height and weight to see your targets.</span></div>`;
     const t = M.calc.targets(d);
     const c = M.calc.calories(d);
-    return `<div class="mt-preview"><div class="mt-pv"><b>${fmtN(t.cal)}</b><span>cal a day</span></div><div class="mt-pv"><b>${t.p}</b><span>protein g</span></div><div class="mt-pv"><b>${t.c}</b><span>carbs g</span></div><div class="mt-pv"><b>${t.f}</b><span>fat g</span></div>${c.floored ? `<span class="small mut mt-pvnote">Held at the ${fmtN(c.cal)} calorie minimum.</span>` : ""}</div>`;
+    return `<div class="mt-preview"><div class="mt-pv"><b>${fmtN(t.cal)}</b><span>cal a day</span></div><div class="mt-pv"><b>${t.p} g</b><span>protein</span></div><div class="mt-pv"><b>${t.c} g</b><span>carbs</span></div><div class="mt-pv"><b>${t.f} g</b><span>fat</span></div>${c.floored ? `<span class="small mut mt-pvnote">Held at the ${fmtN(c.cal)} calorie minimum.</span>` : ""}</div>`;
   }
 
   M.ui.setupCardHTML = function () {
@@ -1309,7 +1322,13 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     let pr;
     try { pr = Cl.join(code); } catch (e) { pr = null; }
     return Promise.resolve(pr).then(r => {
-      if (r && r.ok) { joinedAt = now(); justOnAt = 0; toast("Joined. Your data is syncing."); rerender(); return; }
+      if (r && r.ok) {
+        joinedAt = now(); justOnAt = 0;
+        /* nothing of this person's came over (a first phone for them): setup is the next step */
+        let due = null; try { due = M.checkins.due(pid()); } catch (e) { due = null; }
+        toast(due === "setup" ? "Joined. Now tap Diary to set your targets." : "Joined. Your data is syncing.");
+        rerender(); return;
+      }
       reset(); joinMsg((r && r.error) || "That didn't work. Try again.");
     }, () => { reset(); joinMsg("That didn't work. Try again."); });
   };
@@ -1499,7 +1518,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     M.body.add({ date: M.today(), w: p.weightLb, pid: id });
     M.checkins.done(id, "setup");
     setupDraft = null;
-    toast("Targets set");
+    toast("Targets set: " + fmtN(p.targets.cal) + " cal a day");
     rerender();
     const sc = $("scroll"); if (sc) sc.scrollTop = 0;
   };

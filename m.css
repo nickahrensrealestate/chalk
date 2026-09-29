@@ -300,3 +300,11 @@
 /* idea cards: "Add to Breakfast" stays on one line; "Save as meal" takes the rest (or its own row on a narrow phone) */
 .m-sug .m-btnrow>.btn{flex:1 1 auto}
 .m-sug .m-btnrow>.btn.primary{min-width:auto;white-space:nowrap}
+/* barcode hit with calories but no protein, carbs or fat */
+.m-offwarn{margin:0 0 10px;padding:10px 12px;border-radius:10px;background:var(--warn-soft);color:var(--warn);font-weight:600;font-size:14px;line-height:1.35}
+/* "Deleted … · Undo" bar on the Foods tab */
+.m-undo{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:6px 6px 6px 14px;border-radius:12px;background:var(--acc-soft);color:var(--ink)}
+.m-undo>span{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;font-weight:600;font-size:14px}
+.m-undo>.btn{flex:0 0 auto;min-height:44px}
+/* meal description: two lines, the whole text shows */
+.m-f textarea.m-mbdesc{min-height:64px;resize:none;font:17px/1.35 "Barlow",-apple-system,sans-serif;font-weight:500;padding:10px 12px;border-radius:10px}

@@ -870,14 +870,17 @@ t("storage: one key on disk; mode taps write only the ui key; one save per actio
   M.reset();
 });
 
-t("fmtServing / parseServing: fractions, no repeated grams, grams inside an existing bracket (BEC-17)", () => {
+t("fmtServing / parseServing: fractions, no repeated grams; grams in their own last bracket (BEC-17, C1)", () => {
   const F = M.fmtServing, P = M.parseServing;
   assert.strictEqual(F({ qty: 0.25, unit: "cup", g: 46 }), "¼ cup (46 g)");
   assert.strictEqual(F({ qty: 1.5, unit: "cup", g: 240 }), "1 ½ cup (240 g)");
   assert.strictEqual(F({ qty: 1 / 3, unit: "cup", g: 80 }), "⅓ cup (80 g)");
   assert.strictEqual(F({ qty: 0.3, unit: "cup" }), "0.3 cup", "not near a fraction: the number");
   assert.strictEqual(F({ qty: 100, unit: "g", g: 100 }), "100 g", "no '100 g (100 g)'");
-  assert.strictEqual(F({ qty: 1, unit: "container (6 oz)", g: 170 }), "1 container (6 oz, 170 g)");
+  /* C1: grams stay in a bracket of their own; the diary row strips that last bracket (m-ui amountText),
+     so "1 container (6 oz, 170 g)" showed as "1 container (6 oz, 170 g) (170 g)" there */
+  assert.strictEqual(F({ qty: 1, unit: "container (6 oz)", g: 170 }), "1 container (6 oz) (170 g)");
+  assert.strictEqual(F({ qty: 1, unit: "oz (23 almonds)", g: 28 }), "1 oz (23 almonds) (28 g)");
   assert.strictEqual(F({ qty: 2, unit: "slice", g: null }), "2 slice");
   assert.strictEqual(F({}), "1 serving");
   assert.deepStrictEqual(P("¼ cup (46 g)"), { qty: 0.25, unit: "cup", g: 46 });
@@ -1146,6 +1149,134 @@ t("batch portions: cooked-only label with the batch size; normal cook foods keep
 });
 
 /* ---- sync ---- */
+/* ---- C1 (partner check): live-format data, the ui key both ways, liquids in ml, round once ---- */
+/* Made by the LIVE build (d757f4b) itself: old cooked-chicken id, a batch portion, a
+   quick add, weigh-ins, water; with the totals the live build showed for each day. */
+const LIVE_FIXTURE = {"main":{"v":1,"updatedAt":1790517600000,"ui":{"mode":"macros","person":null,"date":null,"tab":"diary"},"profiles":{"nick":{"id":"nick","name":"Nick","sex":"m","age":40,"heightIn":71,"weightLb":188,"goalWeightLb":175,"activity":"moderate","pace":-1,"units":"us","split":"highprotein","custom":{"p":30,"c":40,"f":30},"targets":{"cal":2281,"p":190,"c":239,"f":63,"fiber":32,"water":96},"targetsManual":false,"setupAt":1790344800000,"snooze":{"refresh60":0,"body14":0},"lastBody":1790517600000,"aiModel":"claude-sonnet-5-5"}},"foods":{"f_bar":{"id":"f_bar","name":"Protein bar crunchy","brand":"Barebells","per":{"cal":200,"p":20,"c":18,"f":8,"fiber":3,"sugar":1,"sodium":150},"serving":{"qty":1,"unit":"bar","g":55},"source":"custom","barcode":"","per100g":null,"alts":[],"createdAt":1790344800000,"updatedAt":1790344800000,"uses":2,"lastUsed":1790517600000,"pid":"nick"}},"meals":{"m_prep":{"id":"m_prep","name":"Sunday chicken prep","slot":"Dinner","batch":{"cookedG":1450,"rawG":678},"items":[{"foodId":"g_chicken_breast","name":"Chicken breast, boneless skinless","servings":6,"servingLabel":"4 oz (113 g)","g":113,"per":{"cal":136,"p":25.4,"c":0,"f":2.9,"fiber":0,"sugar":0,"sodium":51},"state":"raw","cook":{"y":0.7258,"word":"raw"},"id":"muh12gw02a9r","brand":""}],"desc":"","servingsMade":1,"per":{"cal":816,"p":152.4,"c":0,"f":17.4,"fiber":0,"sugar":0,"sodium":306},"createdAt":1790344800000,"updatedAt":1790344800000,"uses":2,"lastUsed":1790517600000,"pid":"nick"}},"days":{"nick|2026-09-26":{"id":"nick|2026-09-26","pid":"nick","date":"2026-09-26","entries":[{"id":"e_ck0","slot":"Dinner","foodId":"g_chicken_breast","name":"Chicken breast, boneless skinless","servings":1,"servingLabel":"6 oz","g":170,"per":{"cal":280.5,"p":52.7,"c":0,"f":6.1,"fiber":0,"sugar":0,"sodium":125.8},"state":"cooked","cook":{"y":0.7258,"word":"raw"},"brand":"","at":1790431200000},{"id":"e_bar0","slot":"Snacks","foodId":"f_bar","servings":1.5,"name":"Protein bar crunchy","brand":"Barebells","servingLabel":"1 bar (55 g)","g":55,"per":{"cal":200,"p":20,"c":18,"f":8,"fiber":3,"sugar":1,"sodium":150},"at":1790431200000},{"slot":"Dinner","name":"Sunday chicken prep","brand":"","servings":5.9966,"servingLabel":"1 oz cooked","g":28.3495,"per":{"cal":15.9539,"p":2.9796,"c":0,"f":0.3402,"fiber":0,"sugar":0,"sodium":5.9827},"mealId":"m_prep","state":"cooked","cook":{"y":2.1386,"word":"raw"},"id":"muigibk066ub","at":1790431200000},{"id":"e_q0","slot":"Lunch","name":"Quick add","servings":1,"servingLabel":"1 serving","per":{"cal":350,"p":20,"c":30,"f":12,"fiber":0,"sugar":0,"sodium":0},"brand":"","g":null,"at":1790431200000}],"water":64,"note":"","updatedAt":1790431200000},"nick|2026-09-27":{"id":"nick|2026-09-27","pid":"nick","date":"2026-09-27","entries":[{"id":"e_ck1","slot":"Dinner","foodId":"g_chicken_breast","name":"Chicken breast, boneless skinless","servings":1,"servingLabel":"6 oz","g":170,"per":{"cal":280.5,"p":52.7,"c":0,"f":6.1,"fiber":0,"sugar":0,"sodium":125.8},"state":"cooked","cook":{"y":0.7258,"word":"raw"},"brand":"","at":1790517600000},{"id":"e_bar1","slot":"Snacks","foodId":"f_bar","servings":1.5,"name":"Protein bar crunchy","brand":"Barebells","servingLabel":"1 bar (55 g)","g":55,"per":{"cal":200,"p":20,"c":18,"f":8,"fiber":3,"sugar":1,"sodium":150},"at":1790517600000},{"slot":"Dinner","name":"Sunday chicken prep","brand":"","servings":5.9966,"servingLabel":"1 oz cooked","g":28.3495,"per":{"cal":15.9539,"p":2.9796,"c":0,"f":0.3402,"fiber":0,"sugar":0,"sodium":5.9827},"mealId":"m_prep","state":"cooked","cook":{"y":2.1386,"word":"raw"},"id":"mujvy680485i","at":1790517600000},{"id":"e_q1","slot":"Lunch","name":"Quick add","servings":1,"servingLabel":"1 serving","per":{"cal":350,"p":20,"c":30,"f":12,"fiber":0,"sugar":0,"sodium":0},"brand":"","g":null,"at":1790517600000}],"water":64,"note":"","updatedAt":1790517600000}},"body":{"nick|2026-09-26":{"id":"nick|2026-09-26","pid":"nick","date":"2026-09-26","w":189,"rhr":55,"at":1790431200000},"nick|2026-09-27":{"id":"nick|2026-09-27","pid":"nick","date":"2026-09-27","w":188,"rhr":55,"at":1790517600000}}},"totals":{"nick|2026-09-26":{"cal":1026.2,"p":120.6,"c":57,"f":32.1,"fiber":4.5,"sugar":1.5,"sodium":386.7},"nick|2026-09-27":{"cal":1026.2,"p":120.6,"c":57,"f":32.1,"fiber":4.5,"sugar":1.5,"sodium":386.7}}};
+const canonJ = v => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.keys(x).sort().reduce((o, key) => { o[key] = x[key]; return o; }, {}) : x));
+
+t("C1: a main copy written by the live build loads unchanged, totals match, a new save keeps every old day", () => {
+  M.reset();
+  const keepNow = NOW;
+  localStorage.removeItem(M.UI_KEY);
+  localStorage.setItem(M.KEY, JSON.stringify(LIVE_FIXTURE.main));
+  M.load();
+  ["profiles", "foods", "meals", "days", "body"].forEach(k => assert.strictEqual(canonJ(M.MS[k]), canonJ(LIVE_FIXTURE.main[k]), k + " unchanged in memory"));
+  assert.strictEqual(M.mode(), "macros", "mode read from the main key when there is no ui key yet");
+  assert.strictEqual(M.storage.restoredFrom, null);
+  Object.keys(LIVE_FIXTURE.totals).forEach(id => {
+    const d = LIVE_FIXTURE.main.days[id], a = LIVE_FIXTURE.totals[id], b = M.log.totals(d.date, d.pid);
+    M.NUT.forEach(n => near(b[n], a[n], 0.01, id + " " + n));
+  });
+  /* a new save (one more entry today) leaves the old days, body, meals and profiles exactly as they were */
+  M.log.add(today, { slot: "Snacks", name: "Apple", per: { cal: 95 } });
+  const disk = diskState();
+  Object.keys(LIVE_FIXTURE.main.days).forEach(id => assert.strictEqual(canonJ(disk.days[id]), canonJ(LIVE_FIXTURE.main.days[id]), id + " unchanged on disk"));
+  ["profiles", "meals", "body", "foods"].forEach(k => assert.strictEqual(canonJ(disk[k]), canonJ(LIVE_FIXTURE.main[k]), k + " unchanged on disk"));
+  assert.strictEqual(disk.ui.mode, "macros", "the main key still carries mode for an older build");
+  /* the live build reads only v / ui / profiles / foods / meals / days / body: all still there */
+  assert.deepStrictEqual(Object.keys(disk).sort(), ["body", "days", "foods", "meals", "profiles", "ui", "updatedAt", "v"]);
+  NOW = keepNow;
+  M.reset();
+});
+
+t("C1: an old '6 oz cooked' chicken entry comes back as a raw recent that is still 170 g cooked", () => {
+  withFakeDB([G("g_kb2", "Chicken breast, organic", { alwaysRaw: true, staple: true, serving: { qty: 1, unit: "breast", g: 175 }, cook: { y: 0.7258, word: "raw" } })], { g_chicken_breast_cooked: { id: "g_kb2", state: "cooked" } }, () => {
+    M.log.add(M.addDays(today, -1), { slot: "Dinner", foodId: "g_chicken_breast_cooked", servings: 1, servingLabel: "6 oz", g: 170, state: "cooked", cook: { y: 0.7258, word: "raw" }, per: { cal: 281 } });
+    const rc = M.recents("nick").find(x => x.foodId === "g_kb2");
+    assert.ok(rc && rc.state === "raw", "raw recent");
+    near(rc.g * rc.servings * 0.7258, 170, 0.5, "same cooked weight as logged");
+  });
+});
+
+t("C1: the ui key and the main key: the newer one wins (an older build after a rollback writes only the main key)", () => {
+  M.reset();
+  const keepNow = NOW;
+  M.setMode("macros"); M.setPerson("nick");
+  const ui = JSON.parse(localStorage.getItem(M.UI_KEY));
+  assert.ok(ui.at > 0, "the ui key is stamped");
+  assert.strictEqual(ui.mode, "macros");
+  /* an older build saves later: its mode / person live only in the main key */
+  NOW += 60e3;
+  const main = diskState();
+  main.ui = { mode: "train", person: "kat", date: null, tab: "diary" }; main.updatedAt = NOW;
+  localStorage.setItem(M.KEY, JSON.stringify(main));
+  M.load();
+  assert.strictEqual(M.mode(), "train", "the older build's later choice wins");
+  assert.strictEqual(M.MS.ui.person, "kat");
+  /* a tap in this build after that wins again */
+  NOW += 60e3;
+  M.setMode("macros"); M.load();
+  assert.strictEqual(M.mode(), "macros"); assert.strictEqual(M.MS.ui.person, "kat");
+  /* a full save later (ui unchanged) shows the same thing after a reload */
+  NOW += 60e3; M.save(); M.load();
+  assert.strictEqual(M.mode(), "macros"); assert.strictEqual(M.MS.ui.person, "kat");
+  /* a ui key without a stamp (older round-3 copy) still counts */
+  localStorage.setItem(M.UI_KEY, JSON.stringify({ mode: "train", person: "nick", tab: "diary", date: null }));
+  M.load(); assert.strictEqual(M.mode(), "train"); assert.strictEqual(M.MS.ui.person, "nick");
+  /* a taps-only session never rewrites the main key */
+  const before = localStorage.getItem(M.KEY);
+  M.setMode("macros"); M.setPerson("kat"); M.setMode("train");
+  assert.strictEqual(localStorage.getItem(M.KEY), before);
+  NOW = keepNow;
+  M.setPerson("nick");
+  M.reset();
+});
+
+t("C1: liquids read in ml when the food is given; grams never as fractions; labels without the food are unchanged", () => {
+  const F = M.fmtServing;
+  const milk = { name: "Milk, 2%", serving: { qty: 1, unit: "cup", g: 244 } };
+  const coffee = { name: "Coffee, black", serving: { qty: 12, unit: "oz", g: 355 } };
+  const soda = { name: "Soda, cola", serving: { qty: 12, unit: "oz can", g: 368 } };
+  const shot = { name: "Whiskey, 1 shot", serving: { qty: 1.5, unit: "oz shot", g: 42 } };
+  const seltzer = { name: "Sparkling water, lime", serving: { qty: 1, unit: "can (355 ml)", g: 355 } };
+  assert.strictEqual(F(milk.serving, milk), "1 cup (240 ml)");
+  assert.strictEqual(F({ qty: 0.5, unit: "cup", g: 122 }, milk), "½ cup (120 ml)", "fractions stay for cups");
+  assert.strictEqual(F(coffee.serving, coffee), "12 oz (355 ml)");
+  assert.strictEqual(F(soda.serving, soda), "12 oz can (355 ml)");
+  assert.strictEqual(F(shot.serving, shot), "1 ½ oz shot (44 ml)");
+  assert.strictEqual(F(seltzer.serving, seltzer), "1 can (355 ml)", "the serving's own volume words, no grams");
+  assert.strictEqual(F({ qty: 1, unit: "tbsp", g: 15 }, { name: "Heavy cream" }), "1 tbsp (15 g)", "not a drink: grams");
+  /* not liquids, even with liquid-ish words */
+  [{ name: "Tuna, canned in water" }, { name: "Milk chocolate" }, { name: "Electrolyte drink mix packet" }, { name: "Greek yogurt, plain 2%" }, { name: "Cottage cheese, 2%" },
+    { name: "Greek yogurt, plain 5% (whole milk)" }, { name: "Baking soda" }, { name: "Oats, dry" }, { name: "Peanut butter, creamy" }, { name: "Watermelon" }, { name: "Water chestnuts" }]
+    .forEach(f => assert.strictEqual(M.isLiquid(f), false, f.name));
+  ["Oat milk", "Almond milk, unsweetened", "Chocolate milk", "Buttermilk", "Orange juice", "Beer, light (4.2%)", "Sports drink", "Seltzer / sparkling water"]
+    .forEach(n => assert.strictEqual(M.isLiquid({ name: n }), true, n));
+  assert.strictEqual(M.isLiquid({ name: "Kombucha", liquid: false }), false, "the food's own flag wins");
+  assert.strictEqual(M.isLiquid({ name: "Bone broth" }), true);
+  assert.strictEqual(F({ qty: 1, unit: "bottle", g: 591 }, { name: "Sports drink" }), "1 bottle (591 ml)", "no volume words: about 1 ml a gram");
+  assert.strictEqual(F({ qty: 1, unit: "container (6 oz)", g: 170 }, { name: "Greek yogurt, plain 5% (whole milk)" }), "1 container (6 oz) (170 g)");
+  /* without the food: the same labels as before (m-ui parses these) */
+  assert.strictEqual(F(milk.serving), "1 cup (244 g)");
+  assert.strictEqual(F(coffee.serving), "12 oz (355 g)");
+  /* grams and ml: decimals, never "12 ½ g" */
+  assert.strictEqual(F({ qty: 12.5, unit: "g" }), "12.5 g");
+  assert.strictEqual(F({ qty: 2.5, unit: "ml", g: 2.5 }), "2.5 ml", "no '(2.5 g)' after ml either");
+  assert.strictEqual(M.servingText("12.5 g"), "12.5 g");
+  assert.strictEqual(F({ qty: 2.25, unit: "slices", g: 20 }), "2 ¼ slices (20 g)", "fractions stay for pieces");
+  assert.strictEqual(F({ qty: 1.5, unit: "tbsp", g: 21 }), "1 ½ tbsp (21 g)");
+  assert.deepStrictEqual(M.parseServing(F({ qty: 12.5, unit: "g" })), { qty: 12.5, unit: "g", g: null }, "reads back");
+  assert.strictEqual(M.servingMl(coffee.serving, coffee), 355);
+  assert.strictEqual(M.servingMl(milk.serving, { name: "Rice" }), null);
+  /* search rows show ml for drinks */
+  withFakeDB([G("g_milk_x", "Milk, 2%", { serving: { qty: 1, unit: "cup", g: 244 } }), G("g_rice_x", "White rice", { serving: { qty: 1, unit: "cup", g: 158 } })], {}, () => {
+    assert.strictEqual(M.search("milk")[0].sub, "1 cup (240 ml)");
+    assert.strictEqual(M.search("rice")[0].sub, "1 cup (158 g)");
+  });
+});
+
+t("C1: round once: rows show whole numbers and add up to the total; left = round(target) − round(eaten)", () => {
+  const items = [{ servings: 1.5, per: { cal: 100.4, p: 10.3 } }, { servings: 1, per: { cal: 0.4, p: 0.4 } }, { servings: 3, per: { cal: 33.3, p: 1.2 } }, null];
+  const r = M.foodMath.rows(items);
+  assert.deepStrictEqual(r.rows.map(x => x && x.cal), [151, 0, 100, null]);
+  assert.strictEqual(r.total.cal, 251, "the total is the sum of the rows as shown");
+  assert.strictEqual(r.total.p, 15 + 0 + 4);
+  assert.strictEqual(M.foodMath.left(2281.6, 1500.5), 2282 - 1501);
+  assert.strictEqual(M.foodMath.left(2000, 2100.4), -100);
+  assert.deepStrictEqual(M.foodMath.rows(null), { rows: [], total: M.foodMath.blank() });
+});
+
 t("sync is a silent no-op without window.claude", () => {
   assert.strictEqual(typeof window.claude, "undefined");
   M.sync.push(); M.sync.pushNow(); M.sync.pushDay("x"); M.sync.pushBody("x");

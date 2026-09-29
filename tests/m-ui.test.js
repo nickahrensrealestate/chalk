@@ -54,6 +54,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, (msg || "") + " expected " + a + " ≈ " + b);
 const sheetOn = () => $("sheet").classList.contains("on");
 
+/* The day's numbers as the Diary shows them: each row rounded once, then added (BEC-16 / UX2-24). */
+const shownDay = d => { const o = { cal: 0, p: 0 }; ((M.dayOf(d) || {}).entries || []).forEach(e => { if (!e) return; const t = M.foodMath.scale(e.per, Math.max(0, e.servings == null ? 1 : Number(e.servings) || 0)); o.cal += Math.round(t.cal); o.p += Math.round(t.p); }); return o; };
 const tests = [];
 function t(name, fn) { tests.push({ name, fn }); }
 console.log("m-ui.js");
@@ -129,20 +131,28 @@ t("add flow (cook food): Lunch + Add → 'chicken' → Chicken breast → units 
   assert.strictEqual($("m-search"), inp, "search input was not re-rendered");
   const rows = qa('#m-results [data-m="pick"]');
   assert.ok(rows.length > 0, "results");
+  /* Nick's rule: chicken breast is the Kirkland organic breast, first for "chicken" */
+  assert.ok(/^Chicken breast, organic/.test(rows[0].textContent), "Kirkland breast first: " + rows[0].textContent);
   click(q('[data-m="add-seg"][data-v="foods"]'));
-  const row = qa('#m-results [data-m="pick"]').find(r => /Chicken breast, boneless skinless/.test(r.textContent));
+  const row = qa('#m-results [data-m="pick"]').find(r => /Chicken breast, organic/.test(r.textContent));
   assert.ok(row, "merged chicken breast row");
-  assert.ok(/4 oz raw \(2\.9 oz cooked\)/.test(row.textContent), "search row reads raw first: " + row.textContent);
+  assert.ok(/Kirkland/.test(row.textContent), "brand shown");
+  assert.ok(/175 g raw \(127 g cooked\)/.test(row.textContent), "search row reads 1 breast in raw grams, even in US units: " + row.textContent);
   click(row);
   const units = qa('[data-m="det-unit"] option').map(o => o.value);
   assert.deepStrictEqual(units, ["oz-raw", "oz-cooked", "g-raw", "g-cooked", "lb-raw", "lb-cooked"]);
   assert.deepStrictEqual(qa('[data-m="det-unit"] option').map(o => o.textContent).slice(0, 4), ["oz raw", "oz cooked", "g raw", "g cooked"]);
-  assert.strictEqual(q('[data-m="det-unit"]').value, "oz-raw");
-  assert.strictEqual(q('[data-m="det-qty"]').value, "4");
-  assert.strictEqual($("m-det-amt").textContent, "4 oz raw (2.9 oz cooked)");
+  /* 1 breast = 175 g raw is the default; grams typed are raw grams */
+  assert.strictEqual(q('[data-m="det-unit"]').value, "g-raw", "opens in raw grams");
+  assert.strictEqual(q('[data-m="det-qty"]').value, "175");
+  assert.strictEqual($("m-det-amt").textContent, "175 g raw (127 g cooked)");
+  assert.ok(/172kcal/.test($("m-live").textContent.replace(/\s/g, "")), "175 g raw = 172 kcal (label 110 kcal / 112 g): " + $("m-live").textContent);
+  /* g → oz converts the number */
+  change(q('[data-m="det-unit"]'), "oz-raw");
+  assert.strictEqual(q('[data-m="det-qty"]').value, "6.2", "175 g = 6.2 oz");
   input(q('[data-m="det-qty"]'), "6");
   assert.strictEqual($("m-det-amt").textContent, "6 oz raw (4.4 oz cooked)", "servings screen reads raw first");
-  assert.ok(/204kcal/.test($("m-live").textContent.replace(/\s/g, "")), "6 oz raw = 204 kcal: " + $("m-live").textContent);
+  assert.ok(/167kcal/.test($("m-live").textContent.replace(/\s/g, "")), "6 oz raw = 167 kcal: " + $("m-live").textContent);
   click(q('[data-m="det-step"][data-v="1"]'));
   assert.strictEqual(q('[data-m="det-qty"]').value, "6.5", "oz steps by half");
   click(q('[data-m="det-step"][data-v="-1"]'));
@@ -152,7 +162,7 @@ t("add flow (cook food): Lunch + Add → 'chicken' → Chicken breast → units 
   const lunch = M.log.slotEntries(M.today(), "Lunch");
   assert.strictEqual(lunch.length, 1);
   addedEntry = lunch[0];
-  assert.deepStrictEqual([addedEntry.foodId, addedEntry.state, addedEntry.servingLabel, addedEntry.servings], ["g_chicken_breast", "raw", "1 oz raw", 6]);
+  assert.deepStrictEqual([addedEntry.foodId, addedEntry.state, addedEntry.servingLabel, addedEntry.servings], ["g_kirkland_organic_chicken", "raw", "1 oz raw", 6]);
   assert.strictEqual(addedEntry.cook.word, "raw");
   assert.strictEqual(Object.keys(M.MS.foods).length, 0, "generic food NOT copied into M.foods");
   const drow = q('.m-slot [data-m="entry"][data-id="' + addedEntry.id + '"]');
@@ -172,7 +182,9 @@ t("entry sheet (cook): raw → cooked keeps the typed number (6 oz raw → 6 oz 
   click($("m-det-go"));
   let e = M.log.slotEntries(M.today(), "Lunch")[0];
   assert.deepStrictEqual([e.state, e.servingLabel, e.servings], ["cooked", "1 oz cooked", 5]);
-  assert.strictEqual(Math.round(M.foodMath.scale(e.per, e.servings).cal), Math.round(5 * OZ * 1.65), "cooked profile: 165 kcal / 100 g");
+  const ck100 = M.foods.get("g_kirkland_organic_chicken").cook.per100gCooked.cal;
+  near(ck100, 135, 1, "cooked = raw ÷ yield (98 ÷ 0.726)");
+  assert.strictEqual(Math.round(M.foodMath.scale(e.per, e.servings).cal), Math.round(5 * OZ * ck100 / 100), "cooked profile: ~135 kcal / 100 g");
   assert.ok(/6\.9 oz raw \(5 oz cooked\)/.test(q('[data-m="entry"][data-id="' + e.id + '"]').textContent));
   /* by grams */
   click(q('[data-m="entry"][data-id="' + e.id + '"]'));
@@ -244,7 +256,8 @@ t("slot menu → Save Lunch as meal → builder prefilled → Save → M.meals.l
   assert.strictEqual($("sheetT").textContent, "New meal");
   assert.ok(M.ui.draft && M.ui.draft.items.length === 1, "draft prefilled");
   assert.strictEqual(M.ui.draft.items[0].state, "raw", "meal item keeps which weight was logged");
-  assert.ok(/6 oz raw \(4\.4 oz cooked\)/.test(q('[data-m="mb-item"]').textContent), "builder item reads raw first");
+  /* the chicken breast sits in a meal as raw grams (6 oz = 170 g raw) */
+  assert.ok(/170 g raw \(123 g cooked\)/.test(q('[data-m="mb-item"]').textContent), "builder item reads raw grams first: " + q('[data-m="mb-item"]').textContent);
   assert.strictEqual(q('[data-m="mb"][data-k="slot"]').value, "Lunch");
   assert.ok(/kcal/.test($("m-mb-live").textContent), "live per-serving totals");
   click(q('[data-m="mb-save"]'));
@@ -527,36 +540,64 @@ t("entries saved before the merge read raw first and reopen in their old weight"
   click(row);
   assert.strictEqual(q('[data-m="det-unit"]').value, "oz-cooked");
   assert.strictEqual(q('[data-m="det-qty"]').value, "6", "shown rounded; the exact amount stays inside");
+  /* the old cooked chicken id resolves (M.DB.alias) to the one Kirkland breast, still weighed cooked */
+  const ck100 = M.foods.get("g_kirkland_organic_chicken").cook.per100gCooked.cal;
   click($("m-det-go"));
   const e = M.log.slotEntries(M.today(), "Snacks").find(x => x.id === "legacy1");
-  assert.deepStrictEqual([e.foodId, e.state], ["g_chicken_breast", "cooked"]);
-  assert.ok(Math.abs(M.log.totals(M.today()).cal - before) < 2, "same food, same calories");
+  assert.deepStrictEqual([e.foodId, e.state, e.servingLabel], ["g_kirkland_organic_chicken", "cooked", "1 oz cooked"]);
+  near(e.servings * e.g, 169.5, 0.5, "same amount: 6 oz cooked (1.5 × 113 g)");
+  near(M.log.totals(M.today()).cal - before, 169.5 * ck100 / 100 - 1.5 * 186, 2, "saved again with the Kirkland numbers");
+  assert.ok(/8\.2 oz raw \(6 oz cooked\)/.test(q('[data-m="entry"][data-id="legacy1"]').textContent), "still reads raw first");
   M.log.remove(M.today(), "legacy1"); M.ui.render();
+  /* an old raw entry (g_chicken_breast) reads raw first and reopens in its own unit */
+  M.day(M.today()).entries.push({ id: "legacy2", slot: "Snacks", name: "Chicken breast, boneless skinless", brand: "", foodId: "g_chicken_breast", servings: 6, servingLabel: "1 oz raw", g: 28.35, state: "raw", cook: { y: 0.75, word: "raw" }, per: { cal: 34, p: 6.4, c: 0, f: 0.7 }, at: Date.now() });
+  M.ui.render();
+  assert.ok(/6 oz raw \([\d.]+ oz cooked\)/.test(q('[data-m="entry"][data-id="legacy2"]').textContent), "old raw id reads raw first: " + q('[data-m="entry"][data-id="legacy2"]').textContent);
+  click(q('[data-m="entry"][data-id="legacy2"]'));
+  assert.deepStrictEqual([q('[data-m="det-unit"]').value, q('[data-m="det-qty"]').value], ["oz-raw", "6"], "edit keeps the unit it was saved in");
+  M.ui.close();
+  M.log.remove(M.today(), "legacy2"); M.ui.render();
 });
 
 t("recents: the row shows last time's raw (cooked) amount and reopens with it; My foods reads raw first", async () => {
-  if (!M.recents("nick").some(x => x.name === "Chicken breast, boneless skinless")) {
-    const cf = M.foods.get("g_chicken_breast"), o = M.cook.unitsFor(cf, "us").find(x => x.key === "oz-raw");
-    M.log.add(M.addDays(M.today(), -1), { slot: "Lunch", name: cf.name, foodId: cf.id, servings: 6, servingLabel: "1 oz raw", g: o.g, per: o.per, state: "raw", cook: { y: cf.cook.y, word: cf.cook.word } });
-  }
-  const rc = M.recents("nick").find(x => x.name === "Chicken breast, boneless skinless");
-  const info = M.cook.entryInfo(rc), label = M.cook.entryLabel(rc, "us");
-  assert.ok(rc && info && /oz raw \(/.test(label), label);
+  /* an old cooked entry of the pre-merge id comes back as a raw recent of the Kirkland breast */
+  const cf = M.foods.get("g_kirkland_organic_chicken");
+  M.log.add(M.addDays(M.today(), -1), { slot: "Lunch", name: "Chicken breast, cooked", foodId: "g_chicken_breast_cooked", servings: 5, servingLabel: "1 oz cooked", g: OZ, per: M.foodMath.fromPer100(cf.cook.per100gCooked, OZ), state: "cooked", cook: { y: 0.75, word: "raw" } });
+  const rc = M.recents("nick").find(x => x.foodId === "g_kirkland_organic_chicken");
+  assert.ok(rc, "alias resolves: the recent is the Kirkland breast");
+  assert.strictEqual(rc.name, "Chicken breast, organic", "live name");
+  assert.strictEqual(rc.state, "raw", "chicken breast recents come back raw");
+  const info = M.cook.entryInfo(rc);
+  near(info.grams, 5 * OZ / cf.cook.y, 3, "5 oz cooked = ~195 g raw");
+  const label = M.cook.label(info.grams, "raw", cf.cook, "g");
+  assert.ok(/^\d+ g raw \(\d+ g cooked\)$/.test(label), label);
   click(q('[data-m="add"][data-slot="Lunch"]'));
   try {
     await sleep(30);
-    const row = qa('#m-results [data-m="pick"]').find(r => /Chicken breast, boneless skinless/.test(r.textContent));
+    const row = qa('#m-results [data-m="pick"]').find(r => /Chicken breast, organic/.test(r.textContent));
     assert.ok(row && row.textContent.includes(label), (row && row.textContent) + " should show " + label);
     click(row);
-    assert.strictEqual(q('[data-m="det-unit"]').value, info.fam + "-" + info.state, "same unit as last time");
+    assert.strictEqual(q('[data-m="det-unit"]').value, "g-raw", "chicken breast reopens in raw grams");
     assert.strictEqual($("m-det-amt").textContent, label, "same amount as last time");
   } finally { M.ui.close(); }
+  /* a recent logged from search at the default reopens at 175 g raw (127 g cooked) */
+  M.log.add(M.today(), { slot: "Lunch", name: cf.name, brand: cf.brand, foodId: cf.id, servings: 175, servingLabel: "1 g raw", g: 1, per: M.foodMath.fromPer100(cf.per100g, 1), state: "raw", cook: { y: cf.cook.y, word: cf.cook.word } });
+  click(q('[data-m="add"][data-slot="Lunch"]'));
+  try {
+    await sleep(30);
+    const row = qa('#m-results [data-m="pick"]').find(r => /Chicken breast, organic/.test(r.textContent));
+    assert.ok(/175 g raw \(127 g cooked\)/.test(row.textContent), row.textContent);
+    click(row);
+    assert.deepStrictEqual([q('[data-m="det-unit"]').value, q('[data-m="det-qty"]').value, $("m-det-amt").textContent], ["g-raw", "175", "175 g raw (127 g cooked)"]);
+  } finally { M.ui.close(); }
+  M.log.slotEntries(M.today(), "Lunch").filter(x => x.foodId === cf.id && x.servings === 175).forEach(x => M.log.remove(M.today(), x.id));
+  M.ui.render();
   /* the Foods list still offers a food that is already a recent */
   click(q('[data-m="add"][data-slot="Lunch"]'));
   try {
     input($("m-search"), "chicken breast"); await sleep(220);
     click(q('[data-m="add-seg"][data-v="foods"]'));
-    assert.ok(qa('#m-results [data-m="pick"]').some(r => /^Chicken breast, boneless skinless$/.test(r.querySelector(".n").textContent)), "logged food still listed under Foods");
+    assert.ok(qa('#m-results [data-m="pick"]').some(r => /^Chicken breast, organic$/.test(r.querySelector(".n").textContent)), "logged food still listed under Foods");
   } finally { M.ui.close(); }
   const f = M.foods.add({ name: "Ground bison", source: "custom", serving: { qty: 4, unit: "oz", g: 113 }, per: { cal: 200, p: 22, c: 0, f: 12 }, per100g: { cal: 177, p: 19.5, c: 0, f: 10.6 }, cook: { y: 0.75, word: "raw" } });
   M.ui.tab = "foods"; M.ui.foodsSeg = "foods"; M.ui.render();
@@ -635,9 +676,10 @@ t("batch meal: switch on, total cooked weight, raw total, per 4 oz; saved row sa
     click($("m-det-go"));
     assert.strictEqual($("sheetT").textContent, "New meal");
   };
-  await addItem("chicken breast", /^Chicken breast, boneless/, "oz-raw", 64);
+  await addItem("chicken breast", /^Chicken breast, organic/, "oz-raw", 64);
   await addItem("white rice", /^White rice/, "oz-raw", 6);
-  assert.ok(/64 oz raw \(46\.5 oz cooked\)/.test($("m-mb-items").textContent), $("m-mb-items").textContent);
+  /* the chicken breast sits in a meal as raw grams: 64 oz raw = 1814 g raw */
+  assert.ok(/1814 g raw \(1317 g cooked\)/.test($("m-mb-items").textContent), $("m-mb-items").textContent);
   assert.ok(/6 oz dry \(16\.8 oz cooked\)/.test($("m-mb-items").textContent));
   const sw = q('[data-m="mb-batch"]');
   assert.ok(/Cooked a big batch\? Log it by weight/.test(sw.textContent));
@@ -665,7 +707,7 @@ t("batch meal: switch on, total cooked weight, raw total, per 4 oz; saved row sa
   assert.ok(/Batch · 51 oz cooked/.test(rowEl.textContent) && /per 4 oz cooked/.test(rowEl.textContent), rowEl.textContent);
 });
 
-t("batch meal: 'How much did you eat?' of 51 oz cooked → 12 oz → '16.5 oz raw (12 oz cooked)'; editing the meal never changes the day", () => {
+t("batch meal: 'How much did you eat?' of 51 oz cooked → 12 oz → '12 oz cooked · of 51 oz batch'; editing the meal never changes the day", () => {
   const m = M.meals.get(batchId);
   click(q('[data-m="meal"][data-id="' + batchId + '"]'));
   assert.ok(/How much did you eat\?/.test($("sheetB").textContent));
@@ -688,13 +730,15 @@ t("batch meal: 'How much did you eat?' of 51 oz cooked → 12 oz → '16.5 oz ra
   assert.ok(Math.abs(M.foodMath.scale(e.per, e.servings).cal - want) < 1, "batch totals × eaten ÷ cooked");
   M.ui.tab = "diary"; M.ui.render();
   const row = q('[data-m="entry"][data-id="' + e.id + '"]');
-  assert.ok(/16\.5 oz raw \(12 oz cooked\)/.test(row.textContent), row.textContent);
+  /* F1: a batch portion reads cooked only, with the batch it came from */
+  assert.ok(/12 oz cooked · of 51 oz batch/.test(row.textContent), row.textContent);
+  assert.ok(!/raw/.test(row.textContent), "no raw weight for a batch portion");
   const dayCal = M.log.totals(M.today()).cal;
   /* change the saved meal: more rice, new cooked weight */
   M.meals.update(batchId, { items: m.items.concat([{ name: "Olive oil", servings: 2, servingLabel: "1 tbsp (14 g)", g: 14, per: { cal: 124, f: 14 } }]), batch: { cookedG: 55 * OZ } });
   M.ui.render();
   assert.strictEqual(M.log.totals(M.today()).cal, dayCal, "day unchanged");
-  assert.ok(/16\.5 oz raw \(12 oz cooked\)/.test(q('[data-m="entry"][data-id="' + e.id + '"]').textContent));
+  assert.ok(/12 oz cooked · of 51 oz batch/.test(q('[data-m="entry"][data-id="' + e.id + '"]').textContent), "the logged portion keeps the batch it came from");
   /* reopen the logged portion: cooked units only, same amount */
   click(q('[data-m="entry"][data-id="' + e.id + '"]'));
   assert.deepStrictEqual(qa('[data-m="det-useg"]').map(b => b.dataset.v), ["oz-cooked", "g-cooked"]);
@@ -815,9 +859,9 @@ t("trainSummaryHTML: '' with no person or before setup; kcal + protein today and
   ctx.S.profile = null; assert.strictEqual(M.ui.trainSummaryHTML(), "");
   ctx.S.profile = "kat"; assert.strictEqual(M.ui.trainSummaryHTML(), "", "setup not done");
   ctx.S.profile = saveP;
-  const t = M.log.totals(M.today()), tg = M.person().targets;
+  const t = shownDay(M.today()), tg = M.person().targets;
   const h = M.ui.trainSummaryHTML();
-  assert.ok(h.includes("<b>" + Math.round(t.cal) + "</b> / " + Math.round(tg.cal)) && h.includes("<b>" + Math.round(t.p) + "</b> / " + Math.round(tg.p) + " g"), h);
+  assert.ok(h.includes("<b>" + t.cal + "</b> / " + Math.round(tg.cal)) && h.includes("<b>" + t.p + "</b> / " + Math.round(tg.p) + " g"), h);
   assert.ok(/data-m="mode" data-v="macros"/.test(h) && />Log food</.test(h));
   M.setMode("train"); M.ui.chrome();
   $("app").innerHTML = h;
@@ -868,6 +912,90 @@ t("tab action switches views and resets scroll", () => {
   assert.strictEqual(M.ui.tab, "you");
   assert.ok(!sheetOn(), "sheet closed when changing tab");
   M.ui.tab = "diary"; M.ui.render();
+});
+
+t("unit picker: grams rounded, never repeated ('1 oz (28 g)', '100 g', '1 container (6 oz, 170 g)')", () => {
+  M.ui.openDetail({ kind: "off", name: "Test cheese", brand: "", serving: { qty: 1, unit: "oz", g: 28.35 }, per: { cal: 110, p: 7, c: 1, f: 9 },
+    alts: [{ label: "100 g", g: 100 }, { label: "1 container (6 oz, 170 g)", g: 170 }, { label: "1 tsp", g: 4.2 }, { label: "1 cup", g: 240 }] }, { slot: "Snacks" });
+  try {
+    assert.deepStrictEqual(qa('[data-m="det-unit"] option').map(o => o.textContent), ["1 oz (28 g)", "100 g", "1 container (6 oz, 170 g)", "1 tsp (4.2 g)", "1 cup (240 g)", "grams"]);
+  } finally { M.ui.close(); }
+});
+
+t("the Kirkland chicken breast: search and Recent both open at 175 g raw (127 g cooked), in US units too", async () => {
+  assert.strictEqual(M.person("nick").units || "us", "us");
+  const cf = M.foods.get("g_chicken_breast");
+  assert.ok(cf && cf.id === "g_kirkland_organic_chicken" && cf.alwaysRaw === true, "old id resolves to the Kirkland breast");
+  click(q('[data-m="add"][data-slot="Dinner"]'));
+  try {
+    input($("m-search"), "chicken breasts"); await sleep(220);
+    click(q('[data-m="add-seg"][data-v="foods"]'));
+    const row = qa('#m-results [data-m="pick"]')[0];
+    assert.ok(/^Chicken breast, organic/.test(row.textContent) && /175 g raw \(127 g cooked\)/.test(row.textContent), row.textContent);
+    click(row);
+    assert.deepStrictEqual([q('[data-m="det-unit"]').value, q('[data-m="det-qty"]').value, $("m-det-amt").textContent], ["g-raw", "175", "175 g raw (127 g cooked)"]);
+    click($("m-det-go"));
+  } finally { M.ui.close(); }
+  const e = M.log.slotEntries(M.today(), "Dinner").find(x => x.foodId === "g_kirkland_organic_chicken");
+  assert.deepStrictEqual([e.state, e.servingLabel, e.servings], ["raw", "1 g raw", 175], "saved as raw grams");
+  M.ui.render();
+  assert.ok(/175 g raw \(127 g cooked\)/.test(q('[data-m="entry"][data-id="' + e.id + '"]').textContent), "diary row");
+  click(q('[data-m="add"][data-slot="Dinner"]'));
+  try {
+    await sleep(30);
+    const rr = qa('#m-results [data-m="pick"]').find(r => /Chicken breast, organic/.test(r.textContent));
+    assert.ok(/175 g raw \(127 g cooked\)/.test(rr.textContent), rr.textContent);
+    click(rr);
+    assert.deepStrictEqual([q('[data-m="det-unit"]').value, q('[data-m="det-qty"]').value, $("m-det-amt").textContent], ["g-raw", "175", "175 g raw (127 g cooked)"]);
+  } finally { M.ui.close(); }
+  /* editing the logged entry keeps its own unit */
+  click(q('[data-m="entry"][data-id="' + e.id + '"]'));
+  assert.strictEqual(q('[data-m="det-unit"]').value, "g-raw");
+  M.ui.close();
+  M.log.remove(M.today(), e.id); M.ui.render();
+});
+
+t("round once: rows, the meal, the day and 'left' all add up (BEC-16 / UX2-24)", () => {
+  M.ui.tab = "diary"; M.ui.date = M.today(); M.ui.render();
+  const day = M.addDays(M.today(), -3);
+  M.ui.date = day;
+  /* three rows of 100.4 kcal / 10.4 g protein: each row shows 100 and P 10 */
+  for (let i = 0; i < 3; i++) M.log.add(day, { slot: "Snacks", name: "Round " + i, servings: 1, servingLabel: "1 serving", per: { cal: 100.4, p: 10.4, c: 0, f: 0 } });
+  M.ui.render();
+  try {
+    const rows = qa('.m-slot [data-m="entry"]');
+    assert.deepStrictEqual(rows.map(r => q(".m-kcal", r).textContent), ["100", "100", "100"]);
+    assert.ok(rows.every(r => /P\s10\b/.test(r.textContent)), "each row: P 10");
+    const snacks = qa(".m-slot").find(c => q("h3", c).textContent === "Snacks");
+    assert.strictEqual(q(".m-slot-kcal", snacks).textContent, "300 kcal", "the meal adds up its rows (not 301)");
+    const eaten = qa(".m-dn .v")[0].textContent, target = qa(".m-dn .v")[1].textContent;
+    assert.strictEqual(eaten, "300", "the day adds up its rows");
+    assert.strictEqual(q(".m-ring-n").textContent, String(Number(target) - 300), "left = target − eaten, as shown");
+    const pro = q(".m-bar.pro .m-bar-h .num").textContent;
+    const m = /^(\d+) \/ (\d+) g · (\d+) left$/.exec(pro);
+    assert.ok(m && m[1] === "30" && Number(m[3]) === Number(m[2]) - 30, "protein adds up: " + pro);
+    /* the Train summary row uses the same numbers */
+    M.ui.date = M.today();
+  } finally {
+    M.log.slotEntries(day, "Snacks").forEach(e => M.log.remove(day, e.id));
+    M.ui.date = M.today(); M.ui.render();
+  }
+});
+
+t("round once: the Train summary row shows the same whole numbers as the Diary", () => {
+  const d = M.today();
+  for (let i = 0; i < 3; i++) M.log.add(d, { slot: "Snacks", name: "Round t" + i, servings: 1, servingLabel: "1 serving", per: { cal: 100.4, p: 10.4, c: 0, f: 0 } });
+  try {
+    const box = doc.createElement("div"); box.innerHTML = M.ui.trainSummaryHTML();
+    const cal = M.log.slotEntries(d, "Snacks").filter(e => /^Round t/.test(e.name));
+    assert.strictEqual(cal.length, 3);
+    M.ui.render();
+    const eaten = qa(".m-dn .v")[0].textContent;
+    assert.strictEqual(q(".m-ts-c.cal b", box).textContent, eaten, "Train and Diary agree");
+  } finally {
+    M.log.slotEntries(d, "Snacks").filter(e => /^Round t/.test(e.name)).forEach(e => M.log.remove(d, e.id));
+    M.ui.render();
+  }
 });
 
 t("all user strings escaped", () => {
@@ -1108,9 +1236,9 @@ t("protein left on the Diary bar and the Train summary; More reads 'Fiber, sugar
   const bars = M.ui.bars({ p: 143, c: 10, f: 5 }, { p: 187, c: 200, f: 60 });
   assert.ok(/143 \/ 187 g · 44 left/.test(bars), bars);
   assert.ok(/193 \/ 187 g · 6 over/.test(M.ui.bars({ p: 193 }, { p: 187 })));
-  const t0 = M.log.totals(M.today()), tg = M.person().targets;
+  const t0 = shownDay(M.today()), tg = M.person().targets;
   const h = M.ui.trainSummaryHTML();
-  assert.ok(h.includes("Protein · " + (Math.round(tg.p) - Math.round(t0.p) >= 0 ? (Math.round(tg.p) - Math.round(t0.p)) + " left" : (Math.round(t0.p) - Math.round(tg.p)) + " over")), h);
+  assert.ok(h.includes("Protein · " + (Math.round(tg.p) - t0.p >= 0 ? (Math.round(tg.p) - t0.p) + " left" : (t0.p - Math.round(tg.p)) + " over")), h);
   M.ui.tab = "diary"; M.ui.render();
   assert.ok(/Fiber, sugar, water/.test(q('[data-m="more"]').textContent));
 });

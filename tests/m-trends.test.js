@@ -299,6 +299,33 @@ t("setupCardHTML: friendly form with numbers fields + split options (high protei
   M.setMode("train");
 });
 
+t("C3: first-day setup gives the hand-checked numbers (Mifflin-St Jeor, high protein) and says them in words", () => {
+  const cases = [
+    /* 40-year-old man, 5 ft 11 in, 185 lb, exercise 3 to 5 days a week, lose 1 lb a week:
+       BMR 10×83.91 + 6.25×180.34 − 200 + 5 = 1771.3; × 1.55 = 2745.5; − 500 = 2245 cal.
+       Protein 185 g; fat 25% = 62 g; carbs (2245 − 740 − 558) ÷ 4 = 237 g; fiber 31; water 96 oz */
+    { sex: "m", age: 40, ft: 5, inch: 11, w: 185, act: "moderate", pace: "-1", t: { cal: 2245, p: 185, c: 237, f: 62, fiber: 31, water: 96 }, words: "Targets set: 2,245 cal a day" },
+    /* 35-year-old woman, 5 ft 5 in, 140 lb, light exercise, keep my weight:
+       BMR 635.0 + 1031.9 − 175 − 161 = 1330.9; × 1.375 = 1830 cal. Protein 140; fat 51; carbs 203 */
+    { sex: "f", age: 35, ft: 5, inch: 5, w: 140, act: "light", pace: "0", t: { cal: 1830, p: 140, c: 203, f: 51, fiber: 26, water: 72 }, words: "Targets set: 1,830 cal a day" }
+  ];
+  cases.forEach(k => {
+    M.reset(); M.trends.resetDraft(); toasts.length = 0; M.ui.tab = "diary";
+    show(M.ui.setupCardHTML());
+    click(`[data-m="t-setup-seg"][data-f="sex"][data-v="${k.sex}"]`);
+    show(M.ui.setupCardHTML());
+    change('[data-f="age"]', k.age); change('[data-f="hft"]', k.ft); change('[data-f="hin"]', k.inch); change('[data-f="weight"]', k.w);
+    change('[data-f="activity"]', k.act); change('[data-f="pace"]', k.pace);
+    const pv = document.getElementById("mt-preview").textContent.replace(/\s+/g, " ");
+    assert.ok(pv.indexOf(k.t.cal.toLocaleString("en-US") + "cal a day") >= 0 && pv.indexOf(k.t.p + " gprotein") >= 0 && pv.indexOf(k.t.c + " gcarbs") >= 0 && pv.indexOf(k.t.f + " gfat") >= 0, "preview: " + pv);
+    click('[data-m="t-save-setup"]');
+    const p = M.person("nick");
+    assert.strictEqual(p.split, "highprotein", "high protein is the default");
+    assert.deepStrictEqual(p.targets, k.t);
+    assert.strictEqual(toasts[toasts.length - 1], k.words);
+  });
+});
+
 t("t-save-setup: validates, writes the profile, targets (high protein p ≈ weightLb), today's body entry, setupAt", () => {
   M.reset(); M.trends.resetDraft(); toasts.length = 0;
   show(M.ui.setupCardHTML());
@@ -318,7 +345,7 @@ t("t-save-setup: validates, writes the profile, targets (high protein p ≈ weig
   change('[data-f="pace"]', "-1");
   /* live preview updates as numbers change */
   const pv = document.getElementById("mt-preview").innerHTML;
-  assert.ok(/cal a day/.test(pv) && /<b>185<\/b>/.test(pv), "preview shows protein 185 g: " + pv);
+  assert.ok(/cal a day/.test(pv) && /<b>185 g<\/b><span>protein<\/span>/.test(pv), "preview shows protein 185 g: " + pv);
   const before = renders;
   click('[data-m="t-save-setup"]');
   const p = M.person("nick");
@@ -1204,7 +1231,8 @@ t("BES/SEC sync card: code hidden behind Show, stuck items said once, off-state 
     let r = renders;
     M.trends.patchSync();
     assert.ok(renders > r, "on → off redraws the card");
-    /* setup card on a phone with sync off: Join sync first */
+    /* setup card on a phone with sync off: Join sync first (no note: the "other phone" note opens the code box by itself) */
+    st.note = "";
     M.reset(); M.trends.resetDraft();
     let h = M.ui.setupCardHTML();
     assert.ok(/Used Macros on another phone\? Join sync first\./.test(h) && /data-m="t-setup-join"/.test(h));
@@ -1251,6 +1279,82 @@ t("UX2-21: a daily weigh-in moves the targets only on a change of 2 lb or more; 
   p.activity = "moderate";
   p.targetsManual = true; assert.ok(!M.trends.targetsHold(p), "hand-typed targets are left to the person");
   p.targetsManual = false;
+});
+
+t("C3: the other phone changed the code → this phone's card opens the code box (Join is the next step, not a second Start)", () => {
+  M.ui.tab = "you"; M.reset(); setupNick();
+  const had = M.cloud;
+  try {
+    const st = { on: false, code: "", lastSync: 0, lastError: "", pending: 0, busy: false, note: "Sync is off. The other phone deleted the cloud copy or changed the code. Everything is still on this phone." };
+    M.cloud = { configured: () => true, status: () => Object.assign({}, st), create() { return ""; }, join: () => Promise.resolve({ ok: false }), leave() {}, fmtCode: c => String(c), training: () => null };
+    show(M.ui.views.you());
+    assert.ok(/The other phone deleted the cloud copy or changed the code/.test(app().textContent), "says why");
+    assert.ok(!$("#mt-join").hidden, "code box open");
+    assert.ok(!$('[data-m="t-sync-on"]').classList.contains("primary"), "Start is not the main button");
+    assert.ok($('[data-m="t-sync-joinshow"]').hidden, "no second 'join' button");
+    assert.ok($('[data-m="t-sync-join"]').classList.contains("primary"), "Join is");
+    /* this phone deleted the copy itself: starting again is the next step */
+    st.note = "Your cloud copy is deleted. Everything is still on this phone.";
+    show(M.ui.views.you());
+    assert.ok($("#mt-join").hidden && $('[data-m="t-sync-on"]').classList.contains("primary"), "own delete: Start is the main button");
+    st.note = "";
+    show(M.ui.views.you());
+    assert.ok($("#mt-join").hidden && $('[data-m="t-sync-on"]').classList.contains("primary"), "plain off: Start is the main button");
+  } finally { if (had) M.cloud = had; else delete M.cloud; }
+});
+
+t("C3: joining on a phone where this person has no numbers yet says setup is next; the code box hint fits", async () => {
+  const had = M.cloud;
+  try {
+    const st = { on: false, code: "", lastSync: 0, lastError: "", pending: 0, busy: false, note: "" };
+    M.cloud = { configured: () => true, status: () => Object.assign({}, st), create() { return ""; }, join() { Object.assign(st, { on: true, code: "ABCDEFGHJKLMNPQRSTUV", lastSync: NOW }); return Promise.resolve({ ok: true }); }, leave() { st.on = false; }, fmtCode: c => String(c).replace(/(.{4})(?=.)/g, "$1-"), training: () => null };
+    /* first time in Macros: nothing came over, so setup is still due */
+    M.ui.tab = "you"; M.reset(); M.trends.resetDraft(); toasts.length = 0;
+    show(M.ui.views.you());
+    assert.strictEqual($("#mt-join-code").getAttribute("placeholder"), "Type the code");
+    $("#mt-join-code").value = "ABCD-EFGH-JKLM-NPQR-STUV";
+    await click('[data-m="t-sync-join"]');
+    assert.strictEqual(toasts[toasts.length - 1], "Joined. Now tap Diary to set your targets.");
+    /* numbers already here (or they came over): the usual words */
+    Object.assign(st, { on: false, code: "" });
+    M.reset(); setupNick(); toasts.length = 0;
+    show(M.ui.views.you());
+    $("#mt-join-code").value = "ABCD-EFGH-JKLM-NPQR-STUV";
+    await click('[data-m="t-sync-join"]');
+    assert.strictEqual(toasts[toasts.length - 1], "Joined. Your data is syncing.");
+  } finally { if (had) M.cloud = had; else delete M.cloud; }
+});
+
+t("C3: a weigh-in under 2 lb away never nudges the targets (high-protein carbs round both ways); one reading reads plainly", () => {
+  M.ui.tab = "trends"; M.reset(); M.trends.resetDraft(); closeSheet();
+  [0, -1, -0.5, 0.5].forEach(pace => {
+    M.reset();
+    const p = setupNick({ pace });
+    const t185 = Object.assign({}, p.targets);
+    for (let x = 1831; x <= 1869; x++) assert.ok(M.trends.targetsHold(Object.assign({}, p, { weightLb: x / 10, targets: t185 })), "pace " + pace + ": holds at " + x / 10);
+    [182.6, 182.9, 187.1, 187.4].forEach(x => assert.ok(!M.trends.targetsHold(Object.assign({}, p, { weightLb: x, targets: t185 })), "pace " + pace + ": moves at " + x));
+  });
+  /* the case found in the browser: set up at 185 lb, lose 1 lb a week, first weigh-in 184.6 (used to go 2,245 → 2,243) */
+  M.reset();
+  const p = setupNick({ pace: -1 });
+  const t185 = Object.assign({}, p.targets);
+  assert.strictEqual(t185.cal, 2245);
+  click(mkBtn("t-log-body"));
+  const sb = document.getElementById("sheetB");
+  sb.querySelector("#mt-w").value = "184.6"; sb.querySelector("#mt-rhr").value = "58";
+  click(sb.querySelector('[data-m="t-save-body"]'));
+  assert.strictEqual(p.weightLb, 184.6);
+  assert.deepStrictEqual(p.targets, t185, "0.4 lb: same targets");
+  /* one weigh-in and one heart rate: no "latest 0.0" and no "0 bpm vs average" */
+  show(M.ui.views.trends());
+  const text = app().textContent.replace(/\s+/g, " ");
+  assert.ok(/1 weigh-in/.test(text), "says 1 weigh-in: " + text.slice(0, 200));
+  assert.ok(!/latest 0\.0|latest [+−]0\.0/.test(text), "no latest 0.0");
+  assert.ok(/—Vs average/.test(text), "vs average is a dash with one reading");
+  /* a second weigh-in in the week brings the "latest" line back */
+  M.body.add({ date: M.addDays(M.today(), -2), w: 185.4, pid: "nick" });
+  show(M.ui.views.trends());
+  assert.ok(/latest −0\.4/.test(app().textContent), "latest vs the 7-day average");
 });
 
 t("the weekly rate reads the same in the tile and the goal line (halves round the same way)", () => {
