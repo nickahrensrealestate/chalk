@@ -819,7 +819,9 @@ window.M = window.M || {};
         /* the food's own count servings, raw: "breast (175 g raw)" for "1 breast" / "½ breast" */
         if (states.indexOf("raw") >= 0) {
           (sv.g ? [{ label: sv.qty + " " + sv.unit, g: sv.g }] : []).concat(normAlts(food.alts)).forEach(a => {
-            const p = M.parseServing(a.label), u = String(p.unit || "").replace(/\([^)]*\)/g, " ").replace(/,.*$/, "").trim();
+            const p = M.parseServing(a.label), u0 = String(p.unit || "").replace(/\([^)]*\)/g, " ").replace(/,.*$/, "").trim();
+            /* one piece, one unit: "4 scallops" and "1 scallop" are both "scallop" */
+            const u = u0 && !unitWord(u0) ? singular(lc(u0)) : u0;
             if (!(num(a.g) > 0) || !u || unitWord(u) || /^(servings?|g|grams?|ml)$/i.test(u) || /\d/.test(u)) return;
             const g1 = num(a.g) / (p.qty || 1);
             add(u, "raw", g1, false, u + " (" + r0(g1) + " g " + word + ")", 0.5);
@@ -874,6 +876,8 @@ window.M = window.M || {};
       const cAlts = normAlts(c.alts);
       let serving;
       if (u && WEIGHT_G[u] && sv.g) serving = { qty: sv.qty, unit: sv.unit, g: sv.g };
+      /* a serving by the piece is the same pieces cooked ("4 scallops", "1 fillet"): raw grams × y */
+      else if (!u && sv.g && !/^servings?$/i.test(sv.unit) && num(c.y) > 0) serving = { qty: sv.qty, unit: sv.unit, g: r4(sv.g * num(c.y)) };
       else {
         const vol = cAlts.filter(a => a.g && !isWeightLabel(a.label));
         const a = vol.find(x => Math.abs((M.parseServing(x.label).qty || 1) - 1) < 1e-9) || vol[0] || cAlts[0];
@@ -1017,7 +1021,8 @@ window.M = window.M || {};
       const c = normCode(code); if (!c) return null;
       const mine = M.foods.findByBarcode(c); if (mine) return mine;
       const codes = isObj(M.MS.codes) ? M.MS.codes : {};
-      for (const k of Object.keys(codes)) if (normCode(k) === c) { const f = M.foods.get(codes[k]); if (isObj(f)) return f; }
+      /* a code linked to a built-in food that was replaced (the plain shrimp) finds the new one */
+      for (const k of Object.keys(codes)) if (normCode(k) === c) { const f = M.foods.get(codes[k]) || replacedFood(codes[k]); if (isObj(f)) return f; }
       return genericList().find(f => isObj(f) && Array.isArray(f.barcodes) && f.barcodes.some(b => normCode(b) === c)) || null;
     },
     /* K3: "Pick one of my foods" for a barcode. A saved food gets it as its barcode (a food
@@ -1395,6 +1400,15 @@ window.M = window.M || {};
     if (exact) return alt(exact);
     return alts.length ? alt(alts[0]) : null;
   }
+  /* A built-in food replaced by a different product (M.DB.replaced: the plain shrimp → the
+     Kirkland cooked shrimp): the new food, for recent rows only. Entries keep their own numbers. */
+  function replacedFood(id) {
+    try {
+      const to = id && M.DB && isObj(M.DB.replaced) ? M.DB.replaced[id] : null;
+      const f = isStr(to) ? M.foods.get(to) : null;
+      return isObj(f) ? f : null;
+    } catch (e) { return null; }
+  }
   function liveRecent(o) {
     if (o.mealId) {
       const m = M.meals.get(o.mealId);
@@ -1409,7 +1423,7 @@ window.M = window.M || {};
       return o;
     }
     if (!o.foodId) return bigGuard(o, null);
-    const f = M.foods.get(o.foodId);
+    const f = M.foods.get(o.foodId) || replacedFood(o.foodId);
     if (!isObj(f)) return bigGuard(o, null);
     const al = M.cook.alias(o.foodId), c = M.cook.of(f);
     /* NJ-04: logged as another food (an old generic chicken now read as the Kirkland breast):
@@ -1497,7 +1511,7 @@ window.M = window.M || {};
     };
     const keyOfEntry = e => {
       if (e.mealId && M.meals.get(e.mealId)) return "m:" + e.mealId;
-      if (e.foodId) { const f = M.foods.get(e.foodId); if (isObj(f)) return "f:" + f.id; }
+      if (e.foodId) { const f = M.foods.get(e.foodId) || replacedFood(e.foodId); if (isObj(f)) return "f:" + f.id; }
       return lc(e.name) + "|" + lc(e.brand);
     };
     Object.values(M.MS.days).forEach(d => {
@@ -1831,7 +1845,11 @@ window.M = window.M || {};
     { q: ["cottage cheese"], hit: f => f.staple === true && hasW(f, "cottage") && hasW(f, "cheese") },
     { q: ["jam", "jelly", "strawberry jam", "strawberry jelly"], hit: f => f.staple === true && (hasW(f, "jam") || hasW(f, "jelly") || hasW(f, "smucker")) },
     { q: ["turkey", "turkey slice", "slice turkey", "sliced turkey", "deli turkey", "lunch meat", "turkey lunch meat", "turkey deli meat", "deli meat"],
-      hit: f => f.staple === true && hasW(f, "turkey") && (hasW(f, "slice") || hasW(f, "deli") || hasW(f, "lunch") || hasW(f, "hillshire")) }
+      hit: f => f.staple === true && hasW(f, "turkey") && (hasW(f, "slice") || hasW(f, "deli") || hasW(f, "lunch") || hasW(f, "hillshire")) },
+    /* Nick: shrimp, cod and scallops are the Kirkland frozen bags */
+    { q: ["shrimp", "prawn", "kirkland shrimp", "shrimp tail"], hit: f => f.staple === true && hasW(f, "shrimp") },
+    { q: ["cod", "cod fillet", "fillet cod", "kirkland cod"], hit: f => f.staple === true && hasW(f, "cod") },
+    { q: ["scallop", "sea scallop", "kirkland scallop"], hit: f => f.staple === true && hasW(f, "scallop") }
   ];
   function stapleRule(toks) { const q = toks.join(" "); return STAPLE_WORDS.find(r => r.q.indexOf(q) >= 0) || null; }
   /* a name as plain words, numbers kept ("Chicken & rice" → "chicken and rice") */

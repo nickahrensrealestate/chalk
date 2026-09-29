@@ -21,7 +21,7 @@ const COUNT_UNITS = /^(spray|sprays|packet|packets|serving|servings|piece|pieces
 const BRANDS = ["Kirkland", "Dave's Killer Bread", "Daisy", "Smucker's Natural", "Hillshire Farm"];
 /* everything they buy (Nick's list) — flagged staple: true */
 const STAPLES = ["g_kirkland_organic_chicken", "g_pork_tenderloin", "g_dkb_21_grains", "g_dkb_good_seed", "g_dkb_thin", "g_zucchini", "g_zucchini_raw",
-  "g_broccoli_raw", "g_broccoli_cooked", "g_carrots", "g_carrots_cooked", "g_roma_tomato", "g_onion", "g_sweet_onion", "g_cod", "g_shrimp", "g_scallops",
+  "g_broccoli_raw", "g_broccoli_cooked", "g_carrots", "g_carrots_cooked", "g_roma_tomato", "g_onion", "g_sweet_onion", "g_cod", "g_kirkland_cooked_shrimp", "g_scallops",
   "g_bell_pepper", "g_asparagus", "g_greek_yogurt_2", "g_quinoa", "g_cucumber", "g_banana", "g_blueberries", "g_strawberries", "g_agave", "g_lemon",
   "g_lemon_juice", "g_lime", "g_lime_juice", "g_corn", "g_cottage_cheese_2", "g_jam", "g_deli_turkey", "g_carrots_baby"];
 /* small add-ons meal ideas may use besides staples */
@@ -120,11 +120,11 @@ t("generic: their staples and plain basics are covered", () => {
   [ /* what Nick and Katerina actually buy */
     "g_kirkland_organic_chicken", "g_pork_tenderloin_raw", "g_pork_tenderloin_cooked", "g_dkb_21_grains", "g_dkb_thin", "g_dkb_good_seed",
     "g_zucchini_raw", "g_zucchini", "g_broccoli_raw", "g_broccoli_cooked", "g_carrots", "g_carrots_cooked", "g_roma_tomato", "g_onion", "g_sweet_onion",
-    "g_cod", "g_shrimp", "g_scallops", "g_quinoa", "g_asparagus", "g_greek_yogurt_2", "g_cucumber", "g_lemon", "g_lemon_juice", "g_lime", "g_lime_juice",
+    "g_cod", "g_kirkland_cooked_shrimp", "g_scallops", "g_quinoa", "g_asparagus", "g_greek_yogurt_2", "g_cucumber", "g_lemon", "g_lemon_juice", "g_lime", "g_lime_juice",
     "g_agave", "g_corn", "g_jam", "g_deli_turkey", "g_cottage_cheese_2", "g_cod_cooked", "g_quinoa_cooked", "g_chicken_breast",
     /* plain basics */
     "g_chicken_breast_raw", "g_chicken_breast_cooked", "g_chicken_thigh_raw", "g_ground_beef_93_cooked", "g_ground_turkey_93_raw", "g_salmon_cooked",
-    "g_salmon_raw", "g_tuna_canned_water", "g_shrimp_cooked", "g_egg_large", "g_egg_white", "g_greek_yogurt_0", "g_cottage_cheese_2", "g_whey_protein",
+    "g_salmon_raw", "g_tuna_canned_water", "g_egg_large", "g_egg_white", "g_greek_yogurt_0", "g_cottage_cheese_2", "g_whey_protein",
     "g_white_rice_cooked", "g_brown_rice_cooked", "g_jasmine_rice_cooked", "g_potato_baked", "g_sweet_potato_baked", "g_white_bread", "g_pasta_cooked",
     "g_tortilla_flour", "g_olive_oil", "g_butter", "g_avocado", "g_almonds", "g_peanut_butter", "g_banana", "g_apple", "g_strawberries", "g_blueberries",
     "g_spinach_raw", "g_lettuce_romaine", "g_tomato", "g_bell_pepper", "g_mushrooms", "g_green_beans", "g_milk_2", "g_coffee_black", "g_water",
@@ -184,9 +184,10 @@ t("suggest: 20+ ideas, ≥5 per slot, valid store and shape", () => {
       assert.ok(f && (f.staple === true || ADDONS.indexOf(f.id) >= 0), s.id + ": " + x.name + " is not a food they buy");
     });
     assert.ok(s.items.filter(x => byId.get(x.foodId).staple === true).length >= 2, s.id + " is built from at least 2 foods they buy");
-    /* stores: Kirkland chicken = Costco, pork tenderloin 2-pack = King Soopers, else Either */
+    /* stores: anything Kirkland (the chicken breast; the frozen cod, shrimp and scallops) = Costco,
+       pork tenderloin 2-pack = King Soopers, else Either */
     const ids = s.items.map(x => x.foodId);
-    const want = ids.includes("g_kirkland_organic_chicken") ? "Costco" : ids.includes("g_pork_tenderloin") ? "King Soopers" : "Either";
+    const want = ids.some(id => byId.get(id).brand === "Kirkland") ? "Costco" : ids.includes("g_pork_tenderloin") ? "King Soopers" : "Either";
     assert.strictEqual(s.store, want, s.id + " store");
   });
 });
@@ -228,20 +229,28 @@ t("suggest: items reference generic foods with matching macros (cooked items use
 /* old raw/cooked pairs that became one food (their old ids alias to it) */
 const PAIRS = { chicken_thigh: "raw", ground_beef_80: "raw", ground_beef_85: "raw", ground_beef_90: "raw", ground_beef_93: "raw", ground_turkey_93: "raw", pork_tenderloin: "raw", salmon: "raw", white_rice: "dry", pasta: "dry" };
 /* cook yield y (cooked g per raw/dry g) from each USDA pair: raw ÷ cooked protein (meat, fish), dry ÷ cooked kcal (grains) */
-const Y = { kirkland_organic_chicken: 22.5 / 31, pork_tenderloin: 21 / 26.2, cod: 17.8 / 22.8, shrimp: 20.1 / 24, scallops: 12.1 / 20.5, salmon: 20.4 / 22.1,
+/* Kirkland cod and scallops: the label's protein per 100 g ÷ USDA's cooked protein (cod, dry heat; scallops, steamed) */
+const Y = { kirkland_organic_chicken: 22.5 / 31, pork_tenderloin: 21 / 26.2, cod: 17.65 / 22.8, scallops: 16.81 / 20.5, salmon: 20.4 / 22.1,
   chicken_thigh: 19.7 / 24.8, ground_beef_80: 17.2 / 27, white_rice: 365 / 130, pasta: 371 / 158, quinoa: 368 / 120 };
 /* USDA's own cooked numbers per 100 g (what MyFitnessPal shows): fat melts off, so these are NOT raw ÷ y.
    [kcal, protein, carbs, fat, sodium] */
 const USDA_COOKED = { ground_beef_80: [272, 27, 0, 17.4, 91], ground_beef_85: [256, 27.7, 0, 15.3, 89], ground_beef_90: [230, 28.5, 0, 12, 87],
   ground_beef_93: [209, 28.9, 0, 9.5, 86], ground_turkey_93: [213, 27.1, 0, 11.6, 90], chicken_thigh: [179, 24.8, 0, 8.2, 106], salmon: [206, 22.1, 0, 12.4, 61],
-  pork_tenderloin: [143, 26.2, 0, 3.5, 57], cod: [105, 22.8, 0, 0.9, 78], shrimp: [99, 24, 0.2, 0.3, 111], scallops: [111, 20.5, 5.4, 0.8, 667],
+  pork_tenderloin: [143, 26.2, 0, 3.5, 57],
   white_rice: [130, 2.7, 28.2, 0.3, 1], pasta: [158, 5.8, 31, 0.9, 1], quinoa: [120, 4.4, 21.3, 1.9, 7] };
-t("cooked profile: USDA pairs use USDA's cooked numbers (MyFitnessPal); only the Kirkland label breast is raw ÷ y", () => {
+/* Kirkland label fish: cooked protein per 100 g stays at USDA's cooked fish (what MyFitnessPal shows) */
+const LABEL_COOKED_P = { cod: 22.8, scallops: 20.5 };
+t("cooked profile: USDA pairs use USDA's cooked numbers (MyFitnessPal); Kirkland label foods (breast, cod, scallops) are raw ÷ y", () => {
   const byId = new Map(M.DB.generic.map(f => [f.id, f]));
   const cooks = M.DB.generic.filter(f => f.cook);
+  assert.deepStrictEqual(cooks.filter(f => f.brand === "Kirkland").map(f => f.id).sort(), ["g_cod", "g_kirkland_organic_chicken", "g_scallops"], "Kirkland cook foods");
   cooks.forEach(f => {
     const slug = f.id.slice(2), c = f.cook.per100gCooked;
-    if (slug === "kirkland_organic_chicken") return;
+    if (f.brand === "Kirkland") {
+      NUT.forEach(n => near(c[n], f.per100g[n] / f.cook.y, n === "cal" || n === "sodium" ? 0.51 : 0.051, slug + " cooked " + n + " = label ÷ y"));
+      if (LABEL_COOKED_P[slug]) near(c.p, LABEL_COOKED_P[slug], 0.051, slug + " cooked protein = USDA cooked");
+      return;
+    }
     const u = USDA_COOKED[slug]; assert.ok(u, slug + ": cooked numbers come from a USDA pair");
     [["cal", 0], ["p", 1], ["c", 2], ["f", 3], ["sodium", 4]].forEach(([k, i]) => near(c[k], u[i], k === "cal" || k === "sodium" ? 0.5 : 0.05, slug + " cooked " + k));
   });
@@ -255,7 +264,7 @@ t("cooked profile: USDA pairs use USDA's cooked numbers (MyFitnessPal); only the
 t("cook foods: ONE food with raw (or dry) and cooked profiles; y from the USDA pair", () => {
   const byId = new Map(M.DB.generic.map(f => [f.id, f]));
   const cooks = M.DB.generic.filter(f => f.cook);
-  ["kirkland_organic_chicken", "cod", "shrimp", "scallops", "quinoa"].concat(Object.keys(PAIRS)).forEach(slug => assert.ok(byId.get("g_" + slug) && byId.get("g_" + slug).cook, "cook food g_" + slug));
+  ["kirkland_organic_chicken", "cod", "scallops", "quinoa"].concat(Object.keys(PAIRS)).forEach(slug => assert.ok(byId.get("g_" + slug) && byId.get("g_" + slug).cook, "cook food g_" + slug));
   cooks.forEach(f => {
     const c = f.cook, slug = f.id.slice(2);
     assert.ok(!/\b(raw|cooked|dry|uncooked)\b/i.test(f.name), "plain name: " + f.name);
@@ -273,16 +282,15 @@ t("cook foods: ONE food with raw (or dry) and cooked profiles; y from the USDA p
     assert.deepStrictEqual(M.DB.alias["g_" + slug + "_" + PAIRS[slug]], { id: "g_" + slug, state: "raw" });
     assert.deepStrictEqual(M.DB.alias["g_" + slug + "_cooked"], { id: "g_" + slug, state: "cooked" });
   });
-  /* chicken breast is the Kirkland breast; cooked-only cod / shrimp / quinoa became cook foods */
+  /* chicken breast is the Kirkland breast; cooked-only cod / quinoa became cook foods */
   const K = "g_kirkland_organic_chicken";
   assert.deepStrictEqual(M.DB.alias.g_chicken_breast, { id: K, state: "raw" });
   assert.deepStrictEqual(M.DB.alias.g_chicken_breast_raw, { id: K, state: "raw" });
   assert.deepStrictEqual(M.DB.alias.g_chicken_breast_cooked, { id: K, state: "cooked" });
   assert.deepStrictEqual(M.DB.alias.g_cod_cooked, { id: "g_cod", state: "cooked" });
-  assert.deepStrictEqual(M.DB.alias.g_shrimp_cooked, { id: "g_shrimp", state: "cooked" });
   assert.deepStrictEqual(M.DB.alias.g_quinoa_cooked, { id: "g_quinoa", state: "cooked" });
   assert.ok(!byId.has("g_chicken_breast") && !byId.has("g_cod_cooked") && !byId.has("g_shrimp_cooked") && !byId.has("g_quinoa_cooked"), "merged ids are gone");
-  assert.strictEqual(Object.keys(M.DB.alias).length, 26, "every old id has an alias");
+  assert.strictEqual(Object.keys(M.DB.alias).length, 25, "every old id has an alias");
   Object.values(M.DB.alias).forEach(a => assert.ok(byId.has(a.id) && byId.get(a.id).cook, "alias target " + a.id + " is a cook food"));
   /* numbers in the spec */
   const ck = byId.get(K);
@@ -293,8 +301,12 @@ t("cook foods: ONE food with raw (or dry) and cooked profiles; y from the USDA p
   assert.strictEqual(cups && cups.g, 158, "1 cup cooked rice = 158 g");
   const q = byId.get("g_quinoa");
   assert.strictEqual(q.cook.word, "dry"); assert.strictEqual(q.cook.alts.find(a => a.label === "1 cup").g, 185, "1 cup cooked quinoa = 185 g");
-  const sh = byId.get("g_shrimp");
-  assert.ok(sh.alts.some(a => /^1 large shrimp\b/.test(a.label)) && sh.cook.alts.some(a => /^1 large shrimp\b/.test(a.label)), "shrimp by count, raw and cooked");
+  /* the shrimp they buy comes cooked: a plain food by the piece, not a cook food. The plain raw /
+     cooked shrimp is replaced, not aliased (an alias would stamp raw / cooked on old entries). */
+  const sh = byId.get("g_kirkland_cooked_shrimp");
+  assert.ok(sh && !sh.cook && !byId.has("g_shrimp") && sh.alts.some(a => a.label === "1 shrimp" && a.g === 10.5), "Kirkland cooked shrimp: no raw / cooked, 1 shrimp = 10.5 g");
+  assert.deepStrictEqual(M.DB.replaced, { g_shrimp: "g_kirkland_cooked_shrimp", g_shrimp_cooked: "g_kirkland_cooked_shrimp" });
+  assert.ok(!M.DB.alias.g_shrimp && !M.DB.alias.g_shrimp_cooked, "no shrimp alias");
 });
 
 t("chicken breast = the Kirkland organic breast: 1 breast = 175 g raw, alwaysRaw, label numbers", () => {
@@ -323,7 +335,7 @@ t("suggest: cook items say which weight they are and carry y; chicken is always 
     assert.ok(x.state === "raw" || x.state === "cooked", s.id + " " + x.name + " state");
     assert.deepStrictEqual(x.cook, { y: f.cook.y, word: f.cook.word }, s.id + " cook");
     const word = x.state === "cooked" ? "cooked" : f.cook.word;
-    assert.ok(new RegExp("^[\\d¼½¾ .]+ (oz|cup|cups|breast) (" + word + "|\\(\\d+ g " + word + "\\))$").test(x.servingLabel), s.id + " label " + x.servingLabel);
+    assert.ok(new RegExp("^[\\d¼½¾ .]+ (oz|cup|cups|breast|fillet|scallops) (" + word + "|\\(\\d+ g " + word + "\\))$").test(x.servingLabel), s.id + " label " + x.servingLabel);
     if (f.id === "g_kirkland_organic_chicken") {
       assert.strictEqual(x.state, "raw", s.id + ": chicken breast is never cooked grams");
       assert.ok((x.g === 175 && x.servingLabel === "1 breast (175 g raw)") || (x.g === 88 && x.servingLabel === "½ breast (88 g raw)"), s.id + " chicken " + x.servingLabel);
@@ -345,9 +357,11 @@ t("staples: every food they buy is flagged staple: true, and nothing else", () =
 const LABEL = { /* id: [serving g, kcal, protein, carbs, fat, fiber, sugar, sodium mg] per the label serving */
   g_cottage_cheese_2: [113, 90, 13, 5, 2.5, 0, 4, 350], g_jam: [19, 40, 0, 10, 0, 0, 10, 0], g_deli_turkey: [56, 60, 10, 2, 1.5, 0, 0, 490],
   g_dkb_21_grains: [45, 110, 6, 22, 1.5, 4, 4, 170] /* the bag sold now (C7: Kroger label + OFF front photo) */, g_dkb_good_seed: [45, 120, 5, 23, 3, 3, 5, 160],
-  g_dkb_thin: [28, 60, 3, 14, 1, 3, 3, 105] /* C7: King Soopers label for this loaf */ };
+  g_dkb_thin: [28, 60, 3, 14, 1, 3, 3, 105] /* C7: King Soopers label for this loaf */,
+  /* Kirkland Signature frozen seafood (Costco), checked on Open Food Facts by barcode */
+  g_cod: [170, 120, 30, 0, 0, 0, 0, 190], g_scallops: [113, 100, 19, 3, 1, 0, 0, 180], g_kirkland_cooked_shrimp: [84, 80, 20, 0, 0, 0, 0, 230] };
 const USDA = { /* id: per 100 g [kcal, protein, carbs, fat, fiber, sugar, sodium mg] */
-  g_pork_tenderloin: [109, 21, 0, 2.2, 0, 0, 53], g_cod: [82, 17.8, 0, 0.7, 0, 0, 54], g_shrimp: [85, 20.1, 0, 0.5, 0, 0, 119], g_scallops: [69, 12.1, 3.2, 0.5, 0, 0, 392],
+  g_pork_tenderloin: [109, 21, 0, 2.2, 0, 0, 53],
   g_quinoa: [368, 14.1, 64.2, 6.1, 7, 0, 5], g_asparagus: [20, 2.2, 3.9, 0.1, 2.1, 1.9, 2], g_bell_pepper: [26, 1, 6, 0.3, 2.1, 4.2, 4],
   g_greek_yogurt_2: [73, 9.9, 3.9, 1.9, 0, 3.6, 34], g_cucumber: [15, 0.7, 3.6, 0.1, 0.5, 1.7, 2], g_zucchini_raw: [17, 1.2, 3.1, 0.3, 1, 2.5, 8],
   g_zucchini: [15, 1.1, 2.7, 0.4, 1, 1.7, 3], g_banana: [89, 1.1, 22.8, 0.3, 2.6, 12.2, 1], g_blueberries: [57, 0.7, 14.5, 0.3, 2.4, 10, 1],
@@ -435,7 +449,7 @@ t("suggest: only foods they eat — no other cheese, oats, cereal, shakes, bars,
     });
   });
   const ids = new Set(); M.DB.suggest.forEach(s => s.items.forEach(x => ids.add(x.foodId)));
-  ["g_kirkland_organic_chicken", "g_pork_tenderloin", "g_cod", "g_shrimp", "g_scallops", "g_quinoa", "g_greek_yogurt_2", "g_cottage_cheese_2", "g_deli_turkey",
+  ["g_kirkland_organic_chicken", "g_pork_tenderloin", "g_cod", "g_kirkland_cooked_shrimp", "g_scallops", "g_quinoa", "g_greek_yogurt_2", "g_cottage_cheese_2", "g_deli_turkey",
     "g_dkb_21_grains", "g_jam", "g_corn", "g_agave", "g_asparagus", "g_bell_pepper", "g_cucumber"].forEach(id => assert.ok(ids.has(id), "some idea uses " + id));
   assert.ok(M.DB.suggest.length >= 12, "12+ ideas");
 });
@@ -469,8 +483,11 @@ const GTIN_OK = c => { const d = c.split("").map(Number); const sum = d.slice(0,
 const CODES = { /* each checked on Open Food Facts (world.openfoodfacts.org/api/v2/product/<code>.json) */
   g_cottage_cheese_2: ["073420516208", "073420524203"], g_jam: ["051500141304", "051500616123"],
   g_deli_turkey: ["044500966466", "044500976502", "044500201994"],
-  g_dkb_21_grains: ["013764027053"], g_dkb_thin: ["013764027138"], g_dkb_good_seed: ["013764027039"] };
-t("barcodes (K3): Daisy, Smucker's, Hillshire and Dave's carry their package codes", () => {
+  g_dkb_21_grains: ["013764027053"], g_dkb_thin: ["013764027138"], g_dkb_good_seed: ["013764027039"],
+  /* Kirkland frozen seafood: every code whose label matches (the 31–40 cooked shrimp bag only) */
+  g_cod: ["096619173808", "096619065943", "196633883797", "096619065950"], g_scallops: ["196633912749", "096619051724", "096619777327"],
+  g_kirkland_cooked_shrimp: ["096619140251", "096619140633"] };
+t("barcodes (K3): Daisy, Smucker's, Hillshire, Dave's and the Kirkland seafood carry their package codes", () => {
   const byId = new Map(M.DB.generic.map(f => [f.id, f]));
   Object.keys(CODES).forEach(id => assert.deepStrictEqual(byId.get(id).barcodes, CODES[id], id + " barcodes"));
   const seen = new Set();
@@ -484,7 +501,7 @@ t("barcodes (K3): Daisy, Smucker's, Hillshire and Dave's carry their package cod
       assert.ok(!seen.has(c), "code on two foods: " + c); seen.add(c);
     });
   });
-  assert.strictEqual(seen.size, 10, "10 codes");
+  assert.strictEqual(seen.size, 19, "19 codes");
   /* the Kirkland breast is sold by weight (a price code), so it has none */
   assert.strictEqual(byId.get("g_kirkland_organic_chicken").barcodes, undefined);
 });
@@ -536,16 +553,25 @@ t("search (m-core + m-data): the new words list the right food first", () => {
 });
 
 /* queued: scallops and carrots by the piece; baby carrots are their own food */
-t("by the piece: 1 large sea scallop (30 g raw), carrots small / medium / large, baby carrots", () => {
+t("by the piece: Kirkland sea scallops (4 = 113 g raw), carrots small / medium / large, baby carrots", () => {
   const byId = new Map(M.DB.generic.map(f => [f.id, f]));
   const sc = byId.get("g_scallops");
-  /* C7: sea scallops sold near them are 10–20 or 15–20 per pound (26–30 g each), not
-     USDA's mixed-species "2 large = 30 g"; the label says it is a sea scallop */
-  assert.ok(sc.alts.some(a => a.label === "1 large sea scallop" && a.g === 30), "1 large sea scallop = 30 g raw");
-  assert.ok(!sc.alts.concat(sc.cook.alts).some(a => a.label === "1 large scallop"), "old unclear label gone");
-  assert.strictEqual(sc.alts.findIndex(a => /scallop/.test(a.label)), 0, "the piece is the first choice after 4 oz");
-  const ca = sc.cook.alts.find(a => a.label === "1 large sea scallop");
-  assert.ok(ca && Math.abs(ca.g - 30 * sc.cook.y) < 0.051, "cooked scallop = 30 g × y (" + (ca && ca.g) + ")");
+  /* Kirkland wild sea scallops label: 4 scallops (113 g), so one is 28.25 g raw and
+     "6 scallops" is 6 × 1 scallop. The editor shows one "scallop" unit, not two. */
+  assert.deepStrictEqual([sc.name, sc.brand, sc.serving], ["Scallops, wild sea", "Kirkland", { qty: 4, unit: "scallops", g: 113 }], "label serving: 4 scallops (113 g)");
+  assert.ok(!sc.alts.concat(sc.cook.alts).some(a => /large (sea )?scallop/.test(a.label)), "old sizes gone");
+  assert.deepStrictEqual(sc.alts[0], { label: "1 scallop", g: 28.25 }, "1 scallop = 113 g ÷ 4");
+  const C = core();
+  if (C) {
+    const pieces = C.cook.unitsFor(C.foods.get("g_scallops"), "us").filter(o => /scallop/.test(o.unit));
+    assert.strictEqual(pieces.map(o => o.key + " " + o.g).join(" | "), "scallop-raw 28.25", "one scallop unit");
+  }
+  const ca = sc.cook.alts.find(a => a.label === "1 scallop");
+  assert.ok(ca && Math.abs(ca.g - 28.25 * sc.cook.y) < 0.051, "cooked scallop = 28.25 g × y (" + (ca && ca.g) + ")");
+  const cod = byId.get("g_cod");
+  assert.deepStrictEqual([cod.name, cod.brand, cod.serving], ["Cod, wild Alaska Pacific", "Kirkland", { qty: 1, unit: "fillet", g: 170 }], "label serving: 1 portion (170 g)");
+  const cf = cod.cook.alts.find(a => a.label === "1 fillet");
+  assert.ok(cf && Math.abs(cf.g - 170 * cod.cook.y) < 0.051, "cooked fillet = 170 g × y (" + (cf && cf.g) + ")");
   const c = byId.get("g_carrots");
   assert.deepStrictEqual(c.serving, { qty: 1, unit: "medium", g: 61 }, "1 medium carrot = 61 g (USDA)");
   assert.ok(c.alts.some(a => a.label === "1 small" && a.g === 50) && c.alts.some(a => a.label === "1 large" && a.g === 72), "small 50 g, large 72 g");
@@ -581,9 +607,10 @@ t("no restaurant entree: Chicken Caesar salad is gone and not aliased to another
 
 /* ---- old ids in real diaries (live d757f4b storage format) ---- */
 /* Every generic id that was live (d757f4b) is still a food or an alias, except
-   g_cottage_cheese_4 and g_chicken_caesar_salad, which were removed on purpose:
-   their entries keep their own numbers. */
-const LIVE_IDS_GONE = ["g_chicken_breast", "g_chicken_breast_raw", "g_chicken_breast_cooked", "g_cod_cooked", "g_shrimp_cooked", "g_quinoa_cooked"];
+   g_cottage_cheese_4 and g_chicken_caesar_salad, which were removed on purpose, and
+   the plain shrimp (g_shrimp, g_shrimp_cooked), replaced by the Kirkland cooked shrimp
+   (M.DB.replaced): their entries keep their own numbers. */
+const LIVE_IDS_GONE = ["g_chicken_breast", "g_chicken_breast_raw", "g_chicken_breast_cooked", "g_cod_cooked", "g_quinoa_cooked"];
 t("old ids: a live-format diary and saved meal load, resolve and keep their own numbers", () => {
   const ctx = { console, Date, Math, JSON, setTimeout, clearTimeout, Intl };
   ctx.window = ctx; ctx.self = ctx;
@@ -621,6 +648,7 @@ t("old ids: a live-format diary and saved meal load, resolve and keep their own 
   assert.strictEqual(C.cook.alias("g_chicken_breast_cooked").state, "cooked");
   assert.strictEqual(C.foods.get("g_cottage_cheese_4"), null, "removed id: no food (the entry keeps its own numbers)");
   assert.strictEqual(C.foods.get("g_chicken_caesar_salad"), null, "removed Caesar entree: no food (the entry keeps its own numbers)");
+  assert.strictEqual(C.foods.get("g_shrimp_cooked"), null, "replaced shrimp: no food by the old id (the entry keeps its own numbers)");
   /* the day's entries keep exactly the numbers they were saved with */
   const d = C.dayOf(today, "nick");
   assert.ok(d && d.entries.length === saved.length, "all " + saved.length + " entries load");
@@ -647,6 +675,9 @@ t("old ids: a live-format diary and saved meal load, resolve and keep their own 
     assert.ok(cs && cs.per.cal === 520 && cs.name === "Chicken Caesar salad, entree", "gone Caesar entree: recent keeps its snapshot");
     const ch = rs.filter(r => r.foodId === "g_kirkland_organic_chicken");
     assert.ok(ch.length >= 1 && ch.every(r => r.state === "raw"), "old chicken recents come back as the Kirkland breast, raw");
+    /* replaced shrimp: the recent row is the Kirkland cooked shrimp, at its own serving */
+    const sr = rs.filter(r => /shrimp/i.test(r.name));
+    assert.ok(sr.length === 1 && sr[0].foodId === "g_kirkland_cooked_shrimp" && sr[0].name === "Shrimp, cooked, tail-on" && sr[0].servings === 1 && sr[0].g === 84 && sr[0].per.cal === 80 && !sr[0].state && !sr[0].cook, "old shrimp recent → the Kirkland shrimp: " + JSON.stringify(sr));
     rs.forEach(r => NUT.forEach(k => assert.ok(isNum(r.per[k]), "recent " + r.name + " " + k)));
   }
 });
@@ -671,44 +702,58 @@ function core(store) {
 const OZ_G = 28.349523125;
 const localToday = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 
-/* MF-04: the old "1 large shrimp" (18 g raw) was jumbo size. Sizes by count per pound. */
-t("MF-04 shrimp sizes: large (31–40/lb) 10 g raw first, jumbo (21–25/lb) 18 g, medium (41–50/lb) 8 g; cooked = raw × y", () => {
-  const sh = M.DB.generic.find(f => f.id === "g_shrimp"), y = sh.cook.y;
-  const LARGE = "1 large shrimp, 31–40 per lb", JUMBO = "1 jumbo shrimp, 21–25 per lb", MED = "1 medium shrimp, 41–50 per lb";
-  const raw = l => (sh.alts.find(a => a.label === l) || {}).g, ck = l => (sh.cook.alts.find(a => a.label === l) || {}).g;
-  assert.deepStrictEqual([raw(LARGE), raw(JUMBO), raw(MED)], [10, 18, 8], "raw grams");
-  near(ck(LARGE), 10 * y, 0.051, "cooked large = 10 g × y"); near(ck(MED), 8 * y, 0.051, "cooked medium = 8 g × y");
-  assert.strictEqual(ck(JUMBO), 15, "cooked jumbo = 15 g (FNDDS large/jumbo)");
-  /* medium < large < jumbo, raw and cooked */
-  assert.ok(raw(MED) < raw(LARGE) && raw(LARGE) < raw(JUMBO) && ck(MED) < ck(LARGE) && ck(LARGE) < ck(JUMBO), "sizes in order");
-  /* "12 shrimp" in Describe takes the first count size: large */
-  assert.strictEqual(sh.alts[0].label, LARGE, "large is the first size (raw)"); assert.strictEqual(sh.cook.alts[0].label, LARGE, "large is the first size (cooked)");
-  /* the old label is gone: nothing reads "1 large shrimp" = 18 g any more */
-  assert.ok(!sh.alts.concat(sh.cook.alts).some(a => a.label === "1 large shrimp" || a.label === "1 medium shrimp"), "old labels renamed");
+/* Nick: their shrimp is the Kirkland cooked tail-on bag (31–40 per lb). It replaced the plain
+   raw / cooked shrimp and its sizes (MF-04). */
+t("Kirkland cooked shrimp: 8 shrimp (84 g) = 80 cal, 1 shrimp = 10.5 g, no raw / cooked, one size", () => {
+  const sh = M.DB.generic.find(f => f.id === "g_kirkland_cooked_shrimp");
+  assert.deepStrictEqual([sh.name, sh.brand, sh.staple, sh.cook, sh.alwaysRaw], ["Shrimp, cooked, tail-on", "Kirkland", true, undefined, undefined]);
+  assert.deepStrictEqual(sh.serving, { qty: 8, unit: "shrimp", g: 84 }, "label serving: 8 shrimp (84 g)");
+  assert.deepStrictEqual(sh.alts[0], { label: "1 shrimp", g: 10.5 }, "1 shrimp = 84 g ÷ 8");
+  assert.ok(!sh.alts.some(a => /large|jumbo|medium/.test(a.label)), "one size: the bag's");
+  assert.deepStrictEqual(M.DB.generic.filter(f => /shrimp/i.test(f.name)).map(f => f.id), ["g_kirkland_cooked_shrimp"], "the only shrimp built in");
+  /* 12 shrimp = 126 g = 120 cal, 30 g protein */
+  near(sh.per100g.cal * 126 / 100, 120, 0.5, "12 shrimp cal"); near(sh.per100g.p * 126 / 100, 30, 0.05, "12 shrimp protein");
 });
-t("MF-04 shrimp: the editor shows large / jumbo / medium, and old '1 large shrimp' (18 g) entries and recents keep their numbers", () => {
+t("Kirkland cooked shrimp: old raw / cooked shrimp entries keep their numbers; their recent row becomes the Kirkland shrimp", () => {
   const C = core(); if (!C) return;
-  const f = C.foods.get("g_shrimp");
-  const us = C.cook.unitsFor(f, "us"), u = k => us.find(x => x.key === k);
-  assert.ok(u("large shrimp-raw") && Math.abs(u("large shrimp-raw").g - 10) < 1e-6 && /^large shrimp\b/.test(u("large shrimp-raw").label) && /\b10 g\b/.test(u("large shrimp-raw").label), "large in the editor");
-  assert.ok(u("jumbo shrimp-raw") && Math.abs(u("jumbo shrimp-raw").g - 18) < 1e-6, "jumbo in the editor");
-  assert.ok(u("medium shrimp-raw") && Math.abs(u("medium shrimp-raw").g - 8) < 1e-6, "medium in the editor");
-  /* each new label reads as 1 of that size */
-  f.alts.concat(f.cook.alts).filter(a => /shrimp/.test(a.label)).forEach(a => assert.strictEqual(C.parseServing(a.label).qty, 1, a.label));
-  /* old entries as v16/v17 saved them: Describe ("1 large shrimp (18 g)"), the editor ("… (18 g raw)"), medium (12 g) */
   const today = C.today();
-  [["1 large shrimp (18 g)", 12, 18], ["1 large shrimp (18 g raw)", 10, 18], ["1 medium shrimp (12 g)", 10, 12], ["1 large shrimp (15 g)", 6, 15, "cooked"]].forEach(([label, n, g, state]) => {
+  const P = g => ({ cal: 0.85 * g, p: 0.201 * g, c: 0, f: 0.005 * g, fiber: 0, sugar: 0, sodium: 1.19 * g });
+  /* as v16–v18 saved them: raw shrimp with its y, and the old cooked id with no state */
+  [["1 large shrimp (18 g)", 12, 18, "g_shrimp", true], ["1 large shrimp, 31–40 per lb (10 g raw)", 10, 10, "g_shrimp", true], ["3 oz (85 g)", 1, 85, "g_shrimp_cooked", false]].forEach(([label, n, g, id, raw]) => {
     C.reset();
-    const per = C.cook.perFor(f, state || "raw", g);
-    const e = C.log.add(today, { slot: "Lunch", name: "Shrimp", brand: "", foodId: "g_shrimp", servingLabel: label, servings: n, g, per, state: state || "raw", cook: { y: f.cook.y, word: "raw" } });
+    const per = P(g);
+    const e = C.log.add(today, Object.assign({ slot: "Lunch", name: "Shrimp", brand: "", foodId: id, servingLabel: label, servings: n, g, per }, raw ? { state: "raw", cook: { y: 0.8375, word: "raw" } } : {}));
     const d = C.dayOf(today, "nick"), kept = d.entries.find(x => x.id === e.id);
-    assert.ok(kept && kept.servingLabel === label && kept.servings === n && kept.per.cal === per.cal, label + ": entry kept");
+    assert.ok(kept && kept.foodId === id && kept.servingLabel === label && kept.servings === n && kept.per.cal === per.cal, label + ": entry kept as saved");
+    assert.strictEqual(kept.state, raw ? "raw" : undefined, label + ": state kept");
     near(C.log.totals(today, "nick").cal, per.cal * n, 0.5, label + ": day total unchanged");
-    const r = C.recents("nick", 30).find(x => x.foodId === "g_shrimp");
-    assert.ok(r, label + ": recent row");
-    near(r.g * r.servings, g * n, 0.01, label + ": recent keeps its grams");
-    near(r.per.cal * r.servings, per.cal * n, 0.5, label + ": recent keeps its calories");
+    const rs = C.recents("nick", 30).filter(x => /shrimp/i.test(x.name));
+    assert.ok(rs.length === 1 && rs[0].foodId === "g_kirkland_cooked_shrimp" && rs[0].servingLabel === "8 shrimp (84 g)" && rs[0].servings === 1 && rs[0].per.cal === 80 && !rs[0].state && !rs[0].cook, label + ": recent → " + JSON.stringify(rs));
+    /* search: one shrimp row, the Kirkland bag */
+    const hits = C.search("shrimp", { pid: "nick" }).filter(x => /shrimp/i.test(x.name));
+    assert.ok(hits.length >= 1 && hits[0].foodId === "g_kirkland_cooked_shrimp" && hits.every(x => x.foodId === "g_kirkland_cooked_shrimp"), label + ": search → " + hits.map(x => x.kind + " " + x.name + " " + x.foodId).join(" | "));
   });
+  /* the plain word is the bag they buy, above a saved meal that shares the word (like turkey / chicken) */
+  C.reset();
+  const item = { name: "Food", servings: 1, servingLabel: "1 serving", per: { cal: 300, p: 25, c: 20, f: 10, fiber: 0, sugar: 0, sodium: 0 } };
+  ["Shrimp tacos", "Cod bowl", "Scallop pasta"].forEach(name => C.meals.add({ name, slot: "Dinner", items: [item] }));
+  [["shrimp", "g_kirkland_cooked_shrimp"], ["prawns", "g_kirkland_cooked_shrimp"], ["cod", "g_cod"], ["cod fillet", "g_cod"], ["scallops", "g_scallops"], ["sea scallops", "g_scallops"]].forEach(([q, id]) => {
+    const r = C.search(q, { pid: "nick" });
+    assert.strictEqual(r[0] && r[0].foodId, id, "'" + q + "' → " + r.slice(0, 3).map(x => x.kind + " " + x.name).join(" | "));
+  });
+  assert.ok(C.search("shrimp tacos", { pid: "nick" })[0].kind === "meal", "their meal's whole name still finds the meal first");
+  C.reset();
+  /* a barcode linked on v18 to the plain shrimp finds the Kirkland bag */
+  C.MS.codes = { "012345678905": "g_shrimp" };
+  const byc = C.foods.byCode("012345678905");
+  assert.ok(byc && byc.id === "g_kirkland_cooked_shrimp", "old code link → " + (byc && byc.id));
+  delete C.MS.codes["012345678905"];
+  /* new shrimp logged after the old: still one recent row, the last amount */
+  C.log.add(today, Object.assign({ slot: "Lunch", name: "Shrimp", brand: "", foodId: "g_shrimp", servingLabel: "1 oz raw", servings: 6, g: 28.35, per: P(28.35) }, { state: "raw", cook: { y: 0.8375, word: "raw" }, at: Date.now() - 60000 }));
+  const f = C.foods.get("g_kirkland_cooked_shrimp");
+  C.log.add(today, { slot: "Dinner", name: f.name, brand: f.brand, foodId: f.id, servingLabel: "1 shrimp (10.5 g)", servings: 12, g: 10.5, per: C.foodMath.fromPer100(f.per100g, 10.5) });
+  const rs = C.recents("nick", 30).filter(x => /shrimp/i.test(x.name));
+  assert.ok(rs.length === 1 && rs[0].servings === 12 && Math.abs(rs[0].g * rs[0].servings - 126) < 0.01, "one row, last amount: " + JSON.stringify(rs));
 });
 
 /* MF-06: oz-served cook foods at the editor's ounce (28.3495 g), so a row and the editor agree */
@@ -722,7 +767,8 @@ t("MF-06 oz servings: cook foods and meat store exact ounces (4 oz = 113.4 g, 2 
     if (f.serving.unit === "oz") { n++; near(f.serving.g, f.serving.qty * OZ_G, 0.006, f.id + " serving " + f.serving.qty + " oz"); }
     f.alts.concat(f.cook ? f.cook.alts : []).forEach(a => { const m = OZL.exec(a.label); if (m) near(a.g, +m[1] * OZ_G, 0.006, f.id + " " + a.label); });
   });
-  assert.ok(n >= 12, "oz-served cook foods checked: " + n);
+  /* 9: the Kirkland cod and scallops come by the fillet and the scallop (their labels) */
+  assert.ok(n >= 9, "oz-served cook foods checked: " + n);
   /* plain cooked meats keep whole grams in their rows: "4 oz (113 g)" */
   ["g_tilapia_cooked", "g_pork_chop_cooked", "g_turkey_breast_cooked"].forEach(id => assert.strictEqual(byId.get(id).serving.g, 113, id));
   ["g_sirloin_cooked", "g_ribeye_cooked", "g_sockeye_salmon_cooked"].forEach(id => assert.strictEqual(byId.get(id).serving.g, 170, id));

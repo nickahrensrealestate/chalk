@@ -638,7 +638,11 @@ window.M = window.M || {};
       const st = src.state === "raw" || src.state === "cooked" ? src.state : null, ug = st ? M.cook.unitGrams(src) : 0;
       if (!(ug > 0) || !isObj(src.per) || !(num(src.per.cal) > 0)) return null;
       const fp = M.cook.perFor(food, st, ug);
-      if (fp && Math.abs(num(fp.cal) - num(src.per.cal)) <= Math.max(1, num(fp.cal) * 0.01)) return null;
+      /* per 100 g, so a small unit ("1 g raw", "1 oz") can't hide a change; and the same yield
+         (an old scallop saved at y 0.59 is its own, even where a unit's calories look close) */
+      const ownY = isObj(src.cook) && num(src.cook.y) > 0 ? num(src.cook.y) : 0;
+      const k100 = fp ? Math.abs(num(fp.cal) - num(src.per.cal)) * 100 / ug : Infinity;
+      if (fp && k100 <= Math.max(0.5, num(fp.cal) * 100 / ug * 0.01) && (!ownY || Math.abs(ownY - num(c.y)) <= 0.005)) return null;
       const y = isObj(src.cook) && num(src.cook.y) > 0 ? num(src.cook.y) : num(c.y); if (!(y > 0)) return null;
       const cook = { y, word: (isObj(src.cook) && src.cook.word) || c.word || "raw" };
       const p = {}, o = {}; NUT.forEach(k => { p[k] = num(src.per[k]) * 100 / ug; o[k] = st === "raw" ? p[k] / y : p[k] * y; });
@@ -790,6 +794,8 @@ window.M = window.M || {};
       } else if (ck.food) {
         const sv = ck.food.serving || {}, u = M.cook.unitWord(sv.unit);
         if (!key && u && !M.cook.UNIT_G[u] && has(u + "-raw")) key = u + "-raw";   /* rice: "1/4 cup dry" */
+        /* a food sold by the piece opens in its piece: the Kirkland cod "1 fillet", "4 scallops" */
+        if (!key && !u) { const pu = sing(lc(String(sv.unit || ""))), po = pu && ck.opts.find(x => !x.vol && !M.cook.UNIT_G[x.unit] && x.state === "raw" && sing(lc(x.unit)) === pu); if (po) key = po.key; }
         amt = { g: num(sv.g) > 0 ? num(sv.g) : M.cook.portionG(units()), state: "raw" };
       }
       if (!key) key = has(fam + "-" + (amt ? amt.state : "raw")) ? fam + "-" + (amt ? amt.state : "raw") : ck.opts[0].key;
@@ -1829,7 +1835,7 @@ window.M = window.M || {};
   /* items = { list:[{name, servingLabel, g, per, servings, source}], slot, date, onPick, note } */
   /* The whole amount of an item, servings folded in: "2 slices (100 g)", "1.5 cups (360 g)", "150 g".
      Cook foods read raw first ("6 oz raw (4.4 oz cooked)"). Plain text (escape it). */
-  const NOPLURAL = /^(g|grams?|kg|mg|oz|lbs?|ml|l|tbsp|tsp|fl|small|medium|large|each|whole)$/i;
+  const NOPLURAL = /^(g|grams?|kg|mg|oz|lbs?|ml|l|tbsp|tsp|fl|small|medium|large|each|whole|shrimp|fish|cod)$/i;
   function plural(unit) {
     const parts = String(unit).split(","), words = parts[0].trim().split(/\s+/), last = words[words.length - 1] || "";
     if (!last || NOPLURAL.test(last) || /[^a-z]/i.test(last) || /s$/i.test(last)) return unit;

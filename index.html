@@ -14,8 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=18">
-<link rel="stylesheet" href="m-trends.css?v=18">
+<link rel="stylesheet" href="m.css?v=19">
+<link rel="stylesheet" href="m-trends.css?v=19">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
@@ -380,12 +380,12 @@ body.upd-on #app.wrap{padding-bottom:calc(var(--upd-h,46px) + 36px)}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=18"></script>
-<script src="m-data.js?v=18"></script>
-<script src="m-food.js?v=18"></script>
-<script src="m-ui.js?v=18"></script>
-<script src="m-trends.js?v=18"></script>
-<script src="m-sync.js?v=18"></script>
+<script src="m-core.js?v=19"></script>
+<script src="m-data.js?v=19"></script>
+<script src="m-food.js?v=19"></script>
+<script src="m-ui.js?v=19"></script>
+<script src="m-trends.js?v=19"></script>
+<script src="m-sync.js?v=19"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -2106,7 +2106,7 @@ if(S.active) wakeOn();
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=18, BOOT_AT=Date.now();
+const APP_VERSION=19, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
   /* K5: Macros setup or You has typed numbers that aren't saved yet */

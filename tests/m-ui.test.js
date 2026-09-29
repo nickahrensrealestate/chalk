@@ -1682,6 +1682,29 @@ t("F2a NJ-01: editing an old entry never re-prices it with the food's newer numb
   } finally { M.log.remove(M.today(), e.id); if (M.ui.sheetOpen()) M.ui.close(); M.ui.render(); }
 });
 
+t("v19 NJ-01: old cod in 1 g units and old scallops at the old yield keep their own numbers in the editor (the Kirkland labels changed them)", () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const cod = M.foods.get("g_cod"), sc = M.foods.get("g_scallops");
+  if (!cod || cod.brand !== "Kirkland" || !sc) { console.log("       (skipped: no Kirkland cod / scallops)"); return; }
+  /* v18: 170 g raw cod at USDA's 82 cal / 100 g, as 170 × "1 g raw" (a 1 g unit hides a 0.1 cal change) */
+  const e1 = M.log.add(M.today(), { slot: "Snacks", name: "Cod", foodId: "g_cod", servings: 170, servingLabel: "1 g raw", g: 1, per: { cal: 0.82, p: 0.178, c: 0, f: 0.0067, fiber: 0, sugar: 0, sodium: 0.54 }, state: "raw", cook: { y: 0.7807, word: "raw" } });
+  /* v18: 4 oz cooked scallops at USDA's 111 cal / 100 g cooked and y 0.5902 */
+  const e2 = M.log.add(M.today(), { slot: "Snacks", name: "Scallops", foodId: "g_scallops", servings: 4, servingLabel: "1 oz cooked", g: OZ, per: { cal: 31.4679, p: 5.8234, c: 1.5309, f: 0.2268, fiber: 0, sugar: 0, sodium: 189.0918 }, state: "cooked", cook: { y: 0.5902, word: "raw" } });
+  const cal = () => Number($("m-live").querySelector(".v").textContent.replace(/[^\d]/g, ""));
+  try {
+    M.ui.render(); click(q('[data-m="entry"][data-id="' + e1.id + '"]'));
+    assert.strictEqual(cal(), 139);
+    input(q('[data-m="det-qty"]'), "200");
+    assert.strictEqual(cal(), 164, "200 g at the entry's own 0.82 cal / g (not the Kirkland label's 141)");
+    M.ui.close(); M.ui.render();
+    click(q('[data-m="entry"][data-id="' + e2.id + '"]'));
+    assert.strictEqual(cal(), 126);
+    input(q('[data-m="det-qty"]'), "5");
+    assert.strictEqual(cal(), 157, "5 oz cooked at the entry's own numbers (not 153)");
+    assert.ok(/8\.5 oz raw/.test($("m-det-amt").textContent), "raw weight from the entry's own yield: " + $("m-det-amt").textContent);
+  } finally { M.log.remove(M.today(), e1.id); M.log.remove(M.today(), e2.id); if (M.ui.sheetOpen()) M.ui.close(); M.ui.render(); }
+});
+
 t("F2a MF-03 (decision 7, L1): Log food opens the serving editor at the amount typed when the food has that unit", async () => {
   if (M.ui.sheetOpen()) M.ui.close();
   const real = M.searchAmount;

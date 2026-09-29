@@ -96,10 +96,22 @@ window.M = window.M || {}; M.DB = M.DB || {};
   /* Kirkland Signature organic chicken breast label: 4 oz (112 g) = 110 kcal,
      24 g protein, 0 g carbs, 1 g fat, 75 mg sodium. */
   const KIRKLAND_RAW = lab([110, 24, 0, 1, 0, 0, 75], 112);
-  /* Shrimp by the piece (raw, then cooked = raw × y; see the shrimp food). */
-  const SHRIMP_Y = r4(20.1 / 24);
-  const SHRIMP = ["1 large shrimp, 31–40 per lb", 10, "1 jumbo shrimp, 21–25 per lb", 18, "1 medium shrimp, 41–50 per lb", 8];
-  const SHRIMP_COOKED = [SHRIMP[0], r1(10 * SHRIMP_Y), SHRIMP[2], 15, SHRIMP[4], r1(8 * SHRIMP_Y)];
+  /* Nick: shrimp, cod and scallops are Kirkland Signature too, the frozen bags
+     from Costco. Package labels (checked on Open Food Facts by barcode):
+     - Wild Alaska Pacific cod, raw: 1 portion (170 g) = 120 kcal, 30 g protein,
+       0 g carbs, 0 g fat, 190 mg sodium.
+     - Wild sea scallops, raw: 4 scallops (113 g) = 100 kcal, 19 g protein,
+       3 g carbs, 1 g fat, 180 mg sodium.
+     - Cooked tail-on shrimp, 31–40 per lb: 8 shrimp (84 g) = 80 kcal, 20 g
+       protein, 0 g carbs, 0 g fat, 230 mg sodium.
+     The cod and scallop labels are raw and print no cooked numbers, so they cook
+     like the Kirkland breast (cooked = raw ÷ y). y = the label's protein ÷ USDA's
+     cooked protein per 100 g (cod, dry heat: 22.8 g; scallops, steamed: 20.5 g),
+     so cooked protein matches USDA's cooked fish, what MyFitnessPal shows. */
+  const COD_RAW = lab([120, 30, 0, 0, 0, 0, 190], 170);
+  const SCALLOP_RAW = lab([100, 19, 3, 1, 0, 0, 180], 113);
+  const COD_Y = r4(COD_RAW[1] / 22.8), SCALLOP_Y = r4(SCALLOP_RAW[1] / 20.5);
+  const COD_G = 170, SCALLOP_G = 113 / 4, SHRIMP_G = 84 / 8;
 
   const G = [];
   /* ------------------------------------------------------------ PROTEINS */
@@ -132,24 +144,25 @@ window.M = window.M || {}; M.DB = M.DB || {};
     CK("salmon", "Salmon, Atlantic", "", 4, "oz", OZ4, [208, 20.4, 0, 13.4, 0, 0, 59], [206, 22.1, 0, 12.4, 0, 0, 61], MEAT, "raw"),
     W("sockeye_salmon_cooked", "Salmon, wild sockeye, cooked", "", 6, "oz", 170, [156, 26.5, 0, 5.6, 0, 0, 78], MEAT_W),
     W("tilapia_cooked", "Tilapia, cooked", "", 4, "oz", 113, [128, 26.2, 0, 2.7, 0, 0, 56], MEAT_W),
-    /* USDA: cod, Atlantic, raw / cooked dry heat */
-    CK("cod", "Cod", "", 4, "oz", OZ4, [82, 17.8, 0, 0.7, 0, 0, 54], [105, 22.8, 0, 0.9, 0, 0, 78], MEAT, "raw", [], ST),
+    /* Kirkland wild Alaska Pacific cod (label above): one frozen fillet is 170 g raw.
+       A fillet is still one fillet cooked (170 g × y). */
+    CK("cod", "Cod, wild Alaska Pacific", "Kirkland", 1, "fillet", COD_G, COD_RAW, COD_Y,
+      ["½ fillet", COD_G / 2, "1 oz", ozG(1), "3 oz", ozG(3), "4 oz", OZ4, "6 oz", ozG(6), "8 oz", ozG(8), "100 g", 100], "raw",
+      ["1 fillet", r1(COD_G * COD_Y)], STB(["096619173808", "096619065943", "196633883797", "096619065950"], "fillet portion fish frozen")),
     W("tuna_canned_water", "Tuna, canned in water, drained", "", 1, "can (4 oz drained)", 113, [116, 25.5, 0, 0.8, 0, 0, 320], ["½ can", 56, "1 oz", 28, "100 g", 100]),
-    /* USDA: shrimp, raw / cooked. By the piece, sized by count per pound (MF-04):
-       large (31–40 per lb) 10 g raw; jumbo (21–25 per lb) 18 g raw, 15 g cooked
-       (FNDDS "1 large/jumbo shrimp" = 15 g cooked); medium (41–50 per lb) 8 g raw.
-       Cooked = raw × y. Large is the first size, so "12 shrimp" means 12 large.
-       The count range sits after a comma, not in brackets, so these sizes don't
-       read as the old "1 large shrimp" (18 g): entries and recents saved with that
-       label keep their 18 g. */
-    CK("shrimp", "Shrimp", "", 4, "oz", OZ4, [85, 20.1, 0, 0.5, 0, 0, 119], [99, 24, 0.2, 0.3, 0, 0, 111], SHRIMP.concat(MEAT), "raw", SHRIMP_COOKED.concat(["3 oz", ozG(3), "100 g", 100]), ST),
-    /* USDA: scallops, raw / steamed. By the piece: one large sea scallop is about
-       30 g raw. The sea scallops sold near them come 10–20 per pound (King
-       Soopers, about 30 g each) or 15–20 per pound (Costco, about 26 g each).
-       USDA's own "2 large or 5 small = 30 g" (15 g each) is for mixed species,
-       mostly bay-size, so it is too small for these. Cooked weight uses the same
-       yield (30 g × y). "sea" and "bay" are search words. */
-    CK("scallops", "Scallops", "", 4, "oz", OZ4, [69, 12.1, 3.2, 0.5, 0, 0, 392], [111, 20.5, 5.4, 0.8, 0, 0, 667], ["1 large sea scallop", 30].concat(MEAT), "raw", ["1 large sea scallop", r1(30 * r4(12.1 / 20.5)), "3 oz", ozG(3), "100 g", 100], STW("sea bay")),
+    /* Kirkland cooked tail-on shrimp (label above). The bag is already cooked, so
+       its grams are the shrimp as eaten: no raw / cooked. One shrimp is 10.5 g
+       (84 g ÷ 8), so "12 shrimp" is 126 g. It replaces the plain raw / cooked
+       shrimp (g_shrimp): entries logged with that keep their own numbers, and its
+       recent row becomes this food (M.DB.replaced). */
+    W("kirkland_cooked_shrimp", "Shrimp, cooked, tail-on", "Kirkland", 8, "shrimp", 84, lab([80, 20, 0, 0, 0, 0, 230], 84),
+      ["1 shrimp", SHRIMP_G, "1 oz", ozG(1), "3 oz", ozG(3), "4 oz", OZ4, "6 oz", ozG(6), "8 oz", ozG(8), "100 g", 100], STB(["096619140251", "096619140633"], "prawns frozen")),
+    /* Kirkland wild sea scallops (label above): 4 scallops = 113 g raw, so one is
+       28.25 g raw and 28.25 g × y cooked ("6 scallops" = 6 × 1 scallop). "sea" and
+       "bay" are search words. */
+    CK("scallops", "Scallops, wild sea", "Kirkland", 4, "scallops", 113, SCALLOP_RAW, SCALLOP_Y,
+      ["1 scallop", SCALLOP_G, "1 oz", ozG(1), "3 oz", ozG(3), "4 oz", OZ4, "6 oz", ozG(6), "8 oz", ozG(8), "100 g", 100], "raw",
+      ["1 scallop", r1(SCALLOP_G * SCALLOP_Y)], STB(["196633912749", "096619051724", "096619777327"], "sea bay frozen")),
     W("egg_large", "Eggs, whole", "", 1, "large egg", 50, [143, 12.6, 0.7, 9.5, 0, 0.4, 142], ["2 eggs", 100, "3 eggs", 150, "100 g", 100]),
     W("egg_hard_boiled", "Egg, hard-boiled", "", 1, "large egg", 50, [155, 12.6, 1.1, 10.6, 0, 1.1, 124], ["2 eggs", 100, "100 g", 100]),
     W("egg_white", "Egg white, large", "", 1, "large egg white", 33, [52, 10.9, 0.7, 0.2, 0, 0.7, 166], ["2 whites", 66, "3 whites", 99, "100 g", 100]),
@@ -405,8 +418,12 @@ window.M = window.M || {}; M.DB = M.DB || {};
   M.DB.alias.g_chicken_breast_cooked = { id: "g_kirkland_organic_chicken", state: "cooked" };
   /* cooked-only foods that became raw (or dry) + cooked foods */
   M.DB.alias.g_cod_cooked = { id: "g_cod", state: "cooked" };
-  M.DB.alias.g_shrimp_cooked = { id: "g_shrimp", state: "cooked" };
   M.DB.alias.g_quinoa_cooked = { id: "g_quinoa", state: "cooked" };
+  /* Built-in foods replaced by a different product (not merged: the new food has
+     no raw / cooked, so an alias would stamp a state on old entries). Old entries
+     keep their own numbers; only their recent row turns into the new food, at its
+     own serving. The plain raw / cooked shrimp → the Kirkland cooked shrimp. */
+  M.DB.replaced = { g_shrimp: "g_kirkland_cooked_shrimp", g_shrimp_cooked: "g_kirkland_cooked_shrimp" };
 
   /* ======================================================================
      MEAL SUGGESTIONS — built from the generic foods above so every item's
@@ -448,7 +465,8 @@ window.M = window.M || {}; M.DB = M.DB || {};
   const S = [];
   /* Ideas built from what Nick and Katerina actually buy (foods marked staple):
      Kirkland organic chicken breast (Costco), the King Soopers pork tenderloin
-     2-pack, cod, shrimp, scallops, quinoa, Greek yogurt 2%, Daisy 2% cottage
+     2-pack, Kirkland frozen cod, cooked shrimp and sea scallops (Costco), quinoa,
+     Greek yogurt 2%, Daisy 2% cottage
      cheese, Smucker's jam, Hillshire turkey slices, Dave's Killer Bread and
      their fruit and vegetables. Olive oil, soy sauce and rice are small add-ons.
      Chicken breast is always weighed raw (one breast = 175 g raw). The app
@@ -489,8 +507,8 @@ window.M = window.M || {}; M.DB = M.DB || {};
       "Hillshire turkey slices with cucumber, bell pepper and baby carrots. No cooking.",
       "Lunch", "Either", 5, [it("deli_turkey", 2, "12 slices (112 g)"), it("cucumber"), gr("bell_pepper", 92, "1 cup, sliced (92 g)"), it("carrots_baby")], ["high-protein", "no-cook", "quick"]),
     sug("shrimp_quinoa_bowl", "Shrimp quinoa bowl",
-      "Shrimp cooked with bell pepper, over quinoa with cucumber and lime juice.",
-      "Lunch", "Either", 20, [ck("shrimp", "raw", ozG(6), "6 oz raw"), ck("quinoa", "dry", 42.5, "¼ cup dry"), gr("bell_pepper", 60, "½ pepper (60 g)"), gr("cucumber", 52, "½ cup, sliced (52 g)"), gr("lime_juice", 15, "1 tbsp (15 g)"), oil(1)], ["high-protein"]),
+      "Kirkland cooked shrimp warmed with bell pepper, over quinoa with cucumber and lime juice.",
+      "Lunch", "Costco", 20, [it("kirkland_cooked_shrimp", 1.75), ck("quinoa", "dry", 42.5, "¼ cup dry"), gr("bell_pepper", 60, "½ pepper (60 g)"), gr("cucumber", 52, "½ cup, sliced (52 g)"), gr("lime_juice", 15, "1 tbsp (15 g)"), oil(1)], ["high-protein"]),
     sug("pork_corn_carrots", "Pork tenderloin with grilled corn and carrots",
       "Pork tenderloin from the King Soopers 2-pack with an ear of grilled corn and carrots.",
       "Lunch", "King Soopers", 30, [ck("pork_tenderloin", "raw", ozG(5), "5 oz raw"), it("corn"), it("carrots_cooked", 2, "1 cup, sliced (156 g)"), oil(1)], ["high-protein", "meal-prep"])
@@ -504,14 +522,14 @@ window.M = window.M || {}; M.DB = M.DB || {};
       "Roast one pork tenderloin from the King Soopers 2-pack with zucchini and sweet onion on one pan.",
       "Dinner", "King Soopers", 35, [ck("pork_tenderloin", "raw", ozG(6), "6 oz raw"), it("zucchini_raw"), it("sweet_onion"), oil(1.5)], ["high-protein", "sheet-pan", "low-carb"]),
     sug("lemon_cod_asparagus", "Lemon cod with asparagus",
-      "Cod baked with lemon juice and olive oil, with asparagus and quinoa.",
-      "Dinner", "Either", 25, [ck("cod", "raw", ozG(6), "6 oz raw"), gr("asparagus", 128, "8 spears (128 g)"), gr("lemon_juice", 24, "½ lemon, juiced (24 g)"), oil(1.5), ck("quinoa", "dry", 42.5, "¼ cup dry")], ["high-protein", "sheet-pan"]),
+      "A Kirkland cod fillet baked with lemon juice and olive oil, with asparagus and quinoa.",
+      "Dinner", "Costco", 25, [ck("cod", "raw", COD_G, "1 fillet (" + COD_G + " g raw)"), gr("asparagus", 128, "8 spears (128 g)"), gr("lemon_juice", 24, "½ lemon, juiced (24 g)"), oil(1.5), ck("quinoa", "dry", 42.5, "¼ cup dry")], ["high-protein", "sheet-pan"]),
     sug("scallops_corn_zucchini", "Scallops with grilled corn and zucchini",
-      "Seared scallops with an ear of grilled corn and zucchini, finished with lemon.",
-      "Dinner", "Either", 20, [ck("scallops", "raw", ozG(6), "6 oz raw"), it("corn"), it("zucchini_raw"), gr("lemon_juice", 15, "1 tbsp (15 g)"), oil(1)], ["high-protein", "quick"]),
+      "Eight seared Kirkland sea scallops with an ear of grilled corn and zucchini, finished with lemon.",
+      "Dinner", "Costco", 20, [ck("scallops", "raw", 8 * SCALLOP_G, "8 scallops (" + 8 * SCALLOP_G + " g raw)"), it("corn"), it("zucchini_raw"), gr("lemon_juice", 15, "1 tbsp (15 g)"), oil(1)], ["high-protein", "quick"]),
     sug("shrimp_stir_fry", "Shrimp and veggie stir-fry",
-      "Shrimp stir-fried with bell pepper, broccoli and white onion in soy sauce, over rice.",
-      "Dinner", "Either", 20, [ck("shrimp", "raw", ozG(6), "6 oz raw"), it("bell_pepper"), gr("broccoli_raw", 91, "1 cup, chopped (91 g)"), gr("onion", 40, "¼ cup, chopped (40 g)"), it("soy_sauce", 1, "1 tbsp (16 g)"), oil(1.5), ck("white_rice", "cooked", 118.5, "¾ cup cooked")], ["high-protein", "one-pan"]),
+      "Kirkland cooked shrimp tossed with bell pepper, broccoli and white onion in soy sauce, over rice.",
+      "Dinner", "Costco", 20, [it("kirkland_cooked_shrimp", 1.75), it("bell_pepper"), gr("broccoli_raw", 91, "1 cup, chopped (91 g)"), gr("onion", 40, "¼ cup, chopped (40 g)"), it("soy_sauce", 1, "1 tbsp (16 g)"), oil(1.5), ck("white_rice", "cooked", 118.5, "¾ cup cooked")], ["high-protein", "one-pan"]),
     sug("chicken_tomato_skillet", "Chicken, tomato and zucchini skillet",
       "One chicken breast cooked with Roma tomatoes, white onion and zucchini, served over rice.",
       "Dinner", "Costco", 25, [chicken(1), it("roma_tomato", 2, "2 Roma tomatoes (124 g)"), gr("onion", 55, "½ onion (55 g)"), gr("zucchini_raw", 150, "¾ zucchini (150 g)"), oil(1.5), ck("white_rice", "cooked", 79, "½ cup cooked")], ["high-protein", "one-pan"])
