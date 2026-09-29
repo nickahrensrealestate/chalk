@@ -231,7 +231,7 @@
    while the search box is in use the tools and the Recent / Meals / Foods row step aside
    so results sit above the keyboard (on Meals that row stays, so the way back shows: DY-01) */
 .m-tools{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;overflow:visible;margin:10px 0;padding:0}
-.m-tools button{flex-direction:column;gap:4px;min-height:58px;padding:6px 2px;border-radius:12px;font-size:12px;line-height:1.1;white-space:normal;color:var(--ink);min-width:0}
+.m-tools button{flex-direction:column;justify-content:flex-start;gap:4px;min-height:58px;padding:9px 2px 6px;border-radius:12px;font-size:12px;line-height:1.1;white-space:normal;color:var(--ink);min-width:0}
 .m-tools button svg{width:22px;height:22px;flex:none;fill:none;stroke:var(--acc);stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 .m-tools button .m-tool-l{font-size:12px;line-height:1.1;color:var(--ink);overflow-wrap:anywhere}
 .m-add.m-typing .m-tools,.m-add.m-typing .m-seg{display:none}
@@ -313,6 +313,11 @@
 .m-foot .btn{min-height:44px}
 /* Train → Today calories row on a narrow phone (VI-13) */
 @media (max-width:360px){ .m-ts{grid-template-columns:1fr 1fr} .m-ts-go{grid-column:1/-1} }
+/* ring number: four digits with a comma get a little smaller so they clear the ring */
+.m-ring-n.lg{font-size:31px}
+.m-ring-n.xl{font-size:26px}
+/* borrowed phone: the diary is still coming down from the cloud */
+.m-catch{margin:0 0 10px;padding:10px 14px;border-radius:12px;background:var(--acc-soft);color:var(--acc);font-size:14px;font-weight:600;text-align:center}
 
 /* ---- F2b ---- */
 /* parts hidden with the hidden attribute (a display rule would otherwise keep them on screen) */

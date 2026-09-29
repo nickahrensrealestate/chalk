@@ -127,8 +127,12 @@ window.M = window.M || {}; M.DB = M.DB || {};
        cooked (FNDDS), so about 18 g and 12 g raw */
     CK("shrimp", "Shrimp", "", 4, "oz", 113, [85, 20.1, 0, 0.5, 0, 0, 119], [99, 24, 0.2, 0.3, 0, 0, 111], ["1 large shrimp", 18, "1 medium shrimp", 12, "1 oz", 28, "3 oz", 85, "6 oz", 170, "8 oz", 227, "100 g", 100], "raw", ["1 large shrimp", 15, "1 medium shrimp", 10, "3 oz", 85, "100 g", 100], ST),
     /* USDA: scallops, raw / steamed. By the piece: one large sea scallop is about
-       30 g raw; its cooked weight comes from the same yield (30 g × y). */
-    CK("scallops", "Scallops", "", 4, "oz", 113, [69, 12.1, 3.2, 0.5, 0, 0, 392], [111, 20.5, 5.4, 0.8, 0, 0, 667], ["1 large scallop", 30].concat(MEAT), "raw", ["1 large scallop", r1(30 * r4(12.1 / 20.5)), "3 oz", 85, "100 g", 100], ST),
+       30 g raw. The sea scallops sold near them come 10–20 per pound (King
+       Soopers, about 30 g each) or 15–20 per pound (Costco, about 26 g each).
+       USDA's own "2 large or 5 small = 30 g" (15 g each) is for mixed species,
+       mostly bay-size, so it is too small for these. Cooked weight uses the same
+       yield (30 g × y). "sea" and "bay" are search words. */
+    CK("scallops", "Scallops", "", 4, "oz", 113, [69, 12.1, 3.2, 0.5, 0, 0, 392], [111, 20.5, 5.4, 0.8, 0, 0, 667], ["1 large sea scallop", 30].concat(MEAT), "raw", ["1 large sea scallop", r1(30 * r4(12.1 / 20.5)), "3 oz", 85, "100 g", 100], STW("sea bay")),
     W("egg_large", "Eggs, whole", "", 1, "large egg", 50, [143, 12.6, 0.7, 9.5, 0, 0.4, 142], ["2 eggs", 100, "3 eggs", 150, "100 g", 100]),
     W("egg_hard_boiled", "Egg, hard-boiled", "", 1, "large egg", 50, [155, 12.6, 1.1, 10.6, 0, 1.1, 124], ["2 eggs", 100, "100 g", 100]),
     W("egg_white", "Egg white, large", "", 1, "large egg white", 33, [52, 10.9, 0.7, 0.2, 0, 0.7, 166], ["2 whites", 66, "3 whites", 99, "100 g", 100]),
@@ -152,10 +156,17 @@ window.M = window.M || {}; M.DB = M.DB || {};
     W("chickpeas_cooked", "Chickpeas, cooked from dry", "", 1, "cup", 164, [164, 8.9, 27.4, 2.6, 7.6, 4.8, 7], ["½ cup", 82, "100 g", 100]),
     W("pinto_beans_cooked", "Pinto beans, cooked", "", 0.5, "cup", 86, [143, 9, 26.2, 0.65, 9, 0.3, 1], ["1 cup", 172, "100 g", 100]),
     L("refried_beans", "Refried beans, canned", "", 0.5, "cup", 130, [130, 7, 20, 2, 6, 1, 500], ["1 cup", 260, "100 g", 100]),
-    /* Dave's Killer Bread labels, per slice */
-    L("dkb_21_grains", "Bread, 21 Whole Grains", "Dave's Killer Bread", 1, "slice", 45, [110, 5, 22, 1.5, 5, 5, 170], ["2 slices", 90, "100 g", 100], STB(["013764027053"])),
+    /* Dave's Killer Bread labels, per slice. 21 Whole Grains: the bag sold now
+       (27 oz, code 013764027053) says 6 g protein and 4 g fiber on the front, and
+       its label (Kroger / King Soopers item 0001376402705) is 110 kcal, 6 g protein,
+       22 g carbs, 1.5 g fat, 4 g fiber, 4 g sugar, 170 mg sodium (the older bag said
+       5 g protein, 5 g fiber, 5 g sugar). */
+    L("dkb_21_grains", "Bread, 21 Whole Grains", "Dave's Killer Bread", 1, "slice", 45, [110, 6, 22, 1.5, 4, 4, 170], ["2 slices", 90, "100 g", 100], STB(["013764027053"])),
     L("dkb_good_seed", "Bread, Good Seed", "Dave's Killer Bread", 1, "slice", 45, [120, 5, 23, 3, 3, 5, 160], ["2 slices", 90, "100 g", 100], STB(["013764027039"])),
-    L("dkb_thin", "Bread, 21 Whole Grains, thin", "Dave's Killer Bread", 1, "slice", 28, [60, 3, 12, 1, 3, 3, 100], ["2 slices", 56, "100 g", 100], STB(["013764027138"]))
+    /* 21 Whole Grains thin-sliced (20.5 oz): King Soopers' label for this loaf, 1 slice
+       (28 g) = 60 kcal, 3 g protein, 14 g carbs, 1 g fat, 3 g fiber, 3 g sugar, 105 mg
+       sodium (Open Food Facts also says 105 mg; the 2023 label was 12 g carbs, 100 mg). */
+    L("dkb_thin", "Bread, 21 Whole Grains, thin", "Dave's Killer Bread", 1, "slice", 28, [60, 3, 14, 1, 3, 3, 105], ["2 slices", 56, "100 g", 100], STB(["013764027138"]))
   );
   /* --------------------------------------------------------------- CARBS */
   G.push(

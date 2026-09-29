@@ -344,7 +344,8 @@ t("staples: every food they buy is flagged staple: true, and nothing else", () =
 /* label = the package (brands); per 100 g = USDA SR Legacy (plain foods). ±rounding. */
 const LABEL = { /* id: [serving g, kcal, protein, carbs, fat, fiber, sugar, sodium mg] per the label serving */
   g_cottage_cheese_2: [113, 90, 13, 5, 2.5, 0, 4, 350], g_jam: [19, 40, 0, 10, 0, 0, 10, 0], g_deli_turkey: [56, 60, 10, 2, 1.5, 0, 0, 490],
-  g_dkb_21_grains: [45, 110, 5, 22, 1.5, 5, 5, 170], g_dkb_good_seed: [45, 120, 5, 23, 3, 3, 5, 160], g_dkb_thin: [28, 60, 3, 12, 1, 3, 3, 100] };
+  g_dkb_21_grains: [45, 110, 6, 22, 1.5, 4, 4, 170] /* the bag sold now (C7: Kroger label + OFF front photo) */, g_dkb_good_seed: [45, 120, 5, 23, 3, 3, 5, 160],
+  g_dkb_thin: [28, 60, 3, 14, 1, 3, 3, 105] /* C7: King Soopers label for this loaf */ };
 const USDA = { /* id: per 100 g [kcal, protein, carbs, fat, fiber, sugar, sodium mg] */
   g_pork_tenderloin: [109, 21, 0, 2.2, 0, 0, 53], g_cod: [82, 17.8, 0, 0.7, 0, 0, 54], g_shrimp: [85, 20.1, 0, 0.5, 0, 0, 119], g_scallops: [69, 12.1, 3.2, 0.5, 0, 0, 392],
   g_quinoa: [368, 14.1, 64.2, 6.1, 7, 0, 5], g_asparagus: [20, 2.2, 3.9, 0.1, 2.1, 1.9, 2], g_bell_pepper: [26, 1, 6, 0.3, 2.1, 4.2, 4],
@@ -509,7 +510,8 @@ const WORDS2 = {
   g_carrots_baby: ["baby carrots", "baby carrot"], g_bell_pepper: ["red bell pepper", "green bell pepper", "yellow pepper", "orange pepper"],
   g_onion: ["red onion", "yellow onion"], g_corn: ["sweet corn", "corn on the cob", "ear of corn", "corn cob"], g_cherry_tomatoes: ["grape tomatoes"],
   g_olive_oil: ["extra virgin olive oil", "evoo"], g_agave: ["agave nectar"], g_jam: ["preserves", "fruit spread", "strawberry preserves"],
-  g_deli_turkey: ["deli turkey", "turkey lunchmeat", "sandwich meat", "lunch meat"]
+  g_deli_turkey: ["deli turkey", "turkey lunchmeat", "sandwich meat", "lunch meat"],
+  g_scallops: ["sea scallops", "sea scallop", "bay scallops"]
 };
 const FILLER = /^(of|the|a|an)$/;
 t("words: red / green / yellow peppers, red onion, grape tomatoes, EVOO, baby carrots, sweet corn …", () => {
@@ -534,11 +536,15 @@ t("search (m-core + m-data): the new words list the right food first", () => {
 });
 
 /* queued: scallops and carrots by the piece; baby carrots are their own food */
-t("by the piece: 1 large scallop (30 g raw), carrots small / medium / large, baby carrots", () => {
+t("by the piece: 1 large sea scallop (30 g raw), carrots small / medium / large, baby carrots", () => {
   const byId = new Map(M.DB.generic.map(f => [f.id, f]));
   const sc = byId.get("g_scallops");
-  assert.ok(sc.alts.some(a => a.label === "1 large scallop" && a.g === 30), "1 large scallop = 30 g raw");
-  const ca = sc.cook.alts.find(a => a.label === "1 large scallop");
+  /* C7: sea scallops sold near them are 10–20 or 15–20 per pound (26–30 g each), not
+     USDA's mixed-species "2 large = 30 g"; the label says it is a sea scallop */
+  assert.ok(sc.alts.some(a => a.label === "1 large sea scallop" && a.g === 30), "1 large sea scallop = 30 g raw");
+  assert.ok(!sc.alts.concat(sc.cook.alts).some(a => a.label === "1 large scallop"), "old unclear label gone");
+  assert.strictEqual(sc.alts.findIndex(a => /scallop/.test(a.label)), 0, "the piece is the first choice after 4 oz");
+  const ca = sc.cook.alts.find(a => a.label === "1 large sea scallop");
   assert.ok(ca && Math.abs(ca.g - 30 * sc.cook.y) < 0.051, "cooked scallop = 30 g × y (" + (ca && ca.g) + ")");
   const c = byId.get("g_carrots");
   assert.deepStrictEqual(c.serving, { qty: 1, unit: "medium", g: 61 }, "1 medium carrot = 61 g (USDA)");

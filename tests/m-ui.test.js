@@ -1427,6 +1427,87 @@ t("F2a FX-01: an old entry opens with its own numbers and Save (no change) keeps
   } finally { M.log.remove(M.today(), "old204"); M.ui.render(); }
 });
 
+t("C2a FX-01: entries from older builds (old food id, no brand, no batch weight) stay exactly as saved on Save with no change; a meal change still saves", () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const bm = M.meals.add({ name: "C2a batch", desc: "", slot: "Dinner", items: [{ name: "White rice", servings: 4, servingLabel: "1 cup cooked", g: 158, per: { cal: 205, p: 4.3, c: 44.5, f: 0.4 } }], batch: { cookedG: 2150 } });
+  const d = M.day(M.today());
+  const old = [
+    { id: "d757ck", slot: "Lunch", name: "Chicken breast, boneless skinless", brand: "", servings: 4, servingLabel: "1 oz raw", g: 28.3495, per: { cal: 34.0194, p: 6.3786, c: 0, f: 0.7371, fiber: 0, sugar: 0, sodium: 12.7573 }, state: "raw", cook: { y: 0.7258, word: "raw" }, foodId: "g_chicken_breast", at: 1790706600000 },
+    { id: "d757cc", slot: "Lunch", name: "Cottage cheese, 2%", brand: "", servings: 1, servingLabel: "0.5 cup (113 g)", g: 113, per: { cal: 95, p: 12.4, c: 4.9, f: 2.6, fiber: 0, sugar: 4.5, sodium: 373 }, foodId: "g_cottage_cheese_2", at: 1790706600000 },
+    { id: "d757bt", slot: "Lunch", name: "C2a batch", brand: "", servings: 4, servingLabel: "1 oz cooked", g: 28.3495, per: { cal: 10.9152, p: 1.7221, c: 0.4219, f: 0.1991, fiber: 0.0066, sugar: 0.0013, sodium: 3.3795 }, state: "cooked", cook: { y: 3.5397, word: "raw" }, mealId: bm.id, at: 1790706600000 }
+  ];
+  old.forEach(e => d.entries.push(JSON.parse(JSON.stringify(e))));
+  M.save(); M.setMode("macros"); M.ui.tab = "diary"; M.ui.date = M.today(); M.ui.render();
+  const now = id => JSON.stringify(M.dayOf(M.today()).entries.find(x => x.id === id));
+  try {
+    old.forEach(e => {
+      const row = q('[data-m="entry"][data-id="' + e.id + '"]');
+      const rowCal = q(".m-kcal", row).textContent;
+      click(row);
+      assert.strictEqual($("m-live").querySelector(".stat .v").firstChild.textContent, rowCal, e.id + ": the sheet shows the row's calories");
+      click($("m-det-go"));
+      assert.ok(!sheetOn(), e.id + ": saved");
+      assert.strictEqual(now(e.id), JSON.stringify(e), e.id + ": nothing changed, not even the brand or the food id");
+    });
+    /* a real change (the meal) is saved, and the amounts stay the entry's own */
+    click(q('[data-m="entry"][data-id="d757cc"]'));
+    change(q('[data-m="det-slot"]'), "Dinner");
+    click($("m-det-go"));
+    const e = M.dayOf(M.today()).entries.find(x => x.id === "d757cc");
+    assert.deepStrictEqual([e.slot, e.servings, e.servingLabel, e.per.cal, e.name], ["Dinner", 1, "0.5 cup (113 g)", 95, "Cottage cheese, 2%"]);
+  } finally { old.forEach(e => M.log.remove(M.today(), e.id)); M.meals.remove(bm.id); if (M.ui.sheetOpen()) M.ui.close(); M.ui.render(); }
+});
+
+t("C2a VI-10: a Diary row's 'P · C · F' is one unbreakable run (F never sits alone on a line)", () => {
+  const e = M.log.add(M.today(), { slot: "Breakfast", name: "Bread, 21 Whole Grains", brand: "Dave's Killer Bread", servings: 2, servingLabel: "1 slice (45 g)", g: 45, per: { cal: 110, p: 5, c: 22, f: 1.5 } });
+  M.setMode("macros"); M.ui.tab = "diary"; M.ui.date = M.today(); M.ui.render();
+  try {
+    const t = q(".t", q('[data-m="entry"][data-id="' + e.id + '"]')).textContent;
+    const mac = t.slice(t.indexOf("P\u00a0"));
+    assert.ok(/^P 10 · C 44 · F 3$/.test(mac), JSON.stringify(t));
+    assert.ok(!/ /.test(mac), "no normal space inside the macros");
+  } finally { M.log.remove(M.today(), e.id); M.ui.render(); }
+});
+
+t("C2a DY-10: '1 cup, chopped' amounts scale like plain cups ('1.5 cups, chopped (234 g)', not '1.5 × 1 cup, chopped (156 g)')", () => {
+  const mk = sv => M.log.add(M.today(), { slot: "Dinner", name: "Broccoli, cooked", servings: sv, servingLabel: "1 cup, chopped (156 g)", g: 156, per: { cal: 55, p: 3.7, c: 11.2, f: 0.6 } });
+  const a = mk(1.5), b = mk(0.5), c = mk(1), d = M.log.add(M.today(), { slot: "Snacks", name: "Almonds", servings: 2, servingLabel: "1 oz (23 almonds) (28 g)", g: 28, per: { cal: 162, p: 6, c: 6, f: 14 } });
+  M.setMode("macros"); M.ui.tab = "diary"; M.ui.date = M.today(); M.ui.render();
+  const sub = e => q(".t", q('[data-m="entry"][data-id="' + e.id + '"]')).textContent.split(" · ")[0];
+  try {
+    assert.strictEqual(sub(a), "1.5 cups, chopped (234 g)", JSON.stringify([sub(a), sub(b), sub(c)]));
+    assert.strictEqual(sub(b), "½ cup, chopped (78 g)");
+    assert.strictEqual(sub(c), "1 cup, chopped (156 g)");
+    assert.ok(/^2 × 1 oz \(23 almonds\)/.test(sub(d)), "a count in brackets is never scaled: " + sub(d));
+  } finally { [a, b, c].forEach(e => M.log.remove(M.today(), e.id)); M.log.remove(M.today(), d.id); M.ui.render(); }
+});
+
+t("C2a ring: a number with a comma is set a little smaller so it clears the ring", () => {
+  assert.ok(/class="m-ring-n" [^>]*>378</.test(M.ui.ring(1875, 2253)), "3 digits: normal size");
+  assert.ok(/class="m-ring-n lg" [^>]*>2,253</.test(M.ui.ring(0, 2253)), "2,253: smaller");
+  assert.ok(/class="m-ring-n xl" [^>]*>12,000</.test(M.ui.ring(0, 12000)), "12,000: smaller still");
+});
+
+t("C2a SY-05: the Diary says 'Getting your diary…' while the cloud catches up, and redraws when it's done", () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  const had = Object.prototype.hasOwnProperty.call(M, "cloud"), was = M.cloud;
+  let busy = true;
+  M.cloud = Object.assign({}, was || {}, { catchingUp: () => busy });
+  M.setMode("macros"); M.ui.tab = "diary"; M.ui.date = M.today(); M.ui.render();
+  try {
+    assert.strictEqual(q("#app .m-catch").textContent, "Getting your diary…");
+    busy = false;
+    w.dispatchEvent(new w.CustomEvent("chalk-sync", { detail: {} }));
+    assert.ok(!q("#app .m-catch"), "gone once the catch-up is done");
+    const r0 = renders;
+    w.dispatchEvent(new w.CustomEvent("chalk-sync", { detail: {} }));
+    assert.strictEqual(renders, r0, "no redraw when nothing changed");
+    M.cloud.catchingUp = () => { throw new Error("x"); };
+    M.ui.render();
+    assert.ok(!q("#app .m-catch"), "a sync error never breaks the Diary");
+  } finally { if (had) M.cloud = was; else delete M.cloud; M.ui.render(); }
+});
+
 t("F2a K7: once a minute a new day redraws Train (calories row) and Macros; a row tap uses its own day", () => {
   if (M.ui.sheetOpen()) M.ui.close();
   assert.strictEqual(typeof M.ui.wake, "function");

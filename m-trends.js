@@ -140,6 +140,8 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     };
     let out = make(n);
     for (let k = n + 1; out.length < 3 && k <= n + 8; k++) out = make(k);
+    /* whole numbers can fall back to a step of 2 (52, 54 … 64): too many lines, keep every other one */
+    if (out.length > 6) out = out.filter((v, i) => i % 2 === 0);
     return out;
   }
   const fmtTick = v => (Math.abs(v) >= 1000 ? fmtN(v) : String(+(+v).toFixed(1)));
@@ -1306,7 +1308,9 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
       /* TR-01: a typo (55 ft, 1.78 cm) never reaches the targets; a blank box is someone retyping */
       const r = heightRead(el, u);
       say("mt-hmsg-you", r.bad || "");
-      if (r.bad) skip = ["hft", "hin", "hcm"];
+      /* a typo, or the other box still blank: every height box keeps what was typed
+         (never put the saved 5 back over a typed 6 while the inches box is empty) */
+      if (r.bad || r.empty) skip = ["hft", "hin", "hcm"];
       changed = r.h != null && r.h !== p.heightIn;
       if (changed) p.heightIn = r.h;
     } else if (f === "goal") {
@@ -1327,6 +1331,12 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
     showNumbers(el, p, skip);
     patchYou(id, p);
   };
+  /* Typing again in a box whose message shows: hide the message while they fix it.
+     The change (on leaving the box) checks the number again. */
+  const MSG_OF = { hft: "mt-hmsg-", hin: "mt-hmsg-", hcm: "mt-hmsg-", goal: "mt-gmsg-", age: "mt-amsg-" };
+  function quietMsg(el, mode) { const f = el && el.dataset ? el.dataset.f : ""; if (own(MSG_OF, f)) say(MSG_OF[f] + mode, ""); }
+  I["t-num"] = el => quietMsg(el, "you");
+  I["t-target"] = () => say("mt-tmsg", "");
   A["t-wsure"] = el => {
     const id = pid(); if (!id || !el) return;
     const p = person(id), lb = num(el.dataset.lb, 0);
@@ -1647,6 +1657,7 @@ window.M = window.M || {}; M.ui = M.ui || {}; M.ui.actions = M.ui.actions || {};
   function setupField(el, commit) {
     if (!el) return;
     const d = draft(), f = el.dataset.f;
+    if (!commit) quietMsg(el, "setup");
     applyField(d, f, el, true);
     if (f === "pace") { d.paceSet = true; d.paceAuto = false; }
     else autoPace(d);

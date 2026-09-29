@@ -69,6 +69,9 @@ window.M = window.M || {};
   const META_EVERY = DAY_MS;                 /* is the household still there? once per start and per day */
   const REFUSED_AGAIN = DAY_MS, ASIDE_AGAIN = HOUR;   /* stuck rows are tried again this often (Sync now: always) */
   const UNDO_KEEP = DAY_MS;                   /* the Undo copy of a restore: one day (it can be big) */
+  /* A copy made by the build before (no `bk`): that restore replaced every workout on the
+     phone, so the copy may be the only one left of them. It keeps the week that build gave it. */
+  const undoKeep = u => (isObj(u) && !Array.isArray(u.bk) ? 7 * DAY_MS : UNDO_KEEP);
   const MAXLEN = 120;                        /* names, brands, descriptions */
   const BISECT_BUDGET = 40;                  /* requests one cycle may spend hunting a bad row */
   const PREFER = { Prefer: "resolution=merge-duplicates,return=minimal" };
@@ -207,7 +210,7 @@ window.M = window.M || {};
     return lsSet(ST_KEY, JSON.stringify(st));
   }
   /* The training copy a restore replaced lives for a day. */
-  try { const u = JSON.parse(lsGet(UNDO_KEY)); if (u !== null && (!isObj(u) || now() - num(u.at) > UNDO_KEEP)) lsDel(UNDO_KEY); } catch (e) { lsDel(UNDO_KEY); }
+  try { const u = JSON.parse(lsGet(UNDO_KEY)); if (u !== null && (!isObj(u) || now() - num(u.at) > undoKeep(u))) lsDel(UNDO_KEY); } catch (e) { lsDel(UNDO_KEY); }
 
   const over = { url: null, key: null, delay: null };
   function cfg() {
@@ -531,12 +534,13 @@ window.M = window.M || {};
     const tl = trainLocal();
     if (tl && tl.id === id && tl.h === h) st.hashes["train|" + id] = h;
   }
-  /* Workouts from `extra` whose ids `have` doesn't hold, added to state `d` (sorted by start).
-     This phone's workout in progress stays. Returns how many were added. */
+  /* Workouts from `extra` whose ids `have` doesn't hold, added to state `d`, newest first like
+     Chalk keeps them (its log[0] is the last workout). This phone's workout in progress stays.
+     Returns how many were added. */
   const wid = w => (w.id != null ? String(w.id) : (w.start ? "s" + w.start : ""));
   function addWorkouts(d, cur, have, active) {
     const extra = (Array.isArray(cur.log) ? cur.log : []).filter(w => isObj(w) && wid(w) && !have.has(wid(w)));
-    if (extra.length) d.log = d.log.concat(extra).map((w, i) => ({ w, i })).sort((a, b) => num(a.w.start) - num(b.w.start) || a.i - b.i).map(o => o.w);
+    if (extra.length) d.log = d.log.concat(extra).map((w, i) => ({ w, i })).sort((a, b) => num(b.w.start) - num(a.w.start) || a.i - b.i).map(o => o.w);
     if (active) d.active = cur.active;
     if (extra.length && Array.isArray(cur.gone) && cur.gone.length) {
       const inLog = new Set(d.log.map(wid)), g = Array.isArray(d.gone) ? d.gone.slice() : [], seenG = new Set(g.map(String));
@@ -568,7 +572,7 @@ window.M = window.M || {};
   function readUndo() {
     try {
       const u = JSON.parse(lsGet(UNDO_KEY));
-      if (!isObj(u) || typeof u.raw !== "string" || now() - num(u.at) > UNDO_KEEP) return null;
+      if (!isObj(u) || typeof u.raw !== "string" || now() - num(u.at) > undoKeep(u)) return null;
       return u;
     } catch (e) { return null; }
   }
@@ -756,7 +760,8 @@ window.M = window.M || {};
   const recentDay = id => dateOfId(id) >= cutoffDate();
   function pruneBase() {
     const cut = cutoffDate();
-    Object.keys(st.base).forEach(k => { if (kindOf(k) === "day" && dateOfId(idOf(k)) < cut) delete st.base[k]; });
+    /* a {d: 0} mark (sent, not agreed yet) stays until that day comes back from the cloud */
+    Object.keys(st.base).forEach(k => { if (kindOf(k) === "day" && dateOfId(idOf(k)) < cut && !(isObj(st.base[k]) && st.base[k].d === 0)) delete st.base[k]; });
   }
   /* Two copies of one diary day become one: entries by id, water and note on their own. */
   function mergeDay(b, mine, theirs, theirsNewer) {
@@ -890,7 +895,12 @@ window.M = window.M || {};
         /* Never one whole day over the other: entries from both phones are kept, a delete
            sticks, and an entry changed on both takes the newer edit. The cloud copy replaced
            our last push when ours hasn't changed since, so it counts as the newer one. */
-        const b = isObj(st.base[key]) && st.base[key].d === 1 ? st.base[key] : null;
+        let b = isObj(st.base[key]) && st.base[key].d === 1 ? st.base[key] : null;
+        /* No base kept (a phone that synced before bases were kept, or a day older than the
+           base window) and nothing changed here since both phones agreed: this copy IS that
+           base, so the other phone's deletes stick. Not after our own push without a base
+           ({d: 0}): the other phone may never have seen what we sent. */
+        if (!b && !has(st.base, key) && synced !== undefined && lh === synced) b = dayBase(local);
         const tn = synced !== undefined && lh === synced ? true : remoteAt > srvTime(localTime(kind, local));
         const m = mergeDay(b, local, data, tn);
         if (m === data) { take(data); return; }
@@ -1217,6 +1227,8 @@ window.M = window.M || {};
         st.hashes[it.key] = it.h; delete st.gone[it.key];
         /* the merge base stays the copy both phones last agreed on until ours comes back in a pull */
         if ((it.kind === "food" || it.kind === "meal") && !isObj(st.base[it.key])) { try { st.base[it.key] = JSON.parse(x.s).data; } catch (e) {} }
+        /* a day sent with no base: mark it, so what we sent never counts as agreed */
+        else if (it.kind === "day" && !isObj(st.base[it.key])) st.base[it.key] = { d: 0 };
       });
       items.push(x);
     });

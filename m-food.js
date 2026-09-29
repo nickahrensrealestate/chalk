@@ -935,7 +935,12 @@ window.M = window.M || {};
       const vars = codeVariants(raw);
       for (const v of vars) { const f = localByCode(v); if (f) return (M.food.lastLookup = { status: "found", code: raw, food: f, saved: true }); }
       /* K3: then the built-in foods they buy (no internet needed) */
-      for (const v of vars) { const f = builtInByCode(v); if (f) return (M.food.lastLookup = { status: "found", code: raw, food: f, saved: true, builtIn: true }); }
+      for (const v of vars) {
+        const f = builtInByCode(v);
+        /* a second code linked to one of My foods comes back here too: that one isn't built in */
+        const mine = !!(f && M.MS && isObj(M.MS.foods) && Object.prototype.hasOwnProperty.call(M.MS.foods, f.id));
+        if (f) return (M.food.lastLookup = mine ? { status: "found", code: raw, food: f, saved: true } : { status: "found", code: raw, food: f, saved: true, builtIn: true });
+      }
       /* A store's own price sticker (UPC-A starting with 2: item number, then the price). Open
          Food Facts can't know it; the same item keeps its first 6 digits whatever it costs. */
       const item = priceItem(raw);
@@ -2035,6 +2040,8 @@ window.M = window.M || {};
   M.food.parseQuantity = function (phrase) {
     let s = String(phrase == null ? "" : phrase).trim().replace(/\s+/g, " ").replace(/^(about|around|roughly|like|maybe)\s+/i, "");
     const raw = s;
+    /* "juice of 1 lime" is 1 lime's juice (the "1 lime" is not an amount of juice) */
+    s = s.replace(/^juice\s+of\s+(?:(\S+)\s+)?(lemon|lime|orange)(e?s)?\b/i, (m0, n, f) => (n ? n + " " : "") + f + " juice");
     let qty = null, unit = null;
     s = s.replace(/(\d)\s*-\s*(?=(oz|ounce|g|gram|lb|cup|tbsp|tsp|ml)\b)/i, "$1 ");          /* "5-oz" → "5 oz" */
     s = s.replace(/^(\d+(?:\.\d+)?)\s*[x×]\s+(?=[a-z])/i, "$1 ");                            /* "2x chicken breast" → "2 chicken breast" */
@@ -2058,7 +2065,9 @@ window.M = window.M || {};
     if (xm) { qty = (qty == null ? 1 : qty) * num(xm[1], 1); s = s.slice(0, xm.index); }
     if (qty == null) {                                   /* trailing amount: "chicken thigh 8 oz", "rice (1 cup)", "quinoa 1/4 cup dry" */
       const tm = /\s*\(?\s*(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)\s*([a-zA-Z]+)?\.?(?:\s+(?:raw|dry|uncooked|cooked))?\s*\)?\s*$/i.exec(s);
-      if (tm && tm.index > 0) {
+      /* "chicken 1 banana" is two foods, not 1 chicken: a word after the number must be a unit */
+      const tw = tm ? lc(tm[2] || "") : "";
+      if (tm && tm.index > 0 && (!tw || UNIT_LOOKUP[tw] || tw === "floz" || /^(breasts?|fillets?|filets?|pieces?|whole|jumbo|big|mini)$/.test(tw))) {
         qty = qtyOf(tm[1]);
         const uw = lc(tm[2] || "");
         if (uw && UNIT_LOOKUP[uw] && UNIT_LOOKUP[uw] !== "egg") unit = UNIT_LOOKUP[uw];
@@ -2275,6 +2284,12 @@ window.M = window.M || {};
   const CHANGER = /^(sour|peanut|almond|cashew|coconut|soy|oat|ice|string|cream)$/i;
   /* a dish is more than its parts: "a turkey sandwich" isn't turkey slices + a slice of bread */
   const DISH = /^(sandwich|sub|hoagie|wrap|burger|burrito|taco|pizza|soup|stew|casserole|bake|pie|quesadilla|omelet|omelette|lasagna|curry|chili|salad)$/i;
+  /* foods that come in kinds named by another food ("banana bread", "grape juice", "banana
+     peppers", "corn chips", "strawberry yogurt"): two words like that are one food */
+  const KIND_OF = /^(juice|bread|yogurt|pepper|chip|water|smoothie|milk|muffin|cake|sauce|syrup|oil|vinegar|salsa|soda|tea|shake|bar|cookie|pancake|waffle|cracker|cereal|granola|pudding|jerky|broth|stock|noodle|butter|cheese|cream|spread|dressing|dip|seasoning|powder|flour|candy|popsicle|sorbet|gelato|latte|coffee|roll|ring|nugget|tender|wing|bite|ball|meatball|patty|dog|link)$/i;
+  const SEASONING = /^(lemon|lime|garlic|honey|ginger|salt|chili|chile|cinnamon|sesame|mustard|maple|sriracha|pesto|buffalo|bbq|cajun|teriyaki|curry|herb|soy|balsamic|jerk|chipotle|smoky|spicy)$/i;
+  /* how many times a run-on note ("cod asparagus quinoa") may be cut into foods */
+  const SPLIT_DEPTH = 4;
   /* raw / cooked words in what they typed → "raw" | "cooked" | null */
   function stateOf(text) {
     const s = String(text == null ? "" : text);
@@ -2508,7 +2523,8 @@ window.M = window.M || {};
         (w.indexOf("breast") < 0 || w.some(x => /^(slice|sliced|thin|thinly|shaved|deli|lunch|hillshire)$/.test(x))),
       find: fs => fs.find(f => /hillshire/i.test(nameBrand(f)) && /turkey/i.test(f.name)) || fs.find(f => f.staple === true && /\bturkey\b/i.test(f.name) && /slice|deli|lunch/i.test(f.name)) || fs.find(f => /^deli turkey/i.test(f.name)) },
     { word: /\b(jam|jelly|preserves?)\b/i,
-      say: w => w.some(x => /^(jam|jelly|preserve)$/.test(x)) && w.every(x => /^(jam|jelly|preserve|strawberry|smucker|natural|fruit|spread)$/.test(x)),
+      /* any flavor they name ("grape jelly", "blueberry jam") is still their Smucker's jar */
+      say: w => w.some(x => /^(jam|jelly|preserve)$/.test(x)) && w.every(x => /^(jam|jelly|preserve|strawberry|smucker|natural|fruit|spread|grape|blueberry|raspberry|blackberry|apricot|peach|cherry|berry|mixed|apple|plum|fig)$/.test(x)),
       find: fs => fs.find(f => /smucker/i.test(nameBrand(f))) || fs.find(f => f.staple === true && /\b(jam|jelly|preserves|fruit spread)\b/i.test(f.name)) || fs.find(f => /^(jam|jelly)\b/i.test(f.name)) },
     { word: /\bcottage\b/i,
       say: w => w.indexOf("cottage") >= 0 && w.every(x => /^(cottage|cheese|daisy|2%|2|low|fat|lowfat|reduced|small|curd)$/.test(x)),
@@ -2572,7 +2588,7 @@ window.M = window.M || {};
     } catch (e) { return it; }
   }
   M.food.describeLocal = function (text) {
-    const items = [], unmatched = [];
+    const items = [], unmatched = [], memo = new Map();
     const parts = splitDescribe(text);
     for (let i = 0; i < parts.length; i++) {
       /* a saved meal whose name the split cut apart ("eggs and toast"): exact names only */
@@ -2605,26 +2621,73 @@ window.M = window.M || {};
         for (const b of bits) { const got = build(b, depth + 1); if (!got) return null; got.forEach(it => out.push(Object.assign(it, { text: part }))); }
         return out;
       }
+      const key = (depth < SPLIT_DEPTH ? "s|" : "n|") + part;
+      /* the same words are tried more than once while cutting a note into foods: remember the
+         answer (items are plain data; each caller gets its own copy) */
+      const copy = list => list.map(it => JSON.parse(JSON.stringify(it)));
+      if (memo.has(key)) { const hit = memo.get(key); return hit ? copy(hit) : null; }
+      const res = buildOne(part, q, depth);
+      memo.set(key, res ? copy(res) : null);
+      return res;
+    }
+    function buildOne(part, q, depth) {
       const out = [];
       const ok = one(part, q);
       if (ok) { out.push(ok); return out; }
-      /* SC-05: two foods said together ("chicken rice", "avocado toast", "egg toast"): when the
-         words split into two parts that are both foods, both are logged */
+      /* SC-05: foods said together ("chicken rice", "avocado toast", quick notes like "greek
+         yogurt blueberries agave" or "2 chicken breasts 1 cup rice broccoli"): when the words
+         split into parts that are all foods, each is logged */
       const ws = String(q.words || "").split(/\s+/).filter(Boolean);
-      if (depth === 0 && ws.length >= 2 && !ws.some(w => DISH.test(singular(lc(w).replace(/[^a-z]/g, ""))))) {
+      if (depth < SPLIT_DEPTH && ws.length >= 2 && ws.length <= 12 && !ws.some(w => DISH.test(singular(lc(w).replace(/[^a-z]/g, ""))))) {
         const at = lc(part).lastIndexOf(lc(q.words));
         const lead = at > 0 ? part.slice(0, at) : "";
-        for (let k = ws.length - 1; k >= 1; k--) {
-          const left = ws.slice(0, k).join(" "), right = ws.slice(k).join(" ");
-          if (!coreWords(left).length || !coreWords(right).length) continue;
+        const n = ws.length;
+        const isNum = w => /^(\d+(?:[.,\/]\d+)?[a-z]*|[½¼¾⅓⅔⅛])$/i.test(w);
+        const bare = w => singular(lc(w).replace(/[^a-z]/g, ""));
+        /* A piece is one food: a number only at its start ("1 cup rice") or as its last amount
+           ("chicken 200g", "pork tenderloin 6 oz"), never in the middle. */
+        const pieceOk = (i, j) => {
+          for (let k = i; k < j; k++) {
+            if (!isNum(ws[k])) continue;
+            if (i === 0 && lead) return false;                    /* "2 chicken breasts 1 cup": two amounts */
+            if (k === i) continue;
+            /* a last amount needs its unit: "chicken 200g", "pork 6 oz" (never "pork 6" + "oz …") */
+            const tail = j - k - 1;
+            if (!((tail === 0 && /\d[a-z]+$/i.test(ws[k])) || (tail === 1 && (UNIT_LOOKUP[lc(ws[j - 1])] || /^(breasts?|fillets?|filets?)$/i.test(ws[j - 1]))))) return false;
+          }
+          /* "oz broccoli" after "6", "breasts" after "chicken": that word belongs to the food before */
+          if (i > 0 && ((UNIT_LOOKUP[lc(ws[i])] && UNIT_LOOKUP[lc(ws[i])] !== "egg") || /^(breasts?|fillets?|filets?)$/i.test(ws[i]))) return false;
+          /* a piece needs a food word, not only an amount ("1 cup") */
+          if (!ws.slice(i, j).some(w => !isNum(w) && !(UNIT_LOOKUP[lc(w)] && UNIT_LOOKUP[lc(w)] !== "egg"))) return false;
+          if (!coreWords(ws.slice(i, j).join(" ")).length) return false;
           /* "cream cheese", "almond milk": that word makes it a different food, not two foods */
-          if (CHANGER.test(singular(lc(ws[k - 1]).replace(/[^a-z]/g, "")))) continue;
-          const a = build((lead + left).trim(), depth + 1);
-          if (!a) continue;
-          const b = build(right, depth + 1);
-          if (!b) continue;
-          return a.concat(b);
+          if (j < n && CHANGER.test(bare(ws[j - 1]))) return false;
+          return true;
+        };
+        /* the fewest foods that cover every word ("turkey slices | cucumber | cottage cheese",
+           not "cottage | cheese"); on a tie, a number after a food with no amount of its own is
+           that food's amount ("chicken 200g | rice"), else it starts the next food */
+        const best = new Array(n + 1).fill(null);
+        best[0] = { cost: 0, items: [] };
+        for (let j = 1; j <= n; j++) {
+          for (let i = j - 1; i >= 0 && j - i <= 6; i--) {      /* on a tie, the longer earlier food ("egg whites | spinach") */
+            if (!best[i] || !pieceOk(i, j)) continue;
+            if (i === 0 && j === n) continue;                     /* the whole thing: tried above */
+            /* "banana bread", "grape juice", "banana peppers": one word naming the kind of a
+               food that comes in kinds is one food, not two */
+            if (n === 2 && KIND_OF.test(bare(ws[1]))) continue;
+            /* "lemon pepper chicken", "garlic shrimp": a flavor word before a food is how it
+               was made, not a food of its own */
+            if (j < n && j - i === 1 && SEASONING.test(bare(ws[i]))) continue;
+            const text = (i === 0 ? lead : "") + ws.slice(i, j).join(" ");
+            const got = build(text.trim(), SPLIT_DEPTH);
+            if (!got) continue;
+            const odd = i > 0 && isNum(ws[i]) && !(q.explicitQty || lead) && !ws.slice(0, i).some(isNum) ? 1 : 0;
+            const cost = best[i].cost + 10 + odd;
+            if (!best[j] || cost < best[j].cost) best[j] = { cost, items: best[i].items.concat(got) };
+          }
         }
+        if (best[n]) return best[n].items;
       }
       return null;
     }

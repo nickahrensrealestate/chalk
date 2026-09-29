@@ -1573,6 +1573,69 @@ t("WK-02: check-ins come due on the morning of the day (calendar days); weeks si
   M.reset();
 });
 
+t("C1 r4: search never offers a look-alike food for a real word it doesn't have; real typos, count words and numbers still work", () => {
+  const foods = [
+    G("g_asp", "Asparagus", { staple: true }), G("g_pear", "Pear"), G("g_ricecake", "Rice cake, plain"), G("g_rice", "White rice"),
+    G("g_bell", "Bell pepper", { staple: true, words: "red green yellow orange" }), G("g_daisy", "Cottage cheese, 2%", { brand: "Daisy", staple: true }),
+    G("g_sour", "Sour cream"), G("g_wine", "Wine, red"), G("g_gb93", "Ground beef 93/7"), G("g_gb90", "Ground beef 90/10"),
+    G("g_yog2", "Greek yogurt, plain 2%", { staple: true }), G("g_yog5", "Greek yogurt, plain 5% (whole milk)"),
+    G("g_apple", "Apple, with skin"), G("g_maple", "Maple syrup, pure"), G("g_hash", "Hash browns, fried"), G("g_pb", "Peanut butter, creamy"),
+    G("g_turkey", "Turkey slices, oven roasted", { brand: "Hillshire Farm", staple: true }), G("g_bread", "Bread, 21 Whole Grains", { brand: "Dave's Killer Bread", staple: true }),
+    G("g_onion", "Onion, white", { staple: true }), G("g_milk", "Milk, 2%"), G("g_milk0", "Milk, skim"), G("g_tuna", "Tuna, canned in water, drained"),
+    G("g_kb", "Chicken breast, organic", { brand: "Kirkland", staple: true, alwaysRaw: true, cook: { y: 0.75, word: "raw" } }), G("g_sausage", "Chicken sausage link, cooked"),
+    G("g_cooking", "Cooking spray (1 second)"), G("g_beans", "Black beans, cooked"), G("g_seltzer", "Seltzer / sparkling water"), G("g_trail", "Trail mix"), G("g_tomato", "Tomato, Roma", { staple: true })
+  ];
+  withFakeDB(foods, null, () => {
+    const top = q => M.search(q, { pid: "nick", limit: 10 }).map(r => r.id);
+    /* a count word after the food is not a food ("spears" never becomes Pear) */
+    assert.deepStrictEqual(top("6 asparagus spears").slice(0, 1), ["g_asp"]);
+    assert.strictEqual(top("asparagus spears").indexOf("g_pear"), -1);
+    assert.strictEqual(top("2 links chicken sausage")[0], "g_sausage");
+    /* real foods the app doesn't have find nothing, so "+ Add … as a new food" is the answer */
+    ["toast", "coke", "diet coke", "red bull", "soup", "wings", "beets", "bran", "brownie", "creamer", "cookie", "mint", "spam", "wrap", "pita", "lamb", "pad thai", "mahi mahi",
+      "string cheese", "cream cheese", "garlic bread", "grapefruit", "snickers", "jello", "roast beef"].forEach(q => assert.deepStrictEqual(top(q), [], q + " → " + top(q)));
+    /* one typo still finds the food */
+    const first = (q, id) => assert.strictEqual(top(q)[0], id, q + " → " + top(q));
+    [["chiken", "g_kb"], ["chike", "g_kb"], ["brest", "g_kb"], ["turky", "g_turkey"], ["hilshire", "g_turkey"], ["rcie", "g_rice"], ["mlik", "g_milk"], ["bred", "g_bread"],
+      ["aple", "g_apple"], ["tuan", "g_tuna"], ["cotage cheese", "g_daisy"], ["asparagas", "g_asp"], ["onoin", "g_onion"]].forEach(([q, id]) => first(q, id));
+    assert.strictEqual(top("aple").indexOf("g_maple"), -1, "a typo fix beats letters inside another word");
+    /* describing words may be missing; a word that names another food may not */
+    first("red onion", "g_onion"); first("chopped onion", "g_onion"); first("diced tomato", "g_tomato");
+    /* numbers in the name count ("90/10", "5%") */
+    first("ground beef 90/10", "g_gb90"); first("93/7 ground beef", "g_gb93"); first("5% greek yogurt", "g_yog5"); first("2% greek yogurt", "g_yog2"); first("greek yogurt", "g_yog2");
+    first("1 cup 2% milk", "g_milk"); first("2 cups milk", "g_milk");
+  });
+});
+
+t("C1 r4: a snooze lasts whole calendar days across a clock change (Nov 1 fall back, Mar 14 spring forward)", () => {
+  const keepTZ = process.env.TZ, keep = NOW;
+  process.env.TZ = "America/Denver";
+  try {
+    M.reset();
+    const p = M.person("nick");
+    Object.assign(p, { sex: "m", age: 40, heightIn: 71, weightLb: 185, setupAt: new Date(2026, 9, 1, 9, 0).getTime(), lastBody: new Date(2026, 9, 1, 9, 0).getTime(), snooze: { refresh60: 0, body14: 0 } });
+    NOW = new Date(2026, 9, 29, 0, 30).getTime();   /* 12:30 am, 3 days before the clocks go back */
+    M.checkins.snooze("nick", "body14", 7);
+    NOW = new Date(2026, 10, 4, 12, 0).getTime(); assert.strictEqual(M.checkins.due("nick"), null, "still skipped on day 6");
+    NOW = new Date(2026, 10, 4, 23, 59).getTime(); assert.strictEqual(M.checkins.due("nick"), null, "still skipped late on day 6");
+    NOW = new Date(2026, 10, 5, 0, 5).getTime(); assert.strictEqual(M.checkins.due("nick"), "body14", "back on day 7");
+    Object.assign(p, { setupAt: new Date(2027, 1, 1, 9, 0).getTime(), lastBody: new Date(2027, 1, 20, 9, 0).getTime(), snooze: { refresh60: 0, body14: 0 } });
+    NOW = new Date(2027, 2, 10, 23, 30).getTime();  /* 11:30 pm, 4 days before the clocks go forward */
+    M.checkins.snooze("nick", "body14", 7);
+    NOW = new Date(2027, 2, 16, 23, 0).getTime(); assert.strictEqual(M.checkins.due("nick"), null);
+    NOW = new Date(2027, 2, 17, 0, 5).getTime(); assert.strictEqual(M.checkins.due("nick"), "body14", "back on day 7, not day 8");
+    /* the 14-day weigh-in clock over the fall back: calendar days */
+    Object.assign(p, { setupAt: new Date(2026, 9, 1, 9, 0).getTime(), lastBody: new Date(2026, 9, 18, 23, 59).getTime(), snooze: { refresh60: 0, body14: 0 } });
+    NOW = new Date(2026, 10, 1, 0, 1).getTime(); assert.strictEqual(M.checkins.due("nick"), "body14");
+    assert.strictEqual(M.checkins.daysSince("nick"), 14);
+    NOW = new Date(2026, 9, 31, 23, 59).getTime(); assert.strictEqual(M.checkins.due("nick"), null);
+  } finally {
+    if (keepTZ === undefined) delete process.env.TZ; else process.env.TZ = keepTZ;
+    NOW = keep;
+    M.reset();
+  }
+});
+
 t("WK-06: a batch reads in whole grams up to 10 kg", () => {
   const e = { mealId: "mx", name: "Prep", state: "cooked", cook: { y: 1.2, word: "raw" }, batch: true, batchG: 1950, servingLabel: "1 g cooked", g: 1, servings: 170 };
   assert.strictEqual(M.cook.entryLabel(e, "metric"), "170 g cooked · of 1,950 g batch");
@@ -1607,6 +1670,17 @@ t("CO-08: another tab's save is read back and redrawn (never written over); wait
   ctx.document.activeElement = null; docOn.focusout();
   assert.strictEqual(T.dayOf(today, "nick").entries.length, 4); assert.strictEqual(redraws, 2);
   on.storage({ key: "chalk.v1" }); assert.strictEqual(redraws, 2, "other keys are ignored");
+  /* C1 r4: this tab's last save failed (phone full): its unsaved entry is never dropped for the other tab's copy */
+  const realSet = ctx.localStorage.setItem;
+  ctx.localStorage.setItem = () => { const e = new Error("The quota has been exceeded."); e.name = "QuotaExceededError"; e.code = 22; throw e; };
+  T.log.add(today, { slot: "Snacks", name: "Only in memory", per: { cal: 20 } });
+  assert.strictEqual(T.storage.ok, false);
+  const o3 = JSON.parse(store[T.KEY]); o3.days["nick|" + today].entries.push({ id: "o3", slot: "Dinner", name: "Other tab", per: { cal: 5 }, at: NOW }); store[T.KEY] = JSON.stringify(o3);
+  on.storage({ key: T.KEY });
+  assert.ok(T.dayOf(today, "nick").entries.some(e => e.name === "Only in memory"), "the unsaved entry stays");
+  ctx.localStorage.setItem = realSet;
+  T.save();
+  assert.ok(T.storage.ok && JSON.parse(store[T.KEY]).days["nick|" + today].entries.some(e => e.name === "Only in memory"), "and is saved on the next try");
 });
 
 t("FD-03: a batch portion's recent carries its batch: today's batch while the meal exists, its own after it's gone", () => {

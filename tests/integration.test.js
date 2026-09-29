@@ -219,7 +219,8 @@ function swRig(opts) {
     registration: { scope: BASE, update: async () => { updates++; } },
     clients: { claim: async () => {}, matchAll: async () => opts.clients || [{ postMessage: m => posted.push(m) }] }
   };
-  const src = SWSRC.replace("const NET_MS = 8000;", "const NET_MS = " + (opts.netMs || 120) + ";");
+  const src = SWSRC.replace("const NET_MS = 8000;", "const NET_MS = " + (opts.netMs || 120) + ";")
+    .replace("const HIDDEN_MS = 60000, HIDDEN_POLL_MS = 2000;", "const HIDDEN_MS = " + (opts.hiddenMs || 600) + ", HIDDEN_POLL_MS = " + (opts.pollMs || 100) + ";");
   vm.runInNewContext(src, { self, caches, fetch, Request: R, Response, Headers, URL, AbortController, ReadableStream, TextEncoder, setTimeout, clearTimeout, Promise, console });
   const fire = (url, o) => {
     o = o || {};
@@ -495,22 +496,38 @@ async function runSwPass() {
     await next.activate();
     assert.deepStrictEqual([...next.stores.keys()].sort(), ["chalk-v" + (SWV - 1), "chalk-v" + SWV].sort());
   });
-  await ta("OF-02: 1.5 s after taking over, old pages in the background reload onto the new version; open, newer and self-updating pages don't", async () => {
+  await ta("OF-02: after v15, an old page that stays in the background a full minute reloads onto the new version; open, newer and self-updating pages, and pages opened during that minute, don't", async () => {
     const nav = [];
     const win = (id, vis, posted) => ({ id, visibilityState: vis, url: "https://nickahrensrealestate.github.io/chalk/", postMessage: m => posted && posted.push(m), navigate: u => { nav.push(id); return Promise.resolve(null); } });
     const said = [];
-    const list = [win("v15-hidden", "hidden", said), win("v15-open", "visible", said), win("v17-hidden", "hidden", said), Object.assign(win("other-app", "hidden", said), { url: "https://nickahrensrealestate.github.io/apollo/" })];
-    const rig = swRig({ clients: list });
+    const list = [win("v15-hidden", "hidden", said), win("v15-open", "visible", said), win("v17-hidden", "hidden", said), win("v15-back", "hidden", said), Object.assign(win("other-app", "hidden", said), { url: "https://nickahrensrealestate.github.io/apollo/" })];
+    const m = () => new Map([["x", new Response("x")]]);
+    const rig = swRig({ clients: list, caches: [["chalk-v15", m()]] });   /* the version before was 15: no update listener */
     await rig.activate();
-    assert.ok(said.every(m => m.type === "chalk-updated") && said.length === 4, "every open page is told first");
+    assert.ok(said.every(m => m.type === "chalk-updated") && said.length === 5, "every open page is told first");
     rig.message({ type: "chalk-self" }, { id: "v17-hidden" });   /* a v17+ page answers: it reloads itself when quiet */
     assert.deepStrictEqual(nav, [], "nothing reloaded straight away (fetches never wait on it either)");
     list.push(win("new-page", "hidden"));                        /* opened after the update: already on the new version */
-    await sleep(1700);
-    assert.deepStrictEqual(nav, ["v15-hidden"], "only the old page in the background");
+    await sleep(1600);
+    assert.deepStrictEqual(nav, [], "not at 1.5 s: a page must stay in the background a full minute first");
+    list[3].visibilityState = "visible"; await sleep(150); list[3].visibilityState = "hidden";   /* opened for a moment (a set typed) */
+    await sleep(900);
+    assert.deepStrictEqual(nav, ["v15-hidden"], "only the old page that stayed in the background the whole time");
     /* a page that can't be reloaded from outside is left alone, without an error */
-    const bad = swRig({ clients: [{ id: "x", visibilityState: "hidden", url: "u", postMessage() {}, navigate: () => Promise.reject(new TypeError("not controlled")) }, { postMessage() {} }] });
-    await bad.activate(); await sleep(1700);
+    const bad = swRig({ caches: [["chalk-v15", m()]], clients: [{ id: "x", visibilityState: "hidden", url: "u", postMessage() {}, navigate: () => Promise.reject(new TypeError("not controlled")) }, { postMessage() {} }] });
+    await bad.activate(); await sleep(2400);
+  });
+  await ta("OF-02 safety: after v16 or later (and on a first install) the worker never reloads a page itself — v16+ pages wait for a quiet moment, so a rest clock, a HIIT clock, a set being typed or an open sheet is never lost", async () => {
+    const m = () => new Map([["x", new Response("x")]]);
+    const nav = [];
+    await Promise.all([["chalk-v16"], ["chalk-v15", "chalk-v16"], []].map(async before => {
+      const name = before.join("+") || "no older cache";
+      const pg = { id: "busy", visibilityState: "hidden", url: "https://nickahrensrealestate.github.io/chalk/index.html", postMessage() {}, navigate: () => { nav.push(name); return Promise.resolve(null); } };
+      const rig = swRig({ clients: [pg], caches: before.map(k => [k, m()]) });
+      await rig.activate();
+    }));
+    await sleep(2600);
+    assert.deepStrictEqual(nav, [], "no reload from outside");
   });
   await ta("a page still loading the version before gets its own files from the kept cache, even offline", async () => {
     const P = SWV - 1, rig = swRig({ net: () => "down" });

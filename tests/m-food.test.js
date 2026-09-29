@@ -2038,6 +2038,65 @@ t("SC-09 label OCR: a gram line read as 'N.N9' with no unit is N.N g (the g read
   assert.strictEqual(ok.per.f, 2.5); assert.ok(!ok.check.includes("f"), "a real 2.5g isn't flagged");
 });
 
+/* ---- partner check C4, round 4 ---- */
+t("C4R4 quick notes with no commas are cut into foods: '2 chicken breasts 1 cup rice broccoli', 'greek yogurt blueberries agave', 'cod asparagus quinoa'", () => {
+  M.reset();
+  const got = s => { const r = M.food.describeLocal(s); assert.deepStrictEqual(r.unmatched, [], s + " unmatched"); return r.items; };
+  let it = got("2 chicken breasts 1 cup rice broccoli");
+  assert.strictEqual(it.length, 3, it.map(i => i.name).join(" + "));
+  assert.ok(/chicken breast/i.test(it[0].name) && it[0].state === "raw", it[0].name); near(r4g(it[0]), 350, 0.5, "2 breasts raw");
+  assert.ok(/rice/i.test(it[1].name) && it[1].state === "cooked", it[1].name); assert.ok(/^broccoli, raw/i.test(it[2].name), it[2].name);
+  it = got("greek yogurt blueberries agave");
+  assert.deepStrictEqual(it.map(i => i.name.split(",")[0].toLowerCase()), ["greek yogurt", "blueberries", "agave"]);
+  it = got("cod asparagus quinoa");
+  assert.ok(/^cod/i.test(it[0].name) && it[0].state === "raw" && /asparagus/i.test(it[1].name) && /quinoa/i.test(it[2].name) && it[2].state === "cooked", it.map(i => i.name + ":" + i.state).join(" + "));
+  it = got("chicken broccoli rice"); assert.strictEqual(it.length, 3);
+  /* an amount right after a food is that food's amount */
+  it = got("chicken 200g rice broccoli"); near(r4g(it[0]), 200, 0.5, "chicken 200g"); assert.strictEqual(it.length, 3);
+  it = got("chicken 200 g rice"); near(r4g(it[0]), 200, 0.5, "not 200 breasts"); assert.strictEqual(it.length, 2); assert.ok(r4g(it[1]) > 100, "rice keeps its own serving, not 1 g");
+  it = got("pork tenderloin 6 oz broccoli"); near(r4g(it[0]), 170, 0.5, "6 oz pork"); assert.ok(/broccoli/i.test(it[1].name) && r4g(it[1]) > 50);
+  it = got("3 eggs 2 slices daves"); near(it[0].servings, 3, 0.01); near(it[1].servings, 2, 0.01);
+  /* the fewest foods: a two-word food isn't cut in two (no second cottage cheese / bell pepper) */
+  it = got("turkey slices cucumber cottage cheese"); assert.strictEqual(it.length, 3, it.map(i => i.name).join(" + "));
+  it = got("shrimp quinoa bell pepper"); assert.strictEqual(it.length, 3, it.map(i => i.name).join(" + "));
+  it = got("egg whites spinach"); assert.ok(/egg white/i.test(it[0].name), it[0].name);
+  it = got("chicken 1 banana"); assert.strictEqual(it.length, 2, "the banana isn't lost"); near(r4g(it[0]), 175, 0.5);
+  it = got("chicken 2 breasts rice"); assert.strictEqual(it.length, 2, it.map(i => i.name).join(" + ")); near(r4g(it[0]), 350, 0.5);
+  assert.ok(/lime juice/i.test(r4one("juice of 1 lime").name));
+  near(r4g(r4one("juice of 2 limes")), 2 * r4g(r4one("juice of 1 lime")), 0.5);
+});
+t("C4R4 one food is never cut in two; a fruit + bread / juice / peppers isn't two foods; jam of any flavor is their Smucker's; a flavor word isn't a food", () => {
+  M.reset();
+  for (const s of ["sweet potato", "peanut butter", "olive oil", "cottage cheese", "greek yogurt", "corn on the cob", "chicken breast", "pork tenderloin", "baby carrots", "bell pepper", "brown rice", "white rice", "egg whites", "half and half", "sweet onion", "roma tomatoes", "turkey slices"]) r4one(s);
+  for (const s of ["grilled chicken", "baked cod", "steamed broccoli", "scrambled eggs", "sliced turkey", "fresh strawberries", "organic banana", "frozen blueberries", "plain greek yogurt"]) r4one(s);
+  for (const s of ["banana bread", "grape juice", "banana peppers", "corn chips", "strawberry yogurt"]) {
+    const r = M.food.describeLocal(s); assert.strictEqual(r.items.length, 0, s + " → " + r.items.map(i => i.name).join(" + ")); assert.deepStrictEqual(r.unmatched, [s]);
+  }
+  for (const s of ["grape jelly", "blueberry jam"]) assert.ok(/smucker/i.test(r4one(s).brand), s);
+  const lp = M.food.describeLocal("lemon pepper chicken");
+  assert.ok(!lp.items.some(i => /^lemon|pepper/i.test(i.name)), lp.items.map(i => i.name).join(" + "));
+  assert.strictEqual(M.food.describeLocal("chicken broccoli lemon").items.length, 3, "a lemon at the end is a food");
+  const t0 = Date.now(); const big = M.food.describeLocal("chicken broccoli rice quinoa asparagus cod shrimp scallops zucchini onion banana blueberries");
+  assert.strictEqual(big.items.length, 12); assert.ok(Date.now() - t0 < 4000, "a long note stays quick");
+});
+
+t("C4R4 K3: a second code linked to one of My foods finds it offline and isn't called built in; UPC-A, EAN-13 and 11 digits find a built-in", async () => {
+  M.reset();
+  global.fetch = async () => { throw new TypeError("Failed to fetch"); };
+  NAV.onLine = false;
+  try {
+    const mine = M.foods.add({ name: "Oat milk", brand: "Store", source: "custom", barcode: "066666666666", serving: { qty: 1, unit: "cup", g: 240 }, per: { cal: 120, p: 3, c: 16, f: 5, fiber: 2, sugar: 7, sodium: 100 } });
+    assert.ok(M.foods.linkCode("055555555550", mine.id), "linked");
+    const r = await M.food.lookup("055555555550");
+    assert.strictEqual(r.food.id, mine.id); assert.ok(!r.builtIn, "one of My foods isn't built in");
+    const g = M.DB.generic.find(f => Array.isArray(f.barcodes) && f.barcodes.length);
+    if (g) {
+      const c = String(g.barcodes[0]).replace(/^0+/, "");
+      for (const code of [c.padStart(12, "0"), c.padStart(13, "0"), c]) { const b = await M.food.lookup(code); assert.strictEqual(b.food.id, g.id, code); assert.strictEqual(b.builtIn, true, code); }
+    }
+  } finally { NAV.onLine = true; delete global.fetch; delete M.MS.codes; M.reset(); }
+});
+
 /* ---- run ---- */
 (async () => {
   let pass = 0, fail = 0;

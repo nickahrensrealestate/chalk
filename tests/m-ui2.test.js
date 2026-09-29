@@ -1359,6 +1359,175 @@ t("label form: a ⅔ cup serving shows '⅔' (not 0.667); '2/3', '1 1/2' and '1�
   } finally { M.food.label.fromImage = saved; M.ui.close(); }
 });
 
+/* ---- checker C2b (round 4) ---- */
+t("FD-03 recent of a deleted batch meal: opens cooked only 'of 1000 g batch', and the new entry keeps its batch weight", () => {
+  reset();
+  const pot = M.meals.add({ name: "Rice pot", slot: "Lunch", batch: { cookedG: 1000, unit: "g" }, items: [{ name: "Beef", servings: 1000, servingLabel: "1 g raw", g: 1, per: { cal: 1.76, p: 0.2, c: 0, f: 0.1 }, state: "raw", cook: { y: 0.74, word: "raw" } }] });
+  M.log.addMeal(M.today(), pot.id, 1, "Lunch", { grams: 100, unit: "g" });
+  const e = entries().find(x => x.mealId === pot.id);
+  assert.ok(e && e.batchG === 1000, "the portion has its batch weight");
+  M.meals.remove(pot.id);
+  M.ui.openAdd({ slot: "Dinner", date: M.today() });
+  const row = qa('#m-results [data-m="pick"]').find(b => /Rice pot/.test(b.textContent));
+  assert.ok(row, "the recent is listed");
+  click(row);
+  const amt = $("m-det-amt").textContent;
+  assert.ok(/^100 g cooked$/.test(amt), "cooked only, never 'raw (cooked)': " + amt);
+  assert.ok(/of 1,?000 g batch/.test($("m-det-of").textContent), $("m-det-of").textContent);
+  click($("m-det-go"));
+  const e2 = entries().filter(x => x.slot === "Dinner");
+  assert.strictEqual(e2.length, 1);
+  assert.strictEqual(e2[0].batchG, 1000, "the new portion keeps the batch weight");
+  near(e2[0].per.cal * e2[0].servings, e.per.cal * e.servings, 0.5, "same calories as last time");
+  M.ui.close();
+});
+
+t("K3 a built-in barcode (Daisy 073420516208) opens the built-in food with no network, and makes no copy in My foods", async () => {
+  reset();
+  const start = M.food.scanner.start, fetch0 = ctx.fetch;
+  let calls = 0;
+  M.food.scanner.start = () => new Promise(() => {});
+  ctx.fetch = u => { if (/73420516208/.test(String(u && u.url || u))) calls++; return Promise.reject(new Error("no network in this test")); };
+  try {
+    click(q('#cta [data-m="add"]'));
+    click(q('[data-m="open-scan"]'));
+    input($("m-code"), "073420516208");
+    click(q('[data-m="code-lookup"]')); await sleep(20);
+    assert.strictEqual(calls, 0, "no lookup online for this code");
+    assert.ok(/Cottage cheese/.test($("sheetB").textContent), "the built-in Daisy opens");
+    same(Object.keys(M.MS.foods), [], "no copy in My foods");
+    click($("m-det-go"));
+    const e = entries()[0];
+    assert.ok(e && M.foods.get(e.foodId) && M.foods.get(e.foodId).brand === "Daisy", "logged as the built-in food");
+    same(Object.keys(M.MS.foods), [], "still no copy after logging");
+  } finally { M.food.scanner.start = start; ctx.fetch = fetch0; M.ui.close(); }
+});
+
+t("typed numbers that can't be a barcode: the message shows, with no 'Try again' (the same wrong numbers)", async () => {
+  reset();
+  const start = M.food.scanner.start;
+  M.food.scanner.start = () => new Promise(() => {});
+  try {
+    click(q('#cta [data-m="add"]'));
+    click(q('[data-m="open-scan"]'));
+    input($("m-code"), "0212345009998");
+    click(q('[data-m="code-lookup"]')); await sleep(20);
+    assert.ok(/don't match a real barcode/.test($("m-scan-status").textContent), $("m-scan-status").textContent);
+    assert.ok(!q('[data-m="scan-retry"]'), "no Try again");
+    assert.ok($("m-code"), "the number box is still there to fix it");
+  } finally { M.food.scanner.start = start; M.ui.close(); }
+});
+
+t("Meal ideas: calories left read with a comma ('1,806'), like the Diary", () => {
+  reset();
+  click(q('[data-m="suggest"]') || q('[data-m="open-suggest"]') || q('#cta [data-m="add"]'));
+  if (!/Meal ideas/.test($("sheetT").textContent)) { M.ui.close(); M.ui.openAdd({ slot: "Lunch", date: M.today() }); click(q('[data-m="suggest"]')); }
+  assert.ok(/Meal ideas/.test($("sheetT").textContent), $("sheetT").textContent);
+  const v = q(".m-sughd .stat .v").textContent;
+  assert.ok(/^\d{1,2},\d{3}/.test(v), "calories left with a comma: " + v);
+  M.ui.close();
+});
+
+t("K3 'Pick one of my foods': when the core can't save the code, it never says 'It scans next time'", async () => {
+  reset();
+  const saved = M.food.lookup, start = M.food.scanner.start, link = M.foods.linkCode;
+  M.food.scanner.start = () => new Promise(() => {});
+  M.food.lookup = code => Promise.resolve({ status: "not_found", code, message: "Not in Open Food Facts." });
+  M.foods.linkCode = () => null;
+  try {
+    click(q('#cta [data-m="add"]'));
+    click(q('[data-m="open-scan"]'));
+    input($("m-code"), "212345009994");
+    click(q('[data-m="code-lookup"]')); await sleep(10);
+    click(q('[data-m="code-pick"]'));
+    click(q('#m-codepick [data-m="code-pick-go"][data-id="g_kirkland_organic_chicken"]'));
+    assert.ok(!/scans next time/.test(lastToast()), lastToast());
+    assert.ok(/Couldn't save the barcode/.test(lastToast()), lastToast());
+    M.foods.linkCode = link;
+    M.ui.close();
+    /* the real core: a built-in food keeps the sticker in the codes map and the next lookup finds it */
+    click(q('#cta [data-m="add"]'));
+    click(q('[data-m="open-scan"]'));
+    input($("m-code"), "212345009994");
+    click(q('[data-m="code-lookup"]')); await sleep(10);
+    click(q('[data-m="code-pick"]'));
+    click(q('#m-codepick [data-m="code-pick-go"][data-id="g_kirkland_organic_chicken"]'));
+    assert.ok(/scans next time/.test(lastToast()), lastToast());
+    assert.strictEqual(M.foods.byCode("212345009994").id, "g_kirkland_organic_chicken");
+  } finally { M.food.lookup = saved; M.food.scanner.start = start; M.foods.linkCode = link; M.ui.close(); }
+});
+
+t("FD-01/FD-02 food fixes flow into saved meals: cup items (½, 1, 2 cups), a count item (breast) and a gram item", () => {
+  reset();
+  const milk = M.foods.add({ name: "Oat milk", serving: { qty: 1, unit: "cup", g: 240 }, per: { cal: 120, p: 3, c: 16, f: 5 }, source: "custom" });
+  const br = M.foods.add({ name: "Chicken breast pack", serving: { qty: 1, unit: "breast", g: 175 }, per: { cal: 180, p: 38, c: 0, f: 3 }, source: "custom" });
+  const it = (f, label, g, per, s) => ({ name: f.name, foodId: f.id, servings: s || 1, servingLabel: label, g, per });
+  const meal = M.meals.add({ name: "Lunch plate", slot: "Lunch", items: [
+    it(milk, "1 cup (240 g)", 240, { cal: 120, p: 3, c: 16, f: 5 }),
+    it(milk, "½ cup (120 g)", 120, { cal: 60, p: 1.5, c: 8, f: 2.5 }),
+    it(milk, "2 cups (480 g)", 480, { cal: 240, p: 6, c: 32, f: 10 }),
+    it(br, "1 breast (175 g)", 175, { cal: 180, p: 38, c: 0, f: 3 }, 2),
+    it(milk, "1 g", 1, { cal: 0.5, p: 0.0125, c: 0.0667, f: 0.0208 }, 200)] });
+  const oldM = M.cp(milk), oldB = M.cp(br);
+  const nm = M.foods.update(milk.id, { serving: { qty: 1, unit: "cup", g: 245 }, per: { cal: 130, p: 3, c: 17, f: 5 }, per100g: { cal: 130 / 2.45, p: 3 / 2.45, c: 17 / 2.45, f: 5 / 2.45 } });   /* as the food form saves it */
+  M.ui._.syncMeals(oldM, nm);
+  const nb = M.foods.update(br.id, { serving: { qty: 1, unit: "breast", g: 170 }, per: { cal: 175, p: 37, c: 0, f: 3 } });
+  M.ui._.syncMeals(oldB, nb);
+  const its = M.meals.get(meal.id).items;
+  near(its[0].per.cal, 130, 0.01, "1 cup follows the food");
+  near(its[1].per.cal, 65, 0.01, "½ cup is half");
+  near(its[2].per.cal, 260, 0.01, "2 cups is double");
+  assert.ok(/^1 cup \(245 g\)$/.test(its[0].servingLabel), its[0].servingLabel);
+  assert.ok(/^2 cups \(490 g\)$/.test(its[2].servingLabel), its[2].servingLabel);
+  near(its[3].per.cal, 175, 0.01, "a breast is the food's breast");
+  assert.strictEqual(its[3].servings, 2, "2 breasts stay 2");
+  assert.ok(/^1 breast \(170 g\)$/.test(its[3].servingLabel), its[3].servingLabel);
+  near(its[4].per.cal * its[4].servings, 200 * 130 / 245, 0.2, "200 g priced by the new grams, not rounded per gram");
+  M.ui.close();
+});
+
+t("FX-09 editing a meal from before owners were kept (or a food in it, or Undo) never tags it with the editor's name", () => {
+  reset();
+  const f = M.foods.add({ name: "Skyr", serving: { qty: 100, unit: "g", g: 100 }, per: { cal: 63, p: 11, c: 4, f: 0.2 }, per100g: { cal: 63, p: 11, c: 4, f: 0.2 }, source: "custom" });
+  const mk = name => { const m = M.meals.add({ name, slot: "Breakfast", items: [{ name: "Skyr", foodId: f.id, servings: 200, servingLabel: "1 g", g: 1, per: { cal: 0.63, p: 0.11, c: 0.04, f: 0.002 } }] }); delete M.MS.meals[m.id].pid; return m.id; };
+  const a = mk("Old bowl"), b = mk("Old bowl 2"), c = mk("Old bowl 3");
+  /* a food edit flows into the meal */
+  const old = M.cp(f);
+  M.ui._.syncMeals(old, M.foods.update(f.id, { per: { cal: 70, p: 11, c: 4, f: 0.2 }, per100g: { cal: 70, p: 11, c: 4, f: 0.2 } }));
+  assert.ok(!M.meals.get(a).pid, "a food edit doesn't claim the meal");
+  /* the builder: Edit → rename → Save */
+  openFoods("meals");
+  click(q('[data-m="meal"][data-id="' + b + '"]'));
+  click(q('[data-m="meal-edit"]'));
+  input(q('[data-m="mb"][data-k="name"]'), "Old bowl, renamed");
+  click(q('[data-m="mb-save"]'));
+  assert.strictEqual(M.meals.get(b).name, "Old bowl, renamed");
+  assert.ok(!M.meals.get(b).pid, "an edit doesn't claim the meal");
+  /* delete + Undo */
+  openFoods("meals");
+  click(q('[data-m="meal"][data-id="' + c + '"]'));
+  click(q('[data-m="meal-del"]')); click(q('[data-m="meal-del"]'));
+  click(q('[data-m="undo-del"]'));
+  assert.ok(M.meals.get(c) && !M.meals.get(c).pid, "Undo brings it back as it was");
+  /* a new meal is the maker's */
+  assert.strictEqual(M.meals.add({ name: "New bowl", items: [] }).pid, M.pid());
+  M.ui.close();
+});
+
+t("WK-05 a gram batch picked in Log food opens in grams (100 g cooked of 2250 g), like from Foods", () => {
+  reset();
+  const pot = M.meals.add({ name: "Rice pot", slot: "Lunch", batch: { cookedG: 2250, unit: "g" }, items: [{ name: "White rice", servings: 700, servingLabel: "1 g dry", g: 1, per: { cal: 3.65, p: 0.07, c: 0.8, f: 0.006 }, state: "raw", cook: { y: 3, word: "dry" } }] });
+  if (M.meals.get(pot.id).batch.unit !== "g") { M.meals.get(pot.id).batch.unit = "g"; }
+  M.ui.openAdd({ slot: "Lunch", date: M.today() });
+  click(q('[data-m="add-seg"][data-v="meals"]'));
+  const row = qa('#m-results [data-m="pick"]').find(b => /Rice pot/.test(b.textContent));
+  assert.ok(row, "the batch is listed");
+  click(row);
+  assert.strictEqual($("m-det-amt").textContent, "100 g cooked");
+  assert.ok(/of 2,?250 g batch/.test($("m-det-of").textContent), $("m-det-of").textContent);
+  M.ui.close();
+});
+
 (async () => {
   let pass = 0, fail = 0;
   for (const x of tests) {

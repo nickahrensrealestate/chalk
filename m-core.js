@@ -1462,7 +1462,7 @@ window.M = window.M || {};
     /* a name that repeats its brand ("Dave's Killer Bread Powerseed") is matched without it */
     let hw = toksOf(n.split(/[,(]/)[0]);
     if (bw.length && bw.every(w => hw.indexOf(w) >= 0)) { const nb = hw.filter(w => bw.indexOf(w) < 0); if (nb.length) hw = nb; }
-    o = { n, plain: n.replace(/['’]/g, ""), words, bw, lb: lc(brand), hw, head: hw.length ? hw[hw.length - 1] : "", j: words.join(" ") };
+    o = { n, plain: n.replace(/['’]/g, ""), words, bw, lb: lc(brand), hw, head: hw.length ? hw[hw.length - 1] : "", j: words.join(" "), nums: n.match(NUMS) || [] };
     if (nameCache.size > 5000) nameCache.clear();
     nameCache.set(key, o);
     return o;
@@ -1510,10 +1510,19 @@ window.M = window.M || {};
      → { req: words a food must have, opt: words it may have, all: every word left } */
   const Q_FILL = new Set(["large", "medium", "small", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "a", "an", "of", "the", "half", "scoop", "piece", "glass", "handful", "bowl", "serving", "and", "with", "x", "some"]);
   const Q_OPT = new Set(["grilled", "baked", "roasted", "rotisserie", "fried", "scrambled", "boneless", "skinless", "organic", "signature", "fillet", "filet", "deli", "lunchmeat", "natural", "plain", "frozen", "tender", "strip",
-    "g", "gram", "oz", "ounce", "lb", "pound", "kg", "ml", "cup", "tbsp", "tsp", "tablespoon", "teaspoon", "slice", "can", "bottle", "container", "packet", "stick"]);
+    "g", "gram", "oz", "ounce", "lb", "pound", "kg", "ml", "cup", "tbsp", "tsp", "tablespoon", "teaspoon", "slice", "can", "bottle", "container", "packet", "stick",
+    /* count words after a food ("6 asparagus spears", "2 links sausage") */
+    "spear", "stalk", "clove", "ear", "wedge", "link", "sprig", "bunch"]);
+  /* Words that only describe a food. When no food has every word, these may be left
+     out ("red onion" → Onion, "chopped tomato" → Tomato). Other words never are:
+     "string cheese" is not Cottage cheese, "garlic bread" is not Dave's. */
+  const Q_DESC = new Set(["red", "green", "yellow", "white", "brown", "black", "purple", "fresh", "whole", "sliced", "chopped", "diced", "minced", "shredded", "steamed", "boiled", "mashed", "canned", "dried", "baby", "mini", "jumbo", "lean", "wild", "ripe", "raw", "cooked"]);
   const Q_OPT2 = [["low", "fat"], ["lunch", "meat"], ["reduced", "fat"], ["fat", "free"]];
   const Q_UNIT = "g|grams?|gr|kg|oz|ounces?|lbs?|pounds?|ml|cups?|c|tbsps?|tablespoons?|tsps?|teaspoons?|slices?|pieces?|pcs|servings?|scoops?";
   const Q_AMT = new RegExp("(?:\\d+\\s*\\/\\s*\\d+|\\d+(?:[.,]\\d+)?\\s*[½¼¾⅓⅔⅛]?|[½¼¾⅓⅔⅛])\\s*(?:" + Q_UNIT + ")?(?![\\p{L}])", "gu");
+  /* numbers that name a food ("ground beef 90/10", "5% greek yogurt", "21 whole grains") */
+  const NUMS = /\d+(?:[.,]\d+)?(?:\/\d+)?%?/g;
+  const numHit = (pq, r) => { const ns = nameInfo(r.name, r.brand).nums; let b = 0; (pq.nums || []).forEach(x => { if (ns.indexOf(x) >= 0) b += 16; }); return b; };
   const qCache = new Map();
   function searchQuery(q) {
     const key = String(q == null ? "" : q);
@@ -1536,7 +1545,7 @@ window.M = window.M || {};
     let req = all.filter((t, i) => !fill[i] && !opt[i]), op = all.filter((t, i) => !fill[i] && opt[i]);
     if (!req.length) { req = op; op = []; }
     if (!req.length) req = all.slice();
-    o = { req, opt: op, all: kept.length ? kept : all.slice() };
+    o = { req, opt: op, all: kept.length ? kept : all.slice(), nums: lc(key).match(NUMS) || [] };
     if (qCache.size > 500) qCache.clear();
     qCache.set(key, o);
     return o;
@@ -1565,6 +1574,18 @@ window.M = window.M || {};
     return p1[lb];
   }
   const fuzzMax = t => (t.length >= 7 ? 2 : t.length >= 4 ? 1 : 0);
+  const sortedLetters = w => w.split("").sort().join("");
+  /* Typo distance with guards against real words that aren't in the app: in a word
+     under 6 letters only a missing, extra or swapped letter counts ("coke" is not cake,
+     "bull" is not bell, "soup" is not sour); two changes need 8+ letters and the same
+     first 2 letters ("creamer" is not creamy, "snickers" is not smuckers). */
+  function typoDist(t, w, max) {
+    const d = editDist(t, w, max);
+    if (d < 1 || d > max) return d;
+    if (t.length < 6 && t.length === w.length && sortedLetters(t) !== sortedLetters(w)) return max + 1;
+    if (d >= 2 && (t.length < 8 || t.slice(0, 2) !== w.slice(0, 2))) return max + 1;
+    return d;
+  }
   /* → the query with typo words swapped for real words, or null when nothing changed. */
   function fuzzQuery(pq, vocab) {
     const fix = t => {
@@ -1576,9 +1597,12 @@ window.M = window.M || {};
       let best = null, bd = max + 1, bf = 0;
       vocab.forEach((f, w) => {
         if (w.length < 3) return;
-        let d = editDist(t, w, max);
-        if (d > max && w.length > t.length) {   /* a typo in a word still being typed ("chike" → chicken) */
-          const pd = Math.min(editDist(t, w.slice(0, t.length), max), editDist(t, w.slice(0, t.length + 1), max));
+        /* a real word with more on the end is another food ("brownie", "creamer") */
+        if (t.length - w.length >= 2 && t.startsWith(w)) return;
+        let d = typoDist(t, w, max);
+        /* a typo in a word still being typed ("chike" → chicken): 5+ letters, same first letter */
+        if (d > max && w.length - t.length >= 2 && t.length >= 5 && w[0] === t[0]) {
+          const pd = Math.min(typoDist(t, w.slice(0, t.length), max), typoDist(t, w.slice(0, t.length + 1), max));
           if (pd <= max) d = pd + 0.5;
         }
         if (d > max + 0.5) return;
@@ -1590,7 +1614,7 @@ window.M = window.M || {};
     let changed = false;
     const map = list => { const out = []; list.forEach(t => { const r = fix(t); if (r) { changed = true; out.push.apply(out, r); } else out.push(t); }); return out; };
     const req = map(pq.req), op = pq.opt.slice(), all = map(pq.all);
-    return changed ? { req, opt: op, all } : null;
+    return changed ? { req, opt: op, all, nums: pq.nums } : null;
   }
   const usesBonus = o => Math.min(10, Math.log2(num(o.uses) + 1) * 2);
   /* Cook foods also answer to "raw" / "dry" / "cooked" ("cooked chicken", "dry pasta"). */
@@ -1698,7 +1722,7 @@ window.M = window.M || {};
         let s = scoreQuery(pq, c.r.name, c.r.brand, c.extra, c.kw);
         const weak = scoreWeak, inside = s >= 0 && scoreInside;
         if (s < 0) { if (!named) return; s = 0; }
-        res.push({ r: c.r, inside, tier: (c.own && !weak ? 0 : 1) + (fuzzy ? 2 : 0), s: s + c.bonus + (named ? NAMED : 0) + (nameInfo(c.r.name, c.r.brand).j === qn ? 40 : 0) });
+        res.push({ r: c.r, inside, tier: (c.own && !weak ? 0 : 1) + (fuzzy ? 2 : 0), s: s + c.bonus + (named ? NAMED : 0) + (nameInfo(c.r.name, c.r.brand).j === qn ? 40 : 0) + numHit(pq, c.r) });
       });
       /* letters inside a word ("apple" in Pineapple) only when no word matches whole or at its start */
       return res.some(x => !x.inside) ? res.filter(x => !x.inside) : res;
@@ -1707,9 +1731,12 @@ window.M = window.M || {};
     /* fewer than 3 hits: try again with typos fixed; those come after the exact hits */
     let fq = null;
     if (scored.length < 3) { fq = fuzzQuery(pq, vocabOf(cands)); if (fq) scored = scored.concat(pass(fq, true)); }
-    /* still nothing ("red onion", "baby carrots"): the last word must match, the rest may */
+    /* a typo fix that hits whole words beats letters inside another word ("aple": Apple, not Maple syrup) */
+    if (scored.some(x => x.inside) && scored.some(x => !x.inside)) scored = scored.filter(x => !x.inside);
+    /* still nothing ("red onion", "chopped tomato"): the last word must match and the
+       describing words before it may be missing. Never drops a word that names a food. */
     const lq = fq || pq;
-    if (!scored.length && lq.req.length > 1) scored = pass({ req: lq.req.slice(-1), opt: lq.req.slice(0, -1).concat(lq.opt), all: lq.all }, true);
+    if (!scored.length && lq.req.length > 1 && lq.req.slice(0, -1).every(w => Q_DESC.has(w))) scored = pass({ req: lq.req.slice(-1), opt: lq.req.slice(0, -1).concat(lq.opt), all: lq.all, nums: lq.nums }, true);
     scored.sort((a, b) => a.tier - b.tier || b.s - a.s || lc(a.r.name).localeCompare(lc(b.r.name)));
     for (const x of scored) { if (out.length >= limit) break; push(x.r); }
     return out;
@@ -1741,7 +1768,10 @@ window.M = window.M || {};
     snooze(pid, kind, days) {
       const p = M.person(pid || M.pid());
       if (!isObj(p.snooze)) p.snooze = { refresh60: 0, body14: 0 };
-      p.snooze[kind] = M.now() + num(days, 7) * DAY;
+      /* noon of the calendar day it comes back: "7 days" stays 7 days across a clock change */
+      const back = parseKey(M.addDays(M.today(), Math.max(1, Math.round(num(days, 7)))));
+      back.setHours(12, 0, 0, 0);
+      p.snooze[kind] = back.getTime();
       M.save();
       return p.snooze[kind];
     },
@@ -2091,6 +2121,9 @@ window.M = window.M || {};
   let otherTab = false;
   function otherTabSaved() {
     otherTab = false;
+    /* this tab's own last save failed (phone full): what it holds is only in memory,
+       so it is kept, never swapped for the other tab's copy. The next save retries. */
+    if (!M.storage.ok) return;
     try { M.load(); } catch (e) { return; }
     rerender();
   }

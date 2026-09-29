@@ -67,21 +67,36 @@ self.addEventListener("activate", e => {
     list.forEach(c => { try { c.postMessage({ type: "chalk-updated", cache: CACHE }); } catch (x) {} });
     /* not awaited: fetches wait while this worker is still activating */
     const old = new Set(list.map(c => c.id));
-    setTimeout(() => { reloadHidden(old); }, 1500);
+    if (prev >= 0 && prev < SELF_SINCE) setTimeout(() => { reloadHidden(old); }, 1500);
   })());
 });
 
-/* An old page left open in the background would stay on its version for days (v15 has no update listener). So
-   1.5 s after a new version takes over, pages that were open before it and sit in the background are reloaded.
-   Workouts are saved on the phone, so a reload keeps them. Pages from v17 on answer "chalk-self" to the update
-   message: they reload themselves at a quiet moment (never mid-workout or while typing), so they're left alone. */
+/* An old page left open in the background would stay on its version for days: v15 has no update listener.
+   Pages from v16 on reload themselves at a quiet moment (never mid-workout, with a sheet open or while typing), so
+   the worker never reloads them: it only steps in when the version before was older than that. Even then a page is
+   reloaded only after it has stayed in the background for a full minute (looked at every 2 s), because the rest
+   clock, a HIIT clock and a set being typed live only in the open page. Pages that answer "chalk-self" (v17 on)
+   are always left alone. Workouts are saved on the phone, so the reload keeps them. */
+const SELF_SINCE = 16;
+const HIDDEN_MS = 60000, HIDDEN_POLL_MS = 2000;
 const selfUpdating = new Set();
+const isOldHidden = (c, old) => !!c && old.has(c.id) && !selfUpdating.has(c.id) && c.visibilityState === "hidden" &&
+  typeof c.navigate === "function" && String(c.url || "").startsWith(SCOPE.href);   /* only Chalk's own pages, never another app's */
 function reloadHidden(old) {
-  return self.clients.matchAll({ type: "window" }).then(list => Promise.all(list.map(c => {
-    if (!c || !old.has(c.id) || selfUpdating.has(c.id) || c.visibilityState !== "hidden" || typeof c.navigate !== "function") return null;
-    if (!String(c.url || "").startsWith(SCOPE.href)) return null;        /* only Chalk's own pages, never another app's */
-    return Promise.resolve().then(() => c.navigate(c.url)).catch(() => {});
-  }))).catch(() => {});
+  const hiddenNow = () => self.clients.matchAll({ type: "window" }).then(list => list.filter(c => isOldHidden(c, old)));
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  return hiddenNow().then(async first => {
+    let ids = new Set(first.map(c => c.id));
+    /* a page seen in front even once is dropped: it was just in use */
+    for (let t = 0; ids.size && t < HIDDEN_MS; t += HIDDEN_POLL_MS) {
+      await wait(HIDDEN_POLL_MS);
+      const still = new Set((await hiddenNow()).map(c => c.id));
+      ids = new Set([...ids].filter(id => still.has(id)));
+    }
+    if (!ids.size) return;
+    const list = await hiddenNow();
+    await Promise.all(list.filter(c => ids.has(c.id)).map(c => Promise.resolve().then(() => c.navigate(c.url)).catch(() => {})));
+  }).catch(() => {});
 }
 
 self.addEventListener("message", e => {

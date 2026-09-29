@@ -726,7 +726,7 @@ t("restore keeps the replaced training for Undo and leaves a one-time note (BES-
   assert.strictEqual(P.M.cloud.undoInfo(), null, "nothing to undo yet");
   assert.strictEqual(P.M.cloud.training().keep, 2, "the card can say 2 workouts stay");
   assert.strictEqual(await P.M.cloud.restoreTraining(), true);
-  assert.deepStrictEqual(J(P.train().log.map(x => x.id)), ["w1", "p1", "w2", "p2", "w3"], "restored, and this phone's 2 stay (SY-04)");
+  assert.deepStrictEqual(J(P.train().log.map(x => x.id)), ["w3", "p2", "w2", "p1", "w1"], "restored, and this phone's 2 stay, newest first like Chalk (SY-04)");
   assert.strictEqual(P.store.get("chalk.sync.restored"), "3", "one-time note for the toast");
   const u = P.M.cloud.undoInfo();
   assert.ok(u && u.n === 2 && u.pid === "nick" && u.at > 0, JSON.stringify(u));
@@ -1799,7 +1799,7 @@ t("SY-04 a training restore adds the backup to this phone's workouts; Undo keeps
   assert.strictEqual(await K2.M.cloud.restoreTraining(), true);
   const after = K2.train();
   assert.deepStrictEqual(J(after.log.map(w => w.id)).sort(), ["k1", "k2", "k3", "k4", "new1", "new2"], "nothing on this phone was dropped");
-  assert.ok(after.log.every((w, i) => i === 0 || after.log[i - 1].start <= w.start), "in date order");
+  assert.ok(after.log.every((w, i) => i === 0 || after.log[i - 1].start >= w.start), "newest first, like Chalk");
   assert.strictEqual(after.active && after.active.name, "Legs", "the workout in progress stays");
   assert.ok((await K2.sync()).ok);
   const cloudIds = J(trainOf(SERVER.get(code, "train", "kat")).log.map(w => w.id)).sort();
@@ -1807,7 +1807,7 @@ t("SY-04 a training restore adds the backup to this phone's workouts; Undo keeps
   /* she logs a workout, then taps Undo: back to her 2, plus the one logged since */
   const t = K2.train(); t.log.push({ id: "since1", name: "Workout since1", start: Date.now(), sets: {} }); t.active = null; K2.setTrain(t);
   assert.strictEqual(K2.M.cloud.undoRestore(), true);
-  assert.deepStrictEqual(J(K2.train().log.map(w => w.id)), ["new1", "new2", "since1"], "Undo keeps the workout logged since");
+  assert.deepStrictEqual(J(K2.train().log.map(w => w.id)), ["since1", "new2", "new1"], "Undo keeps the workout logged since (newest first)");
   /* nothing logged since: Undo gives back the exact text */
   const K3 = phone("sy04-k3", { S: { profile: "kat", active: null }, train: trainState("kat", ["x1"]) });
   assert.ok((await K3.M.cloud.join(code)).ok);
@@ -1925,6 +1925,84 @@ t("SY-04 on a borrowed phone, a restore never mixes the other person's workouts 
   assert.deepStrictEqual(J(trainOf(SERVER.get(code, "train", "kat")).log.map(w => w.id)), ["k1", "k2", "k3"], "her backup stays clean");
   assert.deepStrictEqual(J(trainOf(SERVER.get(code, "train", "nick")).log.map(w => w.id)), ["n1", "n2"], "his stay in his backup");
   N.M.cloud.leave(); K.M.cloud.leave();
+});
+
+t("C5 upgrade: a phone that synced before day bases were kept never brings back the other phone's deletes (also days older than 60); a push race still keeps both", async () => {
+  const { P: A, code } = await household("c5up-a");
+  const B = phone("c5up-b");                          /* a second phone on Nick */
+  const date = A.M.today(), old = A.M.addDays(date, -61), per = { cal: 300, p: 40, c: 0, f: 10 };
+  A.M.log.add(date, { slot: "Dinner", name: "Pork", per });
+  A.M.log.add(old, { slot: "Dinner", name: "Old A", per }); A.M.log.add(old, { slot: "Dinner", name: "Old B", per });
+  assert.ok((await A.sync()).ok);
+  assert.ok((await B.M.cloud.join(code)).ok);
+  await B.sync(); await A.sync(); await B.sync();
+  assert.deepStrictEqual(dayNames(B, "nick"), ["Chicken toast", "Pork"]);
+  assert.deepStrictEqual(dayNames(B, "nick", old), ["Old A", "Old B"]);
+  /* what the live build (b01144d) left in storage: no day bases and no home */
+  [A, B].forEach(P => { const s = P.M.cloud._.state(); Object.keys(s.base).forEach(k => { if (k.startsWith("day|")) delete s.base[k]; }); s.home = ""; });
+  const del = (P, d, name) => P.M.log.remove(d, P.M.MS.days["nick|" + d].entries.find(e => e.name === name).id);
+  del(A, date, "Chicken toast"); del(A, old, "Old A");
+  assert.ok((await A.sync()).ok); assert.ok((await B.sync()).ok); assert.ok((await A.sync()).ok); assert.ok((await B.sync()).ok);
+  [A, B].forEach(P => {
+    assert.deepStrictEqual(dayNames(P, "nick"), ["Pork"], P.name + ": the delete sticks");
+    assert.deepStrictEqual(dayNames(P, "nick", old), ["Old B"], P.name + ": the delete sticks on a day older than 60");
+  });
+  assert.deepStrictEqual(cloudDay(code, "nick|" + date).entries.map(e => e.name), ["Pork"]);
+  assert.deepStrictEqual(cloudDay(code, "nick|" + old).entries.map(e => e.name), ["Old B"]);
+  /* right after an upgrade both phones log and push at once (neither saw the other): both stay */
+  [A, B].forEach(P => { const s = P.M.cloud._.state(); Object.keys(s.base).forEach(k => { if (k.startsWith("day|")) delete s.base[k]; }); });
+  A.M.cloud.configure({ delay: 60 }); B.M.cloud.configure({ delay: 60 });
+  A.M.log.add(date, { slot: "Snacks", name: "A snack", per });
+  B.M.log.add(date, { slot: "Snacks", name: "B snack", per });
+  await Promise.all([A.sync(), B.sync()]);
+  for (let i = 0; i < 2; i++) { await A.sync(); await B.sync(); }
+  [A, B].forEach(P => assert.deepStrictEqual(dayNames(P, "nick"), ["Pork", "A snack", "B snack"], P.name + ": nothing lost in the race"));
+  /* the same race on a day older than 60 days (no base kept there) */
+  A.M.log.add(old, { slot: "Snacks", name: "A old snack", per });
+  B.M.log.add(old, { slot: "Snacks", name: "B old snack", per });
+  await Promise.all([A.sync(), B.sync()]);
+  for (let i = 0; i < 2; i++) { await A.sync(); await B.sync(); }
+  [A, B].forEach(P => assert.deepStrictEqual(dayNames(P, "nick", old), ["Old B", "A old snack", "B old snack"], P.name + ": nothing lost on an old day"));
+  /* and then nothing more to send, both ways */
+  const pa = A.posts().length, pb = B.posts().length;
+  await A.sync(); await B.sync(); await A.sync(); await B.sync();
+  assert.strictEqual(A.posts().length - pa + B.posts().length - pb, 0, "no ping-pong");
+  A.M.cloud.configure({ delay: 0 }); B.M.cloud.configure({ delay: 0 });
+  A.M.cloud.leave(); B.M.cloud.leave();
+});
+
+t("C5 restore and Undo keep Chalk's order: newest workout first (log[0] is the last workout)", async () => {
+  const now = Date.now(), w = (id, daysAgo) => ({ id, name: "Workout " + id, start: now - daysAgo * DAY, sets: { squat: [{ w: 225, r: 5 }] } });
+  /* real Chalk logs are newest first (it adds with unshift and sorts b.start - a.start) */
+  const O = phone("c5ord-old", { train: trainState("nick", [], { log: [w("b1", 2), w("b2", 9), w("b3", 16)] }) });
+  seedNick(O);
+  const code = O.M.cloud.create(); assert.ok((await O.sync()).ok);
+  const P = phone("c5ord-new", { train: trainState("nick", [], { log: [w("p1", 1), w("p2", 12)] }) });
+  assert.ok((await P.M.cloud.join(code)).ok);
+  assert.strictEqual(await P.M.cloud.restoreTraining(), true);
+  assert.deepStrictEqual(J(P.train().log.map(x => x.id)), ["p1", "b1", "b2", "p2", "b3"], "newest first after the restore");
+  /* a workout logged since, then Undo: still newest first */
+  const t2 = P.train(); t2.log.unshift(w("since", 0)); t2.updatedAt = Date.now(); P.setTrain(t2);
+  assert.strictEqual(P.M.cloud.undoRestore(), true);
+  assert.deepStrictEqual(J(P.train().log.map(x => x.id)), ["since", "p1", "p2"], "newest first after Undo");
+  O.M.cloud.leave(); P.M.cloud.leave();
+});
+
+t("C5 an Undo copy made by the live build (its restore replaced every workout) keeps its week; a new one keeps one day", async () => {
+  const raw = JSON.stringify(trainState("nick", ["only1", "only2"]));
+  const oldCopy = JSON.stringify({ v: 1, at: Date.now() - 3 * DAY, pid: "nick", n: 2, raw });
+  const P = phone("c5undo-old", { store: { "chalk.sync.undo": oldCopy }, train: trainState("nick", ["b1"]) });
+  const u = P.M.cloud.undoInfo();
+  assert.ok(u && u.n === 2 && u.pid === "nick", "still there after 3 days: " + JSON.stringify(u));
+  assert.strictEqual(P.store.get("chalk.sync.undo"), oldCopy);
+  assert.strictEqual(P.M.cloud.undoRestore(), true);
+  assert.deepStrictEqual(J(P.train().log.map(w => w.id)).sort(), ["b1", "only1", "only2"], "the replaced workouts come back, none lost");
+  const tooOld = JSON.stringify({ v: 1, at: Date.now() - 8 * DAY, pid: "nick", n: 2, raw });
+  const P2 = phone("c5undo-8d", { store: { "chalk.sync.undo": tooOld } });
+  assert.strictEqual(P2.M.cloud.undoInfo(), null); assert.ok(!P2.store.has("chalk.sync.undo"), "a week is the most");
+  const newCopy = JSON.stringify({ v: 1, at: Date.now() - 2 * DAY, pid: "nick", n: 2, raw, bk: ["b1"] });
+  const P3 = phone("c5undo-new", { store: { "chalk.sync.undo": newCopy } });
+  assert.strictEqual(P3.M.cloud.undoInfo(), null); assert.ok(!P3.store.has("chalk.sync.undo"), "this build's copy: one day");
 });
 
 /* =================================================================== run */

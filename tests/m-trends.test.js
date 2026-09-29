@@ -1717,6 +1717,101 @@ t("K5: M.trends.hasDraft — setup typed but not saved, or a You box typed but n
   assert.strictEqual(M.trends.hasDraft(), false);
 });
 
+/* partner check C3 (round 4) */
+t("C3: You height — a blank inches box never puts the saved feet back over a typed number; stale messages hide while retyping", () => {
+  M.ui.tab = "you"; M.reset(); M.trends.resetDraft();
+  const p = setupNick(); const t0 = JSON.stringify(p.targets);
+  show(M.ui.views.you());
+  const q = f => $('[data-m="t-num"][data-f="' + f + '"]');
+  /* 5'11" → 6'0": clear inches, type 6 in feet, leave the box */
+  q("hin").value = ""; change(q("hin"), "");
+  change(q("hft"), 6);
+  assert.strictEqual(q("hft").value, "6", "the typed 6 stays (was put back to 5)");
+  assert.strictEqual(q("hin").value, "", "inches still blank");
+  assert.strictEqual(p.heightIn, 71, "nothing saved while inches is blank"); assert.strictEqual(JSON.stringify(p.targets), t0);
+  assert.strictEqual(M.trends.hasDraft(), true, "typed, not saved yet");
+  change(q("hin"), 0);
+  assert.strictEqual(p.heightIn, 72, "6 ft 0 in saved (was 5 ft 0 in)");
+  /* feet blank, inches changed: the typed inches stay */
+  q("hft").value = ""; change(q("hin"), 10);
+  assert.strictEqual(q("hin").value, "10", "typed inches kept"); assert.strictEqual(p.heightIn, 72);
+  change(q("hft"), 5); assert.strictEqual(p.heightIn, 70);
+  /* a typo's message hides while they type again, and comes back if it's still wrong */
+  change(q("hft"), 55); assert.ok(!$("#mt-hmsg-you").hidden);
+  q("hft").value = "5"; M.ui.inputs["t-num"](q("hft"));
+  assert.ok($("#mt-hmsg-you").hidden, "hidden while retyping");
+  change(q("hft"), 55); assert.ok(!$("#mt-hmsg-you").hidden, "back on leaving the box with a typo");
+  assert.strictEqual(q("hft").value, "55"); assert.strictEqual(p.heightIn, 70);
+  change(q("hft"), 5); assert.ok($("#mt-hmsg-you").hidden); assert.strictEqual(p.heightIn, 70);
+  change(q("goal"), 1750); assert.ok(!$("#mt-gmsg-you").hidden);
+  q("goal").value = "17"; M.ui.inputs["t-num"](q("goal")); assert.ok($("#mt-gmsg-you").hidden, "goal message hides while typing");
+  assert.ok($("#mt-hmsg-you").hidden, "other messages untouched");
+  change(q("goal"), 170); assert.strictEqual(p.goalWeightLb, 170);
+  /* typed targets: the clamp message hides on the next keystroke */
+  click('[data-m="t-manual"]'); show(M.ui.views.you());
+  const tq = f => $('[data-m="t-target"][data-f="' + f + '"]');
+  change(tq("p"), 1850); assert.ok(!$("#mt-tmsg").hidden);
+  tq("p").value = "18"; M.ui.inputs["t-target"](tq("p")); assert.ok($("#mt-tmsg").hidden);
+  /* setup: the height message hides while typing */
+  M.reset(); M.trends.resetDraft(); M.ui.tab = "diary";
+  show(M.ui.setupCardHTML());
+  const sf = f => $('#mt-setup [data-f="' + f + '"]');
+  sf("hin").value = "11"; change(sf("hft"), 55);
+  assert.ok(!$("#mt-hmsg-setup").hidden);
+  sf("hft").value = "5"; M.ui.inputs["t-setup"](sf("hft"));
+  assert.ok($("#mt-hmsg-setup").hidden, "setup message hides while typing");
+  change(sf("hft"), 5); assert.ok($("#mt-hmsg-setup").hidden); assert.strictEqual(M.trends.draft().heightIn, 71);
+  M.trends.resetDraft();
+});
+
+t("C3: K5 setup draft comes back for the right person only, and never over saved numbers", () => {
+  const was = global.S.profile;
+  M.reset(); M.trends.resetDraft(); M.ui.tab = "diary";
+  ["nick", "kat"].forEach(id => localStorage.removeItem("chalk.macros.setupDraft." + id));
+  global.S.profile = "nick";
+  show(M.ui.setupCardHTML());
+  const sf = f => $('#mt-setup [data-f="' + f + '"]');
+  change(sf("age"), 41); change(sf("weight"), 185);
+  assert.ok(localStorage.getItem("chalk.macros.setupDraft.nick"), "Nick's draft kept");
+  /* Katerina on the same phone: an empty setup, and her own key */
+  global.S.profile = "kat";
+  show(M.ui.setupCardHTML());
+  assert.strictEqual(sf("age").value, "", "Nick's age not shown to Katerina"); assert.strictEqual(sf("weight").value, "");
+  assert.strictEqual(M.trends.hasDraft(), false, "nothing typed for Katerina");
+  change(sf("age"), 35);
+  assert.strictEqual(JSON.parse(localStorage.getItem("chalk.macros.setupDraft.kat")).age, 35);
+  /* back to Nick (and a reload): his numbers come back */
+  global.S.profile = "nick"; M.trends.forget();
+  show(M.ui.setupCardHTML());
+  assert.strictEqual(sf("age").value, "41"); assert.strictEqual(sf("weight").value, "185");
+  /* a copy whose pid doesn't match its key is dropped */
+  localStorage.setItem("chalk.macros.setupDraft.kat", JSON.stringify({ pid: "nick", at: M.now(), age: 99 }));
+  global.S.profile = "kat"; M.trends.forget(); show(M.ui.setupCardHTML());
+  assert.strictEqual(sf("age").value, "", "a mismatched copy is not used");
+  assert.strictEqual(localStorage.getItem("chalk.macros.setupDraft.kat"), null, "and it is removed");
+  /* numbers arrive from the other phone (sync): the kept draft never replaces them */
+  global.S.profile = "nick"; M.trends.forget();
+  const p = setupNick({ age: 50, weightLb: 200 });
+  M.trends.draft();
+  assert.strictEqual(p.age, 50); assert.strictEqual(p.weightLb, 200);
+  assert.strictEqual(localStorage.getItem("chalk.macros.setupDraft.nick"), null, "the old draft goes away");
+  assert.strictEqual(M.trends.hasDraft(), false);
+  global.S.profile = was; M.trends.resetDraft();
+});
+
+t("C3: a heart-rate chart never gets 7 crowded y lines (52, 54 … 64); at most 6", () => {
+  const today = M.today(), yl = svg => (svg.match(/<line class="g"/g) || []).length;   /* one grid line per y tick */
+  /* 57 and 58 bpm two days apart: the 12-bpm axis lands on 50.1 … 64.9 */
+  const pts = [{ date: M.addDays(today, -2), v: 58 }, { date: today, v: 57 }];
+  const svg = M.charts.line(pts, { avg: [{ date: today, v: 57.5, n: 2 }], minSpan: 12, from: M.addDays(today, -90), to: today, unit: "bpm", label: "Resting heart rate", tone: "mus", whole: true });
+  const n = yl(svg);
+  assert.ok(n >= 3 && n <= 6, "y lines: " + n);
+  assert.ok(!/NaN/.test(svg));
+  /* one reading still gets its 3 lines (55, 60, 65) */
+  const one = M.charts.line([{ date: today, v: 58 }], { avg: [], minSpan: 12, from: M.addDays(today, -90), to: today, unit: "bpm", whole: true });
+  assert.ok(yl(one) >= 3 && yl(one) <= 6); assert.ok(!/NaN/.test(one));
+});
+
 /* ======================================================================= */
 (async () => {
   let passed = 0;
