@@ -258,7 +258,7 @@ t("Foods tab renders the meal under Lunch; meal sheet logs to today", () => {
 
 t("Foods tab: My foods form saves and deletes", () => {
   click(q('[data-m="foods-seg"][data-v="foods"]'));
-  assert.ok(/Nothing saved yet/.test($("app").textContent));
+  assert.ok(/No saved foods yet/.test($("app").textContent));
   click(q('[data-m="food-new"]'));
   assert.ok(sheetOn());
   input(q('[data-m="ff"][data-k="name"]'), "Test bar");
@@ -404,6 +404,42 @@ t("label sheet has capture + library inputs and a Type-it-in path; barcode sheet
   assert.ok($("m-scan") && $("m-code") && q('[data-m="code-lookup"]') && q('[data-m="code-photo"]'));
   M.ui.close();
   assert.ok(!sheetOn());
+});
+
+t("new food not in the app: search → '+ Add as a new food' (name prefilled) → Save & add → logged, saved, found next time", async () => {
+  if (M.ui.sheetOpen()) M.ui.close();
+  M.ui.tab = "diary"; M.ui.date = M.today(); M.ui.render();
+  click(q('[data-m="add"][data-slot="Dinner"]'));
+  /* the Add sheet offers New food next to the scanners */
+  const tools = qa(".m-tools button").map(b => Array.from(b.childNodes).filter(n => n.nodeType === 3).map(n => n.textContent).join("").trim());
+  assert.deepStrictEqual(tools.slice(0, 3), ["Scan barcode", "Scan label", "New food"], JSON.stringify(tools));
+  input($("m-search"), "green chile stew");
+  await sleep(750);
+  const btn = q('#m-results [data-m="open-form"][data-name]');
+  assert.ok(btn && /Add “green chile stew” as a new food/.test(btn.textContent), $("m-results").textContent);
+  click(btn);
+  assert.strictEqual(q('[data-m="ff"][data-k="name"]').value, "Green chile stew", "name prefilled from the search");
+  input(q('[data-m="ff"][data-k="unit"]'), "bowl");
+  input(q('[data-m="ff"][data-k="cal"]'), "320"); input(q('[data-m="ff"][data-k="p"]'), "24"); input(q('[data-m="ff"][data-k="c"]'), "30"); input(q('[data-m="ff"][data-k="f"]'), "10");
+  assert.ok(/Save & add to Dinner/.test(q('[data-m="ff-save-add"]').textContent));
+  click(q('[data-m="ff-save-add"]'));
+  assert.strictEqual($("m-det-go").textContent, "Add to Dinner");
+  click($("m-det-go"));
+  const saved = M.foods.list().find(f => f.name === "Green chile stew");
+  assert.ok(saved && saved.source === "custom" && saved.per.cal === 320 && saved.serving.unit === "bowl", JSON.stringify(saved));
+  assert.ok(M.log.slotEntries(M.today(), "Dinner").some(e => e.name === "Green chile stew"), "logged to Dinner");
+  /* next time: it comes up first, and a partial search still shows the add-new row at the end */
+  click(q('[data-m="add"][data-slot="Lunch"]'));
+  input($("m-search"), "green chile");
+  await sleep(750);
+  const rows = qa('#m-results [data-m="pick"]');
+  assert.ok(rows.length && /Green chile stew/.test(rows[0].textContent), "saved food is the top result");
+  const tail = q("#m-results .m-addnew");
+  assert.ok(tail && /Add “green chile” as a new food/.test(tail.textContent), "add-new row after results");
+  /* and it lives in Foods → My foods */
+  M.ui.close(); M.ui.tab = "foods"; M.ui.foodsSeg = "foods"; M.ui.render();
+  assert.ok(qa('[data-m="food"]').some(r => /Green chile stew/.test(r.textContent)), "listed in My foods");
+  M.ui.tab = "diary"; M.ui.render();
 });
 
 t("chrome() swaps #tabs in both modes and marks the mode bar", () => {

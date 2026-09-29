@@ -484,8 +484,11 @@ window.M = window.M || {};
       else if (add.offQ === q && add.offState === "error") html += '<div class="m-offstate mut small">' + esc(add.offErr || "Open Food Facts didn't answer.") + '</div>';
     }
     if (!add.list.length) {
-      html = '<div class="empty">' + (q ? "Nothing found. Scan the label or describe it." : add.seg === "recent" ? "Nothing logged yet. Search above or try Foods." : "Search for a food, or scan a label.") + '</div>' +
-        (q ? '<div class="m-btnrow"><button class="btn" data-m="open-label">Scan the label</button><button class="btn" data-m="open-describe" data-q="' + esc(q) + '">Describe it</button>' + (M.ai && M.ai.ready() ? '<button class="btn" data-m="ai-name" data-q="' + esc(q) + '">Ask Claude</button>' : "") + '</div>' : "");
+      html = '<div class="empty">' + (q ? "Not in the app yet. Add it once and it's saved for next time." : add.seg === "recent" ? "Nothing logged yet. Search above or try Foods." : "Search for a food, or scan a label.") + '</div>' +
+        (q ? '<button class="btn primary block" data-m="open-form" data-name="' + esc(q) + '">+ Add “' + esc(q) + '” as a new food</button>' +
+          '<div class="m-btnrow"><button class="btn" data-m="open-scan">Scan barcode</button><button class="btn" data-m="open-label">Scan the label</button>' + (M.ai && M.ai.ready() ? '<button class="btn" data-m="ai-name" data-q="' + esc(q) + '">Ask Claude</button>' : '<button class="btn" data-m="open-describe" data-q="' + esc(q) + '">Describe it</button>') + '</div>' : "");
+    } else if (q && add.seg !== "meals") {
+      html += '<button class="m-addnew" data-m="open-form" data-name="' + esc(q) + '"><b>+ Not here?</b> Add “' + esc(q) + '” as a new food</button>';
     }
     return html;
   }
@@ -493,7 +496,7 @@ window.M = window.M || {};
   function addHTML() {
     return '<div class="m-add"><div class="m-pills">' + M.SLOTS.map(s => '<button class="chip' + (s === add.slot ? " on" : "") + '" data-m="add-slot" data-v="' + s + '">' + s + '</button>').join("") + '</div>' +
       '<input class="m-search" id="m-search" type="search" data-m="search" placeholder="Search foods, meals, brands" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search" value="' + esc(add.q) + '">' +
-      '<div class="m-tools"><button data-m="open-scan"><span>▥</span>Scan barcode</button><button data-m="open-label"><span>▤</span>Scan label</button><button data-m="open-photo"><span>◉</span>Photo</button><button data-m="open-describe"><span>✎</span>Describe</button><button data-m="suggest"><span>✦</span>Suggest</button></div>' +
+      '<div class="m-tools"><button data-m="open-scan"><span>▥</span>Scan barcode</button><button data-m="open-label"><span>▤</span>Scan label</button><button data-m="open-form"><span>＋</span>New food</button><button data-m="open-photo"><span>◉</span>Photo</button><button data-m="open-describe"><span>✎</span>Describe</button><button data-m="suggest"><span>✦</span>Suggest</button></div>' +
       '<div class="seg scope m-seg">' + [["recent", "Recent"], ["meals", "Meals"], ["foods", "Foods"]].map(s => '<button data-m="add-seg" data-v="' + s[0] + '"' + (add.seg === s[0] ? ' class="on"' : "") + '>' + s[1] + '</button>').join("") + '</div>' +
       '<div class="ex-list m-results" id="m-results"></div></div>';
   }
@@ -627,10 +630,12 @@ window.M = window.M || {};
   }
   A["open-form"] = el => {
     const ctx = scanCtx();
-    ff = { food: { name: "", brand: "", barcode: el.dataset.code || "", serving: { qty: 1, unit: "serving", g: null }, per: {}, source: "custom" }, id: null, slot: ctx.slot, date: ctx.date, onPick: ctx.onPick };
+    const typed = el && el.dataset && el.dataset.name ? String(el.dataset.name).trim() : "";
+    const nice = typed ? typed.charAt(0).toUpperCase() + typed.slice(1) : "";
+    ff = { food: { name: nice, brand: "", barcode: (el && el.dataset && el.dataset.code) || "", serving: { qty: 1, unit: "serving", g: null }, per: {}, source: "custom" }, id: null, slot: ctx.slot, date: ctx.date, onPick: ctx.onPick };
     UI.sheet("New food", formHTML({ buttons: '<button class="btn primary block" data-m="ff-save-add">Save &amp; add to ' + esc(ff.slot) + '</button><button class="btn block" data-m="ff-save">Save to my foods</button>' }));
   };
-  A["ff-save"] = () => { const f = saveForm(); if (!f) return; UI.close(); UI.toast("Saved to My foods"); if (UI.tab === "foods") UI.render(); };
+  A["ff-save"] = () => { const f = saveForm(); if (!f) return; UI.close(); UI.toast("Saved. Find it in search or Foods → My foods."); if (UI.tab === "foods") UI.render(); };
   A["ff-save-add"] = () => {
     const f = saveForm(); if (!f) return;
     const ctx = { slot: ff.slot, date: ff.date, onPick: ff.onPick };
@@ -807,7 +812,7 @@ window.M = window.M || {};
       return M.SLOTS.concat(["Any"]).map(s => { const g = meals.filter(m => m.slot === s); if (!g.length) return ""; return '<h2 class="sec">' + s + '</h2><div class="card"><div class="ex-list">' + g.map(mealRow).join("") + '</div></div>'; }).join("");
     }
     const foods = M.foods.list().filter(f => !toks.length || toks.every(t => (lc(f.name) + " " + lc(f.brand)).includes(t)));
-    if (!foods.length) return '<div class="card"><div class="empty">' + (q ? "No foods match." : "Nothing saved yet. Scanned, labelled and Claude-estimated foods land here.") + '</div></div>';
+    if (!foods.length) return '<div class="card"><div class="empty">' + (q ? "No foods match." : "No saved foods yet. Tap + New food, or scan a barcode or label when you log. Every food you add is saved here for next time.") + '</div></div>';
     return '<div class="card"><div class="ex-list">' + foods.map(foodRow).join("") + '</div></div>';
   }
   UI.views.foods = function () {
