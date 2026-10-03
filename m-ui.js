@@ -568,7 +568,8 @@ window.M = window.M || {};
     let due = null; try { due = M.checkins.due(id); } catch (e) {}
     if (due === "setup") {
       const card = typeof UI.setupCardHTML === "function" ? UI.setupCardHTML() : "";
-      return card || '<div class="card"><div class="hd"><h3>Let\'s set your targets</h3></div><div class="bd"><p class="hint" style="margin-bottom:10px">Open the You tab and enter your numbers (sex, age, height, weight). Your calorie and macro targets come from those.</p><button class="btn primary block" data-m="tab" data-v="you">Open You</button></div></div>';
+      let sh = ""; try { sh = shareCardsHTML(); } catch (e) { sh = ""; }
+      return sh + (card || '<div class="card"><div class="hd"><h3>Let\'s set your targets</h3></div><div class="bd"><p class="hint" style="margin-bottom:10px">Open the You tab and enter your numbers (sex, age, height, weight). Your calorie and macro targets come from those.</p><button class="btn primary block" data-m="tab" data-v="you">Open You</button></div></div>');
     }
     let banner = ""; try { banner = typeof UI.bannerHTML === "function" ? (UI.bannerHTML() || "") : ""; } catch (e) { banner = ""; }
     const streak = M.streak(id);
@@ -576,7 +577,8 @@ window.M = window.M || {};
     /* SY-05: on a borrowed phone the other person's diary is still coming down from the cloud */
     UI._catchShown = catchingUp();
     const catching = UI._catchShown ? '<div class="m-catch" role="status">Getting your diary…</div>' : "";
-    return full + catching + banner + dayCard() + M.SLOTS.map(slotCard).join("") +
+    let shares = ""; try { shares = shareCardsHTML(); } catch (e) { shares = ""; }
+    return full + catching + banner + shares + dayCard() + M.SLOTS.map(slotCard).join("") +
       '<div class="m-foot">' + (streak > 0 ? '<span class="chip ok m-streak"><span aria-hidden="true">🔥 </span>' + streak + '-day streak</span>' : '<span class="chip">Log a day to start a streak</span>') + '<button class="btn" data-m="suggest">Meal ideas</button></div>';
   };
 
@@ -765,7 +767,7 @@ window.M = window.M || {};
       '<div class="stats m-live" id="m-live"></div>' +
       (det.mode === "pick" ? "" : '<div style="margin-top:10px"><span class="lbl">Meal</span><select class="sel" data-m="det-slot" aria-label="Meal">' + M.SLOTS.map(x => '<option' + (x === det.slot ? " selected" : "") + '>' + x + '</option>').join("") + '</select></div>') +
       '<button class="btn primary block" id="m-det-go" data-m="det-go" style="margin-top:12px">' + (det.mode === "pick" ? "Add to meal" : det.mode === "edit" ? "Save" : "Add to " + det.slot) + '</button>' +
-      (det.mode === "edit" ? '<div class="m-btnrow"><button class="btn" data-m="det-move" aria-expanded="false" aria-controls="m-move">Move</button>' + (det.canSaveFood ? '<button class="btn" data-m="det-savefood">Save food</button>' : "") + '<button class="btn danger" data-m="det-del">Delete</button></div><div id="m-move" hidden class="m-move">' + dayMoveHTML() + "</div>" : "") +
+      (det.mode === "edit" ? '<div class="m-btnrow"><button class="btn" data-m="det-move" aria-expanded="false" aria-controls="m-move">Move</button>' + (det.canSaveFood ? '<button class="btn" data-m="det-savefood">Save food</button>' : "") + (otherPid() ? '<button class="btn" data-m="share-entry">Send to ' + esc(personName(otherPid())) + '</button>' : "") + '<button class="btn danger" data-m="det-del">Delete</button></div><div id="m-move" hidden class="m-move">' + dayMoveHTML() + "</div>" : "") +
       "</div>";
   }
   /* Set `det` for a source. opt: mode, slot, date, entryId, onPick, canSaveFood, fromMeal;
@@ -1098,10 +1100,90 @@ window.M = window.M || {};
     const y = M.addDays(date(), -1); const yn = M.log.slotEntries(y, slot).length; const n = M.log.slotEntries(date(), slot).length;
     const count = k => (k ? k + " item" + (k === 1 ? "" : "s") : "Empty");
     const copyLbl = date() === today() ? "Copy yesterday's " + slot : "Copy " + slot + " from " + M.fmtDay(y);
+    const oth = otherPid();
     UI.sheet(slot + dayTag(date()), '<button class="opt" data-m="slot-copy"' + (yn ? "" : " disabled") + '><span>' + esc(copyLbl) + '</span><span class="m">' + count(yn) + '</span></button>' +
       '<button class="opt" data-m="slot-savemeal"' + (n ? "" : " disabled") + '><span>Save ' + slot + ' as a meal</span><span class="m">' + count(n) + '</span></button>' +
+      (oth ? '<button class="opt" data-m="share-slot"' + (n ? "" : " disabled") + '><span>Send ' + slot + ' to ' + esc(personName(oth)) + '</span><span class="m">' + count(n) + '</span></button>' : "") +
       '<button class="opt m-danger" data-m="slot-clear"' + (n ? "" : " disabled") + '><span>Clear ' + slot + '</span><span class="m">' + count(n) + '</span></button>');
   };
+
+  /* ================================================================= SHARING */
+  /* "Send Breakfast to Katerina": the items go to the other person's inbox (M.share). On their
+     phone (or when they pick themselves here) the Diary shows the card below; "Add to Breakfast"
+     copies the items into their own day, where they change what they like (one more egg). A saved
+     meal arrives as "Save to my meals" and becomes their own copy. Train handles activity shares. */
+  const otherPid = () => { try { return M.share ? M.share.other(pid()) : null; } catch (e) { return null; } };
+  const syncIsOn = () => { try { return !!(M.cloud && typeof M.cloud.status === "function" && M.cloud.status().on); } catch (e) { return false; } };
+  /* after a send: where it goes, and the one thing that stops it reaching the other phone */
+  function sentToast(to, what) {
+    UI.toast("Sent " + what + " to " + personName(to) + "." + (syncIsOn() ? "" : " Turn on Sync (You → Sync & backup) so it reaches " + (to === "kat" ? "her" : "his") + " phone."));
+  }
+  const shareItem = e => Object.assign({ name: e.name, brand: e.brand, servings: e.servings, servingLabel: e.servingLabel, g: e.g, per: e.per, foodId: e.foodId, mealId: e.mealId, source: e.source }, cookOf(e), e.mealId && num(e.batchG) > 0 ? { batch: true, batchG: num(e.batchG) } : {});
+  A["share-slot"] = () => {
+    const to = otherPid(); if (!to || !menu) return;
+    const slot = menu.slot, list = M.log.slotEntries(date(), slot); if (!list.length) return;
+    const r = M.share.send({ to, kind: "log", name: slot, slot, date: date(), items: list.map(shareItem) });
+    UI.close(); if (!r) { UI.toast("Couldn't send that."); return; }
+    sentToast(to, slot.toLowerCase() + " (" + list.length + " item" + (list.length === 1 ? "" : "s") + ")"); UI.render();
+  };
+  A["share-entry"] = () => {
+    const to = otherPid(); if (!to || !det || det.mode !== "edit") return;
+    const d = M.dayOf(det.date), e = d && d.entries.find(x => x.id === det.entryId); if (!e) return;
+    const r = M.share.send({ to, kind: "log", name: e.name, slot: e.slot, date: det.date, items: [shareItem(e)] });
+    UI.close(); if (!r) { UI.toast("Couldn't send that."); return; }
+    sentToast(to, '"' + e.name + '"'); UI.render();
+  };
+  A["share-meal"] = () => {
+    const to = otherPid(); if (!to || !mealSheet) return;
+    const m = M.meals.get(mealSheet.id); if (!m) return;
+    const r = M.share.send({ to, kind: "meal", name: m.name, desc: m.desc, slot: m.slot, servingsMade: m.servingsMade, batch: isObj(m.batch) ? { cookedG: m.batch.cookedG, unit: bUnit(m) || undefined } : null, items: M.cp(m.items) });
+    UI.close(); if (!r) { UI.toast("Couldn't send that."); return; }
+    sentToast(to, '"' + m.name + '"'); UI.render();
+  };
+  /* the cards at the top of the Diary: what the other person sent, and what this person sent that is still waiting */
+  function shareCardsHTML() {
+    const me = pid(); if (!me || !M.share) return "";
+    let inbox = [], out = [];
+    try { inbox = M.share.inbox(me).filter(s => s.share.kind !== "activity"); out = M.share.outbox(me).filter(s => s.share.kind !== "activity"); } catch (e) { return ""; }
+    const his = p => (p === "kat" ? "her" : "his");
+    const list = m => '<div class="ex-list m-mealitems">' + m.items.map(it => { const t = entryTotals(it); return '<div class="ex-row"><div class="ex-main"><div class="n">' + esc(it.name) + '</div><div class="t">' + (it.brand ? esc(it.brand) + " · " : "") + esc(wholeAmount(it)) + '</div></div><div class="m-kcal num">' + kcal(t.cal) + '</div></div>'; }).join("") + '</div>';
+    const cards = inbox.map(m => {
+      const s = m.share, from = personName(s.from), tot = shownTotals(m.items), n = m.items.length;
+      const when = s.date && s.date !== today() ? " · " + M.fmtDay(s.date) : "";
+      if (s.kind === "meal") {
+        return '<div class="card m-share" role="region" aria-label="Meal from ' + esc(from) + '"><div class="hd"><div><div class="up mut">From ' + esc(from) + '</div><h3>' + esc(m.name) + '</h3>' + (m.desc ? '<div class="small mut">' + esc(m.desc) + '</div>' : "") + '</div><span class="tag acc">Meal</span></div>' +
+          list(m) + '<div class="bd"><div class="small mut num" style="margin-bottom:8px">' + kcal(tot.cal) + ' cal · ' + macroLine(tot) + (num(s.servingsMade, 1) > 1 ? ' · makes ' + fmtQty(s.servingsMade) + ' servings' : "") + '</div>' +
+          '<div class="m-btnrow"><button class="btn primary" data-m="share-accept" data-id="' + esc(m.id) + '">Save to my meals</button><button class="btn" data-m="share-dismiss" data-id="' + esc(m.id) + '">Not now</button></div></div></div>';
+      }
+      const slot = M.isSlot(s.slot) ? s.slot : M.defaultSlot();
+      return '<div class="card m-share" role="region" aria-label="' + esc(slot) + ' from ' + esc(from) + '"><div class="hd"><div><div class="up mut">From ' + esc(from) + '</div><h3>' + esc(from) + ' sent you ' + his(s.from) + ' ' + esc(slot) + esc(when) + '</h3></div><span class="tag acc">' + n + ' item' + (n === 1 ? "" : "s") + '</span></div>' +
+        list(m) + '<div class="bd"><div class="small mut num" style="margin-bottom:8px">' + kcal(tot.cal) + ' cal · ' + macroLine(tot) + '</div>' +
+        '<div class="m-btnrow"><button class="btn primary" data-m="share-accept" data-id="' + esc(m.id) + '">Add to my ' + esc(slot) + esc(when) + '</button><button class="btn" data-m="share-dismiss" data-id="' + esc(m.id) + '">Not now</button></div>' +
+        '<p class="hint" style="margin:8px 0 0">Added items are yours to change: tap one to add or take away.</p></div></div>';
+    }).join("");
+    const waiting = out.length ? '<div class="card m-share-out"><div class="bd"><div class="small mut">Waiting for ' + esc(personName(out[0].share.to)) + ': ' + out.map(m => esc(m.share.kind === "meal" ? '"' + m.name + '"' : m.name.toLowerCase() + (m.share.date && m.share.date !== today() ? " (" + M.fmtDay(m.share.date) + ")" : ""))).join(", ") + '. <button class="btn ghost m-inline" data-m="share-cancel" data-id="' + esc(out[0].id) + '">Take back</button></div></div></div>' : "";
+    return cards + waiting;
+  }
+  UI.shareCardsHTML = shareCardsHTML;
+  /* a one-line nudge for Train → Today when food shares wait in Macros */
+  UI.shareNoteHTML = function () {
+    const me = pid(); if (!me || !M.share) return "";
+    let inbox = []; try { inbox = M.share.inbox(me).filter(s => s.share.kind !== "activity"); } catch (e) { return ""; }
+    if (!inbox.length) return "";
+    const s = inbox[0].share, from = personName(s.from), what = s.kind === "meal" ? 'a meal: "' + inbox[0].name + '"' : (s.from === "kat" ? "her " : "his ") + (M.isSlot(s.slot) ? s.slot : "food");
+    return '<div class="card m-share-note"><div class="srow"><div><div class="l">' + esc(from) + ' sent you ' + esc(what) + (inbox.length > 1 ? " + " + (inbox.length - 1) + " more" : "") + '</div><div class="s">Add it to your diary in Macros.</div></div><button class="btn" data-m="mode" data-v="macros" data-tab="diary">Open</button></div></div>';
+  };
+  A["share-accept"] = el => {
+    const m = M.share.get(el.dataset.id); if (!m) { UI.render(); return; }
+    if (m.share.kind === "meal") { const r = M.share.acceptMeal(m.id); UI.toast(r ? '"' + r.name + '" is in your saved meals' : "Couldn't save that."); UI.render(); return; }
+    const r = M.share.acceptLog(m.id);
+    if (!r) { UI.toast("Couldn't add that."); UI.render(); return; }
+    if (r.date !== today()) UI.date = r.date;
+    UI.toast("Added " + r.entries.length + " item" + (r.entries.length === 1 ? "" : "s") + " to " + r.slot + dayTag(r.date) + ". Tap one to change it.");
+    UI.render();
+  };
+  A["share-dismiss"] = el => { M.share.dismiss(el.dataset.id); UI.toast("Skipped"); UI.render(); };
+  A["share-cancel"] = el => { M.share.cancel(el.dataset.id); UI.toast("Taken back"); UI.render(); };
   A["slot-copy"] = () => { const n = M.log.copySlot(M.addDays(date(), -1), date(), menu.slot).length; UI.close(); UI.toast(n ? "Copied " + n + " item" + (n === 1 ? "" : "s") + dayTag(date()) : "Nothing to copy"); UI.render(); };
   A["slot-clear"] = el => { if (!confirmTap(el, "clear")) return; const slot = menu.slot; M.log.clearSlot(date(), slot); UI.close(); UI.toast(slot + " cleared"); UI.render(); };
   A["slot-savemeal"] = () => {
@@ -2271,7 +2353,7 @@ window.M = window.M || {};
     const head = m.desc ? '<p class="m-sugdesc">' + esc(m.desc) + '</p>' : "";
     /* LK-08 / NJ-06: item rows look like food rows and keep the brand */
     const list = '<div class="ex-list m-mealitems">' + m.items.map(it => { const t = entryTotals(it); return '<div class="ex-row"><div class="ex-main"><div class="n">' + esc(it.name) + '</div><div class="t">' + (it.brand ? esc(it.brand) + " · " : "") + esc(wholeAmount(it)) + '</div></div><div class="m-kcal num">' + kcal(t.cal) + '</div></div>'; }).join("") + '</div>';
-    const tools = '<div class="m-btnrow"><button class="btn" data-m="meal-edit">Edit</button><button class="btn" data-m="meal-dup">Duplicate</button><button class="btn danger" data-m="meal-del">Delete</button></div>';
+    const tools = '<div class="m-btnrow"><button class="btn" data-m="meal-edit">Edit</button><button class="btn" data-m="meal-dup">Duplicate</button>' + (otherPid() ? '<button class="btn" data-m="share-meal">Send to ' + esc(personName(otherPid())) + '</button>' : "") + '<button class="btn danger" data-m="meal-del">Delete</button></div>';
     if (isObj(m.batch) && num(m.batch.cookedG) > 0) {
       /* a batch: "How much did you eat?" by cooked weight, logged to today; the amount comes first */
       const lp = lastPortion(m.id);   /* WK-05: a gram batch starts at 100 g, an oz batch at 4 oz */

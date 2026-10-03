@@ -1130,11 +1130,88 @@ window.M = window.M || {};
     remove(id) { if (!ownRec(M.MS.meals, id)) return false; delete M.MS.meals[id]; M.save(); return true; },
     get(id) { return ownRec(M.MS.meals, id); },
     list(slot) {
-      let arr = Object.values(M.MS.meals);
+      /* a share waiting in the other person's inbox rides in this store but is never a saved meal */
+      let arr = Object.values(M.MS.meals).filter(m => isObj(m) && !isObj(m.share));
       if (slot) arr = arr.filter(m => m.slot === slot || m.slot === "Any");
       return arr.sort(byUse);
     },
     touch(id) { const m = touchMeal(id); if (m) M.save(); return m; }
+  };
+
+  /* ----------------------------------------------------------------- shares */
+  /* One person sends the other a logged meal, a saved meal or an activity. A share
+     is a meal-shaped record in M.MS.meals with a `share` field (pid = the person it
+     is for), so it travels on the household sync like any saved meal and shows up
+     in the other person's inbox on their phone (or right away when they pick
+     themselves on this phone). M.meals.list() never shows it. Accepting copies the
+     items into the receiver's own diary / meals / activity log and removes the
+     share; dismissing just removes it. Nothing is ever sent automatically. */
+  const SHARE_KINDS = { log: 1, meal: 1, activity: 1 };
+  M.share = {
+    other(pid) { pid = pid || M.pid(); return pid === "kat" ? "nick" : pid === "nick" ? "kat" : null; },
+    name(pid) { return presetName(pid); },
+    /* { to, kind:"log"|"meal"|"activity", name, desc?, slot?, date?, items?, act?, note? } → share record | null */
+    send(o) {
+      if (!isObj(o) || !isPid(o.to) || !SHARE_KINDS[o.kind]) return null;
+      const from = isPid(o.from) ? o.from : M.pid();
+      if (!isPid(from) || from === o.to) return null;
+      const now = M.now();
+      const share = { kind: o.kind, from, to: o.to, at: now, date: parseKey(o.date) ? o.date : M.today() };
+      if (M.isSlot(o.slot)) share.slot = o.slot;
+      if (isStr(o.note) && o.note.trim()) share.note = o.note.trim().slice(0, 200);
+      if (o.kind === "activity") share.act = isObj(o.act) ? scrubJSON(o.act, 0) : {};
+      if (o.kind === "meal") { share.servingsMade = num(o.servingsMade, 1) > 0 ? num(o.servingsMade, 1) : 1; if (isObj(o.batch) && num(o.batch.cookedG) > 0) { share.batch = { cookedG: r1(num(o.batch.cookedG)) }; if (["g", "oz", "lb"].indexOf(o.batch.unit) >= 0) share.batch.unit = o.batch.unit; } }
+      const rec = {
+        id: "sh_" + M.uid(), name: String(o.name || (o.kind === "activity" ? "Activity" : "Meal")).trim().slice(0, 120),
+        desc: String(o.desc || "").trim().slice(0, 120), slot: M.isSlot(o.slot) ? o.slot : "Any",
+        items: (Array.isArray(o.items) ? o.items : []).filter(isObj).map(it => { const c = M.cp(it); delete c.id; delete c.slot; delete c.at; delete c.u; return c; }),
+        servingsMade: 1, pid: o.to, share
+      };
+      const m = normMeal(rec); m.pid = o.to; m.share = share; m.u = now; m.items.forEach(it => { it.u = now; });
+      M.MS.meals[m.id] = m; M.save();
+      return m;
+    },
+    get(id) { const m = ownRec(M.MS.meals, id); return m && isObj(m.share) ? m : null; },
+    /* shares waiting for this person, oldest first */
+    inbox(pid, kind) {
+      pid = pid || M.pid(); if (!isPid(pid)) return [];
+      return Object.values(M.MS.meals).filter(m => isObj(m) && isObj(m.share) && m.share.to === pid && (!kind || m.share.kind === kind)).sort((a, b) => num(a.share.at) - num(b.share.at));
+    },
+    /* what this person sent that the other hasn't taken yet */
+    outbox(pid) {
+      pid = pid || M.pid(); if (!isPid(pid)) return [];
+      return Object.values(M.MS.meals).filter(m => isObj(m) && isObj(m.share) && m.share.from === pid).sort((a, b) => num(b.share.at) - num(a.share.at));
+    },
+    /* a logged meal → entries in the receiver's diary (the share's date, or `date`) in the share's slot */
+    acceptLog(id, date, slot) {
+      const m = M.share.get(id); if (!m || m.share.kind !== "log") return null;
+      const dt = parseKey(date) ? date : (parseKey(m.share.date) ? m.share.date : M.today());
+      const s = M.isSlot(slot) ? slot : (M.isSlot(m.share.slot) ? m.share.slot : M.defaultSlot());
+      const d = M.day(dt, m.share.to); const now = M.now();
+      const out = m.items.map(it => { const e = normEntry(Object.assign(M.cp(it), { id: M.uid(), slot: s, at: now })); e.u = now; d.entries.push(e); return e; });
+      touchDay(d);
+      delete M.MS.meals[id]; M.save();
+      return { date: dt, slot: s, entries: out };
+    },
+    /* a saved meal → the receiver's own copy in Saved meals */
+    acceptMeal(id) {
+      const m = M.share.get(id); if (!m || m.share.kind !== "meal") return null;
+      const c = { name: m.name, desc: m.desc, slot: m.slot, servingsMade: num(m.share.servingsMade, 1) || 1, items: M.cp(m.items) };
+      if (isObj(m.share.batch) && num(m.share.batch.cookedG) > 0) c.batch = { cookedG: m.share.batch.cookedG, unit: m.share.batch.unit };
+      delete M.MS.meals[id];
+      const r = M.meals.add(c); r.pid = m.share.to; M.save();
+      return r;
+    },
+    /* an activity → the payload for Chalk's Train log (the caller writes it there) */
+    acceptActivity(id) {
+      const m = M.share.get(id); if (!m || m.share.kind !== "activity") return null;
+      const act = M.cp(isObj(m.share.act) ? m.share.act : {}); act.from = m.share.from; act.date = m.share.date;
+      delete M.MS.meals[id]; M.save();
+      return act;
+    },
+    dismiss(id) { if (!M.share.get(id)) return false; delete M.MS.meals[id]; M.save(); return true; },
+    /* the sender takes it back */
+    cancel(id) { return M.share.dismiss(id); }
   };
 
   /* ------------------------------------------------------------------- days */
@@ -2235,6 +2312,19 @@ window.M = window.M || {};
       cNum(o, "servingsMade", false, 1e-9, 1e4); cPer(o, "per");
       if ("batch" in o) { if (!isObj(o.batch)) delete o.batch; else { cNum(o.batch, "cookedG", false, 0, C_MAX); cNum(o.batch, "rawG", false, 0, C_MAX); if (o.batch.unit !== undefined && ["g", "oz", "lb"].indexOf(o.batch.unit) < 0) delete o.batch.unit; } }
       ["createdAt", "updatedAt", "uses", "lastUsed", "u"].forEach(k => cNum(o, k, false, 0));
+      /* a share (see M.share): a real kind, from one person to the other, else it is a plain meal */
+      if ("share" in o) {
+        const s = o.share;
+        if (!isObj(s) || !SHARE_KINDS[s.kind] || !isPid(s.from) || !isPid(s.to) || s.from === s.to) delete o.share;
+        else {
+          cNum(s, "at", false, 0); cStr(s, "date", 10); cStr(s, "slot", 20); cStr(s, "note", 200);
+          if (s.slot !== undefined && !M.isSlot(s.slot)) delete s.slot;
+          cNum(s, "servingsMade", false, 1e-9, 1e4);
+          if ("batch" in s) { if (!isObj(s.batch)) delete s.batch; else { cNum(s.batch, "cookedG", false, 0, C_MAX); if (s.batch.unit !== undefined && ["g", "oz", "lb"].indexOf(s.batch.unit) < 0) delete s.batch.unit; } }
+          if ("act" in s && !isObj(s.act)) delete s.act;
+          o.pid = s.to;
+        }
+      }
       return o;
     },
     day(o, id) {

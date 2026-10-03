@@ -437,3 +437,13 @@
 .m-item>.icon{width:44px;height:44px;margin:0}
 .m-mbedit .stepper.sm{grid-template-columns:44px 1fr 44px}
 .m-mbedit .stepper.sm button,.m-mbedit .stepper.sm input{height:44px}
+
+/* ---- sharing between Nick and Katerina (M.share): inbox cards on the Diary, a waiting line, a Train nudge ---- */
+.card.m-share{border:1px solid var(--acc);box-shadow:var(--shadow)}
+.card.m-share .hd h3{font-size:20px}
+.card.m-share .m-btnrow{margin-top:4px}
+.card.m-share .m-btnrow>.btn.primary{flex:2 1 auto;white-space:nowrap}
+.card.m-share-out .bd{padding-top:10px;padding-bottom:10px}
+.card.m-share-note .srow{padding:10px 14px}
+/* the entry and meal sheets' rows hold four buttons: Send gets its own full line so the others stay one line each */
+.m-btnrow>.btn[data-m="share-entry"],.m-btnrow>.btn[data-m="share-meal"]{flex:1 1 100%;order:9;white-space:nowrap}

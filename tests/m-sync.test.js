@@ -2267,6 +2267,44 @@ t("C5 a phone upgraded from v16/v17 that took a newer phone's day row whole send
   R.M.cloud.leave();
 });
 
+t("a share (M.share) rides the meal rows: Kat sends Breakfast, it lands in Nick's inbox, accepting puts it in his diary and clears it on both phones", async () => {
+  const A = phone("nick-share"), B = phone("kat-share", { S: { profile: "kat", active: null } });
+  const code = A.M.cloud.create(); assert.ok((await A.sync()).ok); assert.ok((await B.M.cloud.join(code)).ok);
+  const bm = B.M, am = A.M, today = bm.today();
+  bm.log.add(today, { slot: "Breakfast", name: "Eggs, whole", servings: 2, servingLabel: "1 large egg (50 g)", g: 50, per: { cal: 72, p: 6, c: 0.4, f: 5 } });
+  const sent = bm.share.send({ to: "nick", from: "kat", kind: "log", name: "Breakfast", slot: "Breakfast", date: today, items: bm.log.slotEntries(today, "Breakfast", "kat").map(e => ({ name: e.name, servings: e.servings, servingLabel: e.servingLabel, g: e.g, per: e.per })) });
+  assert.ok(sent && sent.share.to === "nick" && sent.pid === "nick", "share record made for Nick");
+  assert.ok(!bm.meals.list().some(m => m.id === sent.id), "a share is never a saved meal");
+  assert.strictEqual(bm.share.outbox("kat").length, 1);
+  assert.ok((await B.sync()).ok);
+  const r = await A.sync(); assert.ok(r.ok && r.applied >= 1);
+  const inbox = am.share.inbox("nick");
+  assert.strictEqual(inbox.length, 1, "Nick's phone has the share in his inbox");
+  assert.strictEqual(inbox[0].items[0].name, "Eggs, whole");
+  assert.ok(!am.meals.list().some(m => m.id === sent.id), "not in Nick's saved meals either");
+  const acc = am.share.acceptLog(inbox[0].id);
+  assert.ok(acc && acc.entries.length === 1 && acc.slot === "Breakfast");
+  assert.strictEqual(am.log.slotEntries(today, "Breakfast", "nick")[0].servings, 2, "the items are in Nick's own Breakfast");
+  assert.strictEqual(am.share.inbox("nick").length, 0);
+  await A.sync(); await B.sync();
+  assert.strictEqual(bm.share.outbox("kat").length, 0, "Kat's phone sees it was taken");
+  assert.ok(!bm.MS.meals[sent.id] && !am.MS.meals[sent.id], "the share row is gone on both phones");
+  /* a saved-meal share becomes the receiver's own copy; an activity share carries its payload */
+  const ms = am.share.send({ to: "kat", from: "nick", kind: "meal", name: "Protein oats", desc: "Oats + whey", slot: "Breakfast", servingsMade: 2, items: [{ name: "Oats", servings: 1, per: { cal: 150, p: 5, c: 27, f: 3 } }] });
+  const as = am.share.send({ to: "kat", from: "nick", kind: "activity", name: "Hike", date: today, act: { act: "hike", start: Date.now() - 36e5, min: 90, mi: 4.2, elev: 900, note: "Chautauqua" } });
+  await A.sync(); await B.sync();
+  assert.deepStrictEqual(J(bm.share.inbox("kat").map(m => m.share.kind).sort()), ["activity", "meal"]);
+  const copy = bm.share.acceptMeal(ms.id);
+  assert.ok(copy && copy.pid === "kat" && copy.servingsMade === 2 && copy.items.length === 1, "Kat gets her own copy with the servings");
+  const act = bm.share.acceptActivity(as.id);
+  assert.ok(act && act.act === "hike" && act.mi === 4.2 && act.elev === 900 && act.from === "nick", "the activity payload comes back whole");
+  assert.strictEqual(bm.share.inbox("kat").length, 0);
+  await B.sync(); await A.sync();
+  assert.strictEqual(am.share.outbox("nick").length, 0);
+  assert.ok(mealNames(A).includes("Protein oats") && mealNames(B).includes("Protein oats"), "the copy syncs like any meal");
+  A.M.cloud.leave(); B.M.cloud.leave();
+});
+
 /* =================================================================== run */
 (async () => {
   SERVER = mockServer();
