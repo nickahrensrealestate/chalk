@@ -1360,9 +1360,12 @@ function runFourDayPass() {
         assert.ok(lifts.filter(it => it.pool && it.pool.length).every(it => it.rot), "every lift slot rotates");
         const medium = lifts.filter(it => it.lo === 10 && it.hi === 15);
         assert.ok(medium.length >= 4, "medium-weight rep ranges (10–15): " + medium.length);
-        assert.ok(blocks.some(b => b.name === "Bodyweight") && blocks.some(b => b.name === "Core"), blocks.map(b => b.name).join(","));
-        const bwIds = blocks.find(b => b.name === "Bodyweight").moves.map(m => m.ex);
-        assert.ok(bwIds.length >= 3 && bwIds.every(id => w.eval("NOLOAD(getEx(" + JSON.stringify(id) + ").t)") || w.eval("CARDIO.has(" + JSON.stringify(id) + ")")), "bodyweight moves: " + bwIds.join(","));
+        assert.ok(blocks.some(b => b.name === "Circuit") && blocks.some(b => b.name === "Core"), blocks.map(b => b.name).join(","));
+        assert.strictEqual(A.gear, "hotel", "hotel gym by default (bodyweight + light weights)");
+        const every = [].concat(...A.items.map(it => it.t === "block" ? it.moves.map(m => m.ex) : [it.ex]));
+        every.forEach(id => assert.ok(w.eval("gearOk(" + JSON.stringify(id) + ",'hotel')"), id + " needs no barbell, machine or cable"));
+        const circ = blocks.find(b => b.name === "Circuit").moves.map(m => m.ex);
+        assert.ok(circ.length >= 3, "circuit moves: " + circ.join(","));
         const groups = new Set([].concat(...A.items.map(it => it.t === "block" ? it.moves.map(m => w.eval("getEx(" + JSON.stringify(m.ex) + ").m")) : [w.eval("getEx(" + JSON.stringify(it.ex) + ").m")])));
         assert.ok(groups.size >= 4, "full body: " + [...groups].join(","));
         A.focus.forEach(m => assert.ok(groups.has(m), "focus " + m + " is hit"));
@@ -1379,6 +1382,46 @@ function runFourDayPass() {
         assert.ok(week.includes("ATHL"), "Athletic day comes around: " + week.join(" "));
         assert.ok(q(d, '#app [data-a="days"][data-v="4"].on'), "4 days is on");
         assert.ok(JSON.parse(w.localStorage.getItem("chalk.v1")).days === 4, "saved");
+      });
+      t(who + ": Day 4 gear → No equipment: every move is bodyweight, a squat / push / pull / lunge / hinge each, circuit + core; Hotel gym brings dumbbells, med ball and box back", () => {
+        assert.ok(q(d, '#app [data-a="gear"][data-v="hotel"].on'), "Settings shows the gear row with Hotel gym on");
+        click(w, q(d, '#app [data-a="gear"][data-v="bw"]'));
+        assert.strictEqual(w.eval("gearOf()"), "bw");
+        const A = JSON.parse(w.eval("JSON.stringify(S.program.workouts.ATHL)"));
+        assert.strictEqual(A.gear, "bw"); assert.ok(/bodyweight only/.test(A.sub), A.sub);
+        const every = [].concat(...A.items.map(it => it.t === "block" ? it.moves.map(m => m.ex) : [it.ex]));
+        every.forEach(id => assert.strictEqual(w.eval("getEx(" + JSON.stringify(id) + ").t"), "bw", id + " is bodyweight"));
+        const lifts = A.items.filter(it => it.t === "lift");
+        assert.strictEqual(lifts.length, 5, "squat · push · pull · lunge · hinge");
+        const groups = lifts.map(it => w.eval("getEx(" + JSON.stringify(it.ex) + ").m"));
+        ["Quads", "Back"].forEach(m => assert.ok(groups.includes(m), m + " in " + groups.join(",")));
+        assert.ok(groups.some(m => m === "Chest" || m === "Shoulders" || m === "Triceps"), "a push: " + groups.join(","));
+        assert.ok(lifts.every(it => it.rot), "every slot rotates");
+        assert.deepStrictEqual(A.items.filter(it => it.t === "block").map(b => b.name), ["Circuit", "Core"]);
+        assert.ok(JSON.parse(w.eval("JSON.stringify(S.program.order)")).length === 4, "the other days are untouched");
+        /* the Add picker on that day: bodyweight first, barbell / machine / cable moves behind "show" */
+        w.openAdd({ where: "prog", wid: "ATHL" });
+        const sheet = q(d, "#sheetB");
+        const groupsH = [...sheet.querySelectorAll(".opt-grp")].map(g => g.textContent.trim());
+        assert.strictEqual(groupsH[0], "Bodyweight");
+        const more = sheet.querySelector('.opt[data-a="more"]'); assert.ok(more && /Barbell, machine and cable/.test(more.textContent));
+        const shown = [...sheet.querySelectorAll('.opt[data-a="add-do"]')].filter(b => !b.closest("[hidden]")).map(b => b.dataset.ex).filter(id => id !== "__new");
+        shown.forEach(id => assert.strictEqual(w.eval("getEx(" + JSON.stringify(id) + ").t"), "bw", id + " shown on a no-equipment day"));
+        assert.ok(shown.includes("bw_lunge") && shown.includes("pushup") && shown.includes("pullup") && shown.includes("jump_squat"));
+        assert.ok(!shown.includes("squat") && !shown.includes("bench"), "the barbell lifts are tucked away");
+        w.closeSheet();
+        /* Today shows the gear switch on this day and the hotel option brings the light weights back */
+        w.eval("S.pick='ATHL'; S.plan=null;"); tab("today");
+        assert.ok(q(d, '#app [data-a="gear"][data-v="bw"].on') && q(d, '#app [data-a="gear"][data-v="hotel"]'), "gear switch on Today");
+        assert.ok(!q(d, '#app [data-a="style"]'), "the Weights / Functional / HIIT row steps aside on this day");
+        click(w, q(d, '#app [data-a="gear"][data-v="hotel"]'));
+        const H = JSON.parse(w.eval("JSON.stringify(S.program.workouts.ATHL)"));
+        assert.strictEqual(H.gear, "hotel");
+        const types = new Set([].concat(...H.items.map(it => it.t === "block" ? it.moves.map(m => w.eval("getEx(" + JSON.stringify(m.ex) + ").t")) : [w.eval("getEx(" + JSON.stringify(it.ex) + ").t")])));
+        assert.ok(types.has("db") || types.has("kb"), "light weights back: " + [...types].join(","));
+        assert.ok(H.items.some(it => it.t === "lift" && it.pool && it.pool.includes("pullup")), "a pull-up / row slot");
+        assert.ok(H.items.some(it => it.t === "lift" && it.pool && it.pool.includes("dips")), "a dip slot");
+        w.eval("S.pick=null;"); tab("settings");
       });
       t(who + ": back to 3 days drops the Athletic day and keeps everything else", () => {
         click(w, q(d, '#app [data-a="days"][data-v="3"]'));

@@ -14,8 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=22">
-<link rel="stylesheet" href="m-trends.css?v=22">
+<link rel="stylesheet" href="m.css?v=23">
+<link rel="stylesheet" href="m-trends.css?v=23">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
@@ -383,12 +383,12 @@ body.upd-on #app.wrap{padding-bottom:calc(var(--upd-h,46px) + 36px)}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=22"></script>
-<script src="m-data.js?v=22"></script>
-<script src="m-food.js?v=22"></script>
-<script src="m-ui.js?v=22"></script>
-<script src="m-trends.js?v=22"></script>
-<script src="m-sync.js?v=22"></script>
+<script src="m-core.js?v=23"></script>
+<script src="m-data.js?v=23"></script>
+<script src="m-food.js?v=23"></script>
+<script src="m-ui.js?v=23"></script>
+<script src="m-trends.js?v=23"></script>
+<script src="m-sync.js?v=23"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -526,6 +526,13 @@ const LIB = {
   diamond_pushup:{n:"Diamond Push-Up",m:"Triceps",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Chest"],r:12,p:"pushup"},
   pike_pushup:{n:"Pike Push-Up",m:"Shoulders",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Triceps"],r:10,p:"pushup"},
   bw_calf:{n:"Calf Raise (bodyweight)",m:"Calves",t:"bw",inc:5,rest:30,guess:0,k:0,s:[],r:25,p:"calf"},
+  jump_lunge:{n:"Jump Lunge",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes","Calves"],r:12,ea:true,p:"bwlunge"},
+  wall_sit:{n:"Wall Sit",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes"],r:45,u:"s",p:"bwsquat"},
+  superman:{n:"Superman",m:"Back",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes","Rear Delts"],r:15,p:"birddog"},
+  inverted_row:{n:"Inverted Row (bar or table)",m:"Back",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Biceps","Rear Delts"],r:12,p:"pullup"},
+  bench_dip:{n:"Bench Dip (chair or bench)",m:"Triceps",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Chest","Shoulders"],r:15,p:"dips"},
+  sl_bridge:{n:"Single-Leg Glute Bridge",m:"Glutes",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Hamstrings","Core"],r:12,ea:true,p:"bridge"},
+  prone_y:{n:"Prone Y-Raise",m:"Back",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Rear Delts","Shoulders"],r:12,p:"birddog"},
 };
 const MUSCLES = ["Chest","Shoulders","Triceps","Back","Rear Delts","Traps","Biceps","Forearms","Quads","Hamstrings","Glutes","Calves","Core"];
 /* ================= ACTIVITIES (walk · hike · golf) =================
@@ -575,8 +582,25 @@ const POOLS={
   delts:["lat_raise","face_pull","band_pull_apart","db_rear_fly","cable_lat_raise"], arms:["pushdown","db_curl","hammer","oh_ext","ez_curl","skull"],
   fullA:["goblet_squat","kb_goblet","split_squat","step_up","db_thruster"], fullB:["pushup","db_bench","db_floor_press","db_ohp","dips"],
   fullC:["db_row","renegade_row","cable_row","lat_pulldown"], fullD:["db_lunge_walk","step_up","lat_lunge","curtsy","box_jump","bw_lunge_walk"],
-  deepCore:["pallof","dead_bug","bird_dog","plank","side_plank","hollow_hold","suitcase_carry","ab_wheel","mb_twist"]
+  deepCore:["pallof","dead_bug","bird_dog","plank","side_plank","hollow_hold","suitcase_carry","ab_wheel","mb_twist"],
+  /* Athletic day (day 4). "bw": nothing but your body — a hotel room or the living room. "hotel": what a hotel gym has —
+     dumbbells, a kettlebell, a med ball, a box or bench, a dip / pull-up station. Never a barbell, machine or cable. */
+  athSquatBW:["bw_squat","jump_squat","bw_split_squat","wall_sit","pistol_box"],
+  athSquat:["goblet_squat","kb_goblet","db_thruster","jump_squat","box_jump","step_up","bw_split_squat"],
+  athPushBW:["pushup","diamond_pushup","pike_pushup","bench_dip","plank_tap"],
+  athPush:["db_floor_press","db_ohp","pushup","dips","db_pushpress","pike_pushup","db_bench"],
+  athPullBW:["superman","inverted_row","prone_y"],
+  athPull:["pullup","chinup","db_row","renegade_row","inverted_row"],
+  athLungeBW:["bw_lunge","bw_lunge_walk","jump_lunge","skater","bw_split_squat"],
+  athLunge:["db_lunge_walk","step_up","lat_lunge","split_squat","curtsy","bw_lunge_walk"],
+  athHingeBW:["glute_bridge","sl_bridge","superman","bw_calf"],
+  athHinge:["db_rdl","db_swing","kb_swing","sl_rdl","glute_bridge","sl_bridge"],
+  athCoreBW:["plank","dead_bug","bird_dog","side_plank","hollow_hold","bicycle","mtn_climber"]
 };
+const ATH_GEAR={bw:{t:["bw"],name:"No equipment",desc:"bodyweight only — a hotel room or the living room"},hotel:{t:["bw","db","kb","mb","bal","band"],name:"Hotel gym",desc:"bodyweight + light dumbbells, kettlebell, med ball, box, dip / pull-up bar"}};
+const gearOf=()=>(S.d4==="bw"?"bw":"hotel");
+/* can this move be done with the Athletic day's gear? */
+const gearOk=(id,gear)=>ATH_GEAR[gear||gearOf()].t.includes(getEx(id).t);
 const PRESETS={
   nick:{name:"Nick",desc:"Weights. Pull · Push · Legs, straight sets, abs every other workout. Flip to Functional or HIIT any time.",mix:{ball:1,balance:0,box:1},goal:"weights"},
   kat:{name:"Katerina",desc:"Functional, Katerina's style. Legs + Glutes · Upper · Full body. Heavy main lift, supersets in rounds, carries, deep core, conditioning. Flip to Weights or HIIT any time.",mix:{ball:3,balance:3,box:2},goal:"functional"}
@@ -607,20 +631,34 @@ function liftDayItems(){ const mk=(ex,s,lo,hi)=>({t:"lift",id:uid(),ex,sets:s,lo
 /* Day 4 (optional, any style): a full-body athletic day. No heavy main lift — medium dumbbell / kettlebell work at
    10–15 reps, lunges and step-ups, carries, then a bodyweight circuit and core. Every slot rotates each session.
    It carries its own core work, so the every-other-workout abs skip it. */
-function athleticItems(mix){
-  mix=mix||{}; const med=(pool,off)=>slot(pool,3,10,15,{off:off||0});
-  /* the circuit is bodyweight only (box / plyo moves join it when the box dial is up — no med ball, no dumbbells) */
-  const bw=mixPools(POOLS.bw,w(mix.box,POOLS.box).filter(id=>NOLOAD(getEx(id).t)));
-  return [med(POOLS.fullA),med(POOLS.fullB),med(POOLS.fullC),med(POOLS.fullD,1),slot(POOLS.carry,3,30,45),
-    block("Bodyweight","timer",40,20,4,bw,4),block("Core","timer",30,15,3,hiitPool(mix,"core"),4)];
+function athleticItems(mix,gear){
+  mix=mix||{}; gear=ATH_GEAR[gear]?gear:"hotel"; const bwOnly=gear==="bw";
+  const med=(pool,lo,hi,off)=>slot(pool,3,lo||10,hi||15,{off:off||0});
+  if(bwOnly){
+    /* nothing but your body: squat · push · pull · lunge · hinge, then a bodyweight circuit and core */
+    const circuit=POOLS.bw;
+    return [med(POOLS.athSquatBW),med(POOLS.athPushBW),med(POOLS.athPullBW),med(POOLS.athLungeBW,10,15,1),med(POOLS.athHingeBW),
+      block("Circuit","timer",40,20,4,circuit,4),block("Core","timer",30,15,3,POOLS.athCoreBW,4)];
+  }
+  /* hotel gym: light / medium dumbbell work in the lifts, pull-ups and dips where there's a bar, a carry, then a
+     circuit that mixes bodyweight with the med ball and box, and core */
+  const m=Object.assign({},mix); if(!m.ball) m.ball=1; if(!m.box) m.box=1;
+  const circuit=mixPools(POOLS.bw,w(m.box,POOLS.box),w(m.ball,POOLS.ball));
+  return [med(POOLS.athSquat),med(POOLS.athPush),slot(POOLS.athPull,3,6,12),med(POOLS.athLunge,10,15,1),med(POOLS.athHinge),slot(POOLS.carry,3,30,45),
+    block("Circuit","timer",40,20,3,circuit,4),block("Core","timer",30,15,3,hiitPool(m,"core"),4)];
 }
-function addAthletic(P,mix){
-  const items=athleticItems(mix), c=coverage(items);
-  P.order.push("ATHL");
-  P.workouts.ATHL={name:"Athletic day",sub:"Full body · bodyweight · medium weight",focus:["Quads","Glutes","Chest","Back","Shoulders","Core"].filter(m=>c[m]),items,noAbs:true,full:true};
-  return P;
+function athleticDay(mix,gear){
+  gear=ATH_GEAR[gear]?gear:"hotel"; const items=athleticItems(mix,gear), c=coverage(items);
+  return {name:"Athletic day",sub:(gear==="bw"?"Full body · bodyweight only":"Full body · bodyweight + light weights"),gear,focus:["Quads","Glutes","Chest","Back","Shoulders","Core"].filter(m=>c[m]),items,noAbs:true,full:true};
 }
-function buildProgram(mode,mix,blk,days){
+function addAthletic(P,mix,gear){ P.order.push("ATHL"); P.workouts.ATHL=athleticDay(mix,gear); return P; }
+/* swap the Athletic day's gear in place: that one day is rebuilt (its rotation count stays), the other days are untouched */
+function setGear(g){
+  if(!ATH_GEAR[g]) return false; S.d4=g; const W=S.program.workouts.ATHL; if(!W) return true;
+  S.program.workouts.ATHL=withIds({workouts:{A:athleticDay(S.mix||PRESETS.nick.mix,g)}}).workouts.A; rotateDay("ATHL");
+  if(S.plan&&S.plan.wid==="ATHL") S.plan=null; bumpDay("ATHL"); return true;
+}
+function buildProgram(mode,mix,blk,days,gear){
   mode=MODE_LABEL[mode]?mode:"weights"; blk=blk||0; const F=mode==="functional"; const style=mode; const four=days===4;
   const P={ver:5,gen:true,goal:mode,mode,rev:0,order:["PULL","PUSH","LEGS"],absEvery:mode==="weights"?2:0,abs:"ABS",workouts:{}};
   const main=pool=>slot(pool,F?5:4,F?4:6,F?6:10,{main:true,ex:pick(pool,blk)});
@@ -642,7 +680,7 @@ function buildProgram(mode,mix,blk,days){
     P.workouts.LOWER={name:"Legs + Glutes",sub:"Foundational lower"+tail,focus:["Quads","Hamstrings","Glutes"],items:lower};
     P.workouts.UPPER={name:"Upper body",sub:"Back · Chest · Shoulders"+tail,focus:["Chest","Back","Shoulders"],items:upper};
     P.workouts.FULL={name:"Full body + deep core",sub:"Hinge · circuits · carries"+tail,focus:["Hamstrings","Core"],items:full};
-    if(four) addAthletic(P,mix);
+    if(four) addAthletic(P,mix,gear);
     return withIds(P);
   }
   let pull,push,legs;
@@ -665,7 +703,7 @@ function buildProgram(mode,mix,blk,days){
   P.workouts.ABS={name:"Abs",sub:"every other workout",focus:["Core"],items:[slot(POOLS.absM,3,10,15),slot(POOLS.absM,3,10,15,{off:2})]};
   /* shorter styles can't hit every group with two lifts — the focus list shrinks to what the day actually covers */
   if(style!=="weights") ["PULL","PUSH","LEGS"].forEach(k=>{ const W=P.workouts[k]; const c=coverage(W.items); W.focus=W.focus.filter(m=>c[m]); });
-  if(four) addAthletic(P,mix);
+  if(four) addAthletic(P,mix,gear);
   return withIds(P);
 }
 /* Rotation: after each finished day, every rotating slot moves to the next exercise in its pool (never doubling up within the day). */
@@ -681,12 +719,12 @@ function pickMoves(b,c,used){
   if(!b.pool||!b.pool.length) return b.moves||[]; const n=Math.min(b.n||4,b.pool.length), o=(c*2)%b.pool.length; const out=[]; for(let k=0;k<b.pool.length&&out.length<n;k++){ const ex=pick(b.pool,o+k); if(used.has(ex)) continue; used.add(ex); out.push({ex}); } return out.length?out:b.pool.slice(0,n).map(ex=>({ex})); }
 function rotateAll(){ Object.keys(S.program.workouts).forEach(rotateDay); }
 const daysOf=()=>(S.days===4?4:3);
-function regen(){ S.mix=S.mix||cp(PRESETS.nick.mix); S.goal=S.goal||{mode:"weights",setAt:null}; S.cyc=S.cyc||{}; const oldOrder=(S.program&&S.program.gen&&S.program.order)||[]; S.program=buildProgram(S.goal.mode,S.mix,S.block||0,daysOf()); rotateAll(); const ord=S.program.order; S.next=ord.includes(S.next)?S.next:(ord[oldOrder.indexOf(S.next)]||ord[0]); S.plan=null; S.pick=null; if(S.absNext==null) S.absNext=true; }
+function regen(){ S.mix=S.mix||cp(PRESETS.nick.mix); S.goal=S.goal||{mode:"weights",setAt:null}; S.cyc=S.cyc||{}; const oldOrder=(S.program&&S.program.gen&&S.program.order)||[]; S.program=buildProgram(S.goal.mode,S.mix,S.block||0,daysOf(),gearOf()); rotateAll(); const ord=S.program.order; S.next=ord.includes(S.next)?S.next:(ord[oldOrder.indexOf(S.next)]||ord[0]); S.plan=null; S.pick=null; if(S.absNext==null) S.absNext=true; }
 /* KJ-02: a borrowed phone keeps each person's training plan. Leaving a person puts their plan (never their workouts,
    weights or history) under their name in its own key; picking them again puts it back exactly. It stays out of
    chalk.v1 on purpose: chalk.v1 is sent as-is as the current person's cloud training backup, so one person's plan
    never rides along in the other person's backup. */
-const PEOPLE_KEY="chalk.people", PLAN_KEYS=["program","mix","goal","block","cyc","next","plan","pick","absNext","lastSummary","days"];
+const PEOPLE_KEY="chalk.people", PLAN_KEYS=["program","mix","goal","block","cyc","next","plan","pick","absNext","lastSummary","days","d4"];
 function peopleGet(){ try{ const o=JSON.parse(localStorage.getItem(PEOPLE_KEY)||"null"); return o&&typeof o==="object"&&!Array.isArray(o)?o:{}; }catch(e){ return {}; } }
 const plainObj=o=>!!o&&typeof o==="object"&&!Array.isArray(o);
 /* C6: a kept plan is used only when every day in it is whole. A damaged copy (a null exercise, a day missing) would
@@ -702,7 +740,7 @@ function restorePlan(pid){ const pr=ownV(PRESETS,pid), st=pr?ownV(peopleGet(),pi
   /* only fills what a damaged copy lacks: a plan saved by this app passes through unchanged */
   if(!plainObj(S.mix)) S.mix=cp(pr.mix); if(!plainObj(S.goal)) S.goal={mode:pr.goal,setAt:Date.now()};
   if(!plainObj(S.cyc)) S.cyc={}; if(typeof S.block!=="number") S.block=0; if(typeof S.absNext!=="boolean") S.absNext=true;
-  if(S.days!=null&&S.days!==3&&S.days!==4) S.days=null;
+  if(S.days!=null&&S.days!==3&&S.days!==4) S.days=null; if(S.d4!=null&&!ATH_GEAR[S.d4]) S.d4=null;
   if(S.plan!=null&&!(plainObj(S.plan)&&Array.isArray(S.plan.items)&&S.plan.items.every(plainObj))) S.plan=null;
   if(S.lastSummary!=null&&!(plainObj(S.lastSummary)&&plainObj(S.lastSummary.rec))) S.lastSummary=null;
   if(S.pick!=null&&typeof S.pick!=="string") S.pick=null;
@@ -790,7 +828,7 @@ function upgrade(S){
 /* ================= STATE ================= */
 const KEY = "chalk.v1";
 const cp = o => JSON.parse(JSON.stringify(o));
-function fresh(){ return {v:1,updatedAt:0,settings:{restC:60,restA:45,sound:true,wake:true,theme:"system"},program:buildProgram("weights",PRESETS.nick.mix,0),mix:cp(PRESETS.nick.mix),goal:{mode:"weights",setAt:null},block:0,cyc:{},ex:{},log:[],acts:[],next:"PULL",active:null,custom:{},absNext:true,plan:null,days:3}; }
+function fresh(){ return {v:1,updatedAt:0,settings:{restC:60,restA:45,sound:true,wake:true,theme:"system"},program:buildProgram("weights",PRESETS.nick.mix,0),mix:cp(PRESETS.nick.mix),goal:{mode:"weights",setAt:null},block:0,cyc:{},ex:{},log:[],acts:[],next:"PULL",active:null,custom:{},absNext:true,plan:null,days:3,d4:"hotel"}; }
 /* the save is read once per launch (it can be megabytes) */
 let bootRaw=null; try{ bootRaw=localStorage.getItem(KEY); }catch(e){}
 function load(t){ if(t===undefined){ try{ t=localStorage.getItem(KEY); }catch(e){ t=null; } } try{ const s=JSON.parse(t); if(s&&s.v===1) return s; }catch(e){ try{ if(t) localStorage.setItem("chalk.bad",t); }catch(e2){} } return null; }
@@ -1768,7 +1806,8 @@ function viewToday(){
   const goalTag=S.goal&&S.goal.setAt?`<button class="tag acc" data-a="checkin" style="margin-top:6px">${GOAL_LABEL[S.goal.mode]||"Goal"} · ${Math.max(0,goalDaysLeft())} days left</button>`:"";
   h+=`<div class="card">
     <div class="hd"><div><div class="up mut">${P.kind?"Today":"Suggested today"}</div><h3>${esc(P.name||W.name)}</h3><div class="small mut">${P.kind?(P.kind==="hiit"?"Instead of "+esc(W.name):"Weights instead of "+esc(W.name)):esc(W.sub||"")}${absOn()&&wid!==absId()&&!P.kind?` · ${P.abs?"Abs today":"No abs today"}`:""}</div>${whyLine(wid,P)}${goalTag}</div><button class="icon" data-a="pick-workout" aria-label="Choose a different workout">⇄</button></div>
-    <div class="seg" style="display:flex;margin:6px 14px 2px">${MODES.map(([k])=>`<button data-a="style" data-v="${k}" class="${(S.goal||{}).mode===k?"on":""}" style="flex:1;min-width:0;padding:9px 4px;font-size:13px">${MODE_LABEL[k]}</button>`).join("")}</div>
+    ${wid==="ATHL"&&!P.kind?`<div class="seg" style="display:flex;margin:6px 14px 2px">${Object.keys(ATH_GEAR).map(g=>`<button data-a="gear" data-v="${g}" class="${gearOf()===g?"on":""}" style="flex:1;min-width:0;padding:9px 4px;font-size:13px">${ATH_GEAR[g].name}</button>`).join("")}</div>`
+    :`<div class="seg" style="display:flex;margin:6px 14px 2px">${MODES.map(([k])=>`<button data-a="style" data-v="${k}" class="${(S.goal||{}).mode===k?"on":""}" style="flex:1;min-width:0;padding:9px 4px;font-size:13px">${MODE_LABEL[k]}</button>`).join("")}</div>`}
     <div class="figs">${bodySVG(false,cls)}${bodySVG(true,cls)}</div>
     <div class="up mut" style="padding:8px 14px 4px">Muscle groups · tap to add or remove</div>
     <div class="chips" style="padding:0 14px">${MUSCLES.map(m=>`<button class="chip ${cov[m]?"ok":(gaps.includes(m)?"gap":"")}" data-a="mg" data-m="${m}">${cov[m]?"✓ ":"+ "}${m}</button>`).join("")}</div>
@@ -1840,6 +1879,8 @@ function ctxList(c){ return c.where==="active"?S.active.items:(c.where==="plan"?
 function ctxItem(c){ const it=ctxList(c)[c.i]; return (c.where==="prog"&&c.mi!=null)?it.moves[c.mi]:it; }
 function ctxWid(c){ return c.where==="prog"?c.wid:(c.where==="active"?S.active.wid:S.plan.wid); }
 function ctxFocus(c){ const W=S.program.workouts[ctxWid(c)]; return W&&W.focus?W.focus:null; }
+/* the Athletic day lists only moves its gear allows up front; a barbell, machine or cable move sits behind "show" */
+function ctxGear(c){ const W=S.program.workouts[ctxWid(c)]; return W&&W.gear?W.gear:null; }
 function scopeSeg(where){ scope="today"; if(where==="prog"||(where==="plan"&&S.plan&&S.plan.kind)||(where==="active"&&S.active&&S.active.kind)) return ""; return `<div class="seg scope"><button data-a="scope" data-v="today" class="${scope==="today"?"on":""}">Today only</button><button data-a="scope" data-v="always" class="${scope==="always"?"on":""}">From now on</button></div>`; }
 function openReplace(c){
   const it=ctxItem(c), exId=it.ex, L=getEx(exId), E=S.ex[exId];
@@ -1847,8 +1888,9 @@ function openReplace(c){
   if(c.where==="active"&&it.done&&it.done.length) curW=it.done[it.done.length-1].w;
   const inDay=ctxList(c).flatMap(x=>x.t==="block"?(x.moves||[]).map(v=>v.ex):[x.ex]).filter(x=>x&&x!==exId);
   const rowFor=(id,w,how)=>{ const B=getEx(id); if(NOLOAD(B.t)&&w===0) how="bw"; const wl= how==="bw"?"bodyweight":(w==null?TYPE_LABEL[B.t]:`${fmtW(w)} lb${B.t==="db"?" each":""}`); const tag= how==="yours"?`<span class="tag ok">your number</span>`:(how==="est"?`<span class="tag">est.</span>`:""); return `<button class="opt" data-a="rep-do" ${ctxAttr(c)} data-ex="${esc(id)}" data-w="${w==null?"":esc(w)}"><span>${esc(B.n)} ${tag}</span><span class="m">${wl}</span></button>`; };
-  const subs=subsFor(exId,inDay,curW);
-  let h=scopeSeg(c.where)+`<p class="hint">Same muscle first, weight converted${curW!=null?` from ${fmtW(curW)} lb`:""}.${c.where==="active"&&it.done&&it.done.length?" Sets you already logged stay.":""}</p>`;
+  let subs=subsFor(exId,inDay,curW); const gear=ctxGear(c);
+  if(gear){ const ok=subs.filter(x=>gearOk(x.id,gear)); subs=ok.concat(subs.filter(x=>!gearOk(x.id,gear))); }
+  let h=scopeSeg(c.where)+`<p class="hint">Same muscle first, weight converted${curW!=null?` from ${fmtW(curW)} lb`:""}.${gear?` ${esc(ATH_GEAR[gear].name)} moves first.`:""}${c.where==="active"&&it.done&&it.done.length?" Sets you already logged stay.":""}</p>`;
   h+=`<div class="opt-grp foc">${esc(L.m)} · same muscle</div>`+(subs.length?subs.map(x=>rowFor(x.id,x.w,x.how)).join(""):`<p class="hint">Nothing else for ${esc(L.m)} yet — add a custom one below.</p>`);
   const ids=Object.keys(LIB).concat(Object.keys(S.custom)).filter(id=>id!==exId&&!inDay.includes(id)&&getEx(id).m!==L.m);
   const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp">${esc(m)}</div>`+list.map(id=>{ const E2=S.ex[id]; return rowFor(id,E2&&E2.w!=null?E2.w:null,E2&&E2.w!=null?(E2.est?"est":"yours"):(NOLOAD(getEx(id).t)?"bw":"unknown")); }).join(""); };
@@ -1890,7 +1932,7 @@ function setsSave(c){
   if(sc==="always"){ if(c.where==="prog") bumpDay(c.wid); else { const P=progItemFor(ctxWid(c),it); if(P){ P.sets=sets; P.lo=lo; P.hi=hi; bumpProg(); keepPlan(); } } }
   save(); closeSheet(); render();
 }
-function openAdd(c){ const inDay=c.where==="prog"&&c.i!=null?[]:ctxList(c).flatMap(x=>x.t==="block"?x.moves.map(v=>v.ex):[x.ex]); openSheet("Add exercise",(c.where==="prog"?"":scopeSeg(c.where))+exerciseList("add-do",ctxAttr(c),null,ctxFocus(c),inDay)); }
+function openAdd(c){ const inDay=c.where==="prog"&&c.i!=null?[]:ctxList(c).flatMap(x=>x.t==="block"?x.moves.map(v=>v.ex):[x.ex]); openSheet("Add exercise",(c.where==="prog"?"":scopeSeg(c.where))+exerciseList("add-do",ctxAttr(c),null,ctxFocus(c),inDay,ctxGear(c))); }
 function addDo(c,id){
   const mk=()=>{ const L=getEx(id); let lo=isCompound(id)?6:8, hi=isCompound(id)?10:12;
     /* a bodyweight move works in higher reps (its own rep count sets the top); pull-ups, chin-ups and dips stay 5–10 */
@@ -2056,6 +2098,7 @@ function viewSettings(){
   h+=`<h2 class="sec">Program</h2>`;
   h+=`<div class="card"><div class="srow"><div><div class="l">${GOAL_LABEL[(S.goal||{}).mode]||"Muscle gains"} · ${Math.max(0,goalDaysLeft())} days left</div><div class="s">${MIXROWS.map(([k,l])=>l+": "+LVL[(S.mix||{})[k]||0]).join(" · ")}</div></div><button class="btn" data-a="checkin">Change</button></div>
     <div class="srow"><div><div class="l">Training days</div><div class="s">${daysOf()===4?"Day 4 is an Athletic day: full body, bodyweight and medium weights, no heavy lifts.":"Add a 4th day: full body, bodyweight and medium weights, no heavy lifts."}</div></div><div class="seg">${[3,4].map(v=>`<button data-a="days" data-v="${v}" class="${daysOf()===v?"on":""}">${v} days</button>`).join("")}</div></div>
+    ${daysOf()===4?`<div class="srow"><div><div class="l">Day 4 gear</div><div class="s">${esc(ATH_GEAR[gearOf()].desc)}</div></div><div class="seg">${Object.keys(ATH_GEAR).map(g=>`<button data-a="gear" data-v="${g}" class="${gearOf()===g?"on":""}">${ATH_GEAR[g].name}</button>`).join("")}</div></div>`:""}
     <div class="srow"><div><div class="l">Exercises rotate</div><div class="s">Accessories change every session, main lifts every 45 days. Swap "from now on" pins one in place.</div></div><button class="btn" data-a="reset-prog">Rebuild</button></div></div>`;
   const hasAbs=!!S.program.workouts[absId()];
   if(hasAbs) h+=`<div class="card"><div class="srow"><div><div class="l">Abs every other workout</div><div class="s">${absOn()?(S.absNext!==false?"Next workout: abs on":"Next workout: abs off"):"Off"}</div></div><button class="toggle ${absOn()?"on":""}" data-a="abs-tog" role="switch" aria-checked="${absOn()}" aria-label="Abs every other workout"><i></i></button></div></div>`;
@@ -2128,15 +2171,18 @@ function closeSheet(){
   setTimeout(()=>{ if(g!==sheetGen) return; if(window.M&&M.ui&&typeof M.ui.cleanup==="function"){ try{ M.ui.cleanup(); }catch(e){} } },0);
   setTimeout(()=>{ if(g!==sheetGen) return; document.getElementById("sheetB").innerHTML=""; },260);
 }
-function exerciseList(action, extra, curId, focus, inDay){
-  const ids=Object.keys(LIB).concat(Object.keys(S.custom)); const have=new Set(inDay||[]);
+function exerciseList(action, extra, curId, focus, inDay, gear){
+  const allIds=Object.keys(LIB).concat(Object.keys(S.custom)); const have=new Set(inDay||[]);
+  const ids=gear?allIds.filter(id=>gearOk(id,gear)):allIds, heavy=gear?allIds.filter(id=>!gearOk(id,gear)):[];
   const row=id=>{ const L=getEx(id), E=S.ex[id]; const wl=E&&E.w!=null&&!(NOLOAD(L.t)&&E.w===0)?fmtW(E.w)+" lb":(NOLOAD(L.t)?"bodyweight":TYPE_LABEL[L.t]); return `<button class="opt ${id===curId?"cur":""}" data-a="${action}" data-ex="${esc(id)}" ${extra}><span>${esc(L.n)}${have.has(id)?` <span class="tag">in today</span>`:""}</span><span class="m">${wl}</span></button>`; };
   const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp ${focus&&focus.includes(m)?"foc":""}">${esc(m)}</div>`+list.map(row).join(""); };
   const all=MUSCLES.concat(["Other"]); let h="";
   /* v22: bodyweight moves first (lunges, push-ups, pull-ups, jump squats…), then by muscle group */
   const bw=ids.filter(id=>getEx(id).t==="bw").sort((a,b)=>getEx(a).n.localeCompare(getEx(b).n));
   if(bw.length) h+=`<div class="opt-grp">Bodyweight</div>`+bw.map(id=>{ const L=getEx(id); return row(id).replace('<span class="m">',`<span class="m">${esc(L.m)} · `); }).join("");
-  if(focus&&focus.length){ h+=all.filter(m=>focus.includes(m)).map(grp).join(""); const rest=all.filter(m=>!focus.includes(m)); h+=`<button class="opt" data-a="more"><span>All other muscle groups</span><span class="m">show</span></button><div hidden>${rest.map(grp).join("")}</div>`; }
+  if(gear&&gear!=="bw"){ const light=ids.filter(id=>getEx(id).t!=="bw").sort((a,b)=>getEx(a).n.localeCompare(getEx(b).n)); if(light.length) h+=`<div class="opt-grp">Light weights · ${esc(ATH_GEAR[gear].name.toLowerCase())}</div>`+light.map(id=>{ const L=getEx(id); return row(id).replace('<span class="m">',`<span class="m">${esc(L.m)} · `); }).join(""); }
+  if(gear){ const grpH=m=>{ const list=heavy.filter(id=>getEx(id).m===m); return list.length?`<div class="opt-grp">${esc(m)}</div>`+list.map(row).join(""):""; }; h+=`<button class="opt" data-a="more"><span>Barbell, machine and cable moves</span><span class="m">show</span></button><div hidden>${all.map(grpH).join("")}</div>`; }
+  else if(focus&&focus.length){ h+=all.filter(m=>focus.includes(m)).map(grp).join(""); const rest=all.filter(m=>!focus.includes(m)); h+=`<button class="opt" data-a="more"><span>All other muscle groups</span><span class="m">show</span></button><div hidden>${rest.map(grp).join("")}</div>`; }
   else h+=all.map(grp).join("");
   h+=`<div class="opt-grp">Custom</div><button class="opt" data-a="${action}" data-ex="__new" ${extra}><span>+ New exercise…</span></button>`;
   return h;
@@ -2296,6 +2342,7 @@ document.addEventListener("click",e=>{
         S=s; upgrade(S); save(); applyTheme(); closeSheet(); render(); toast(macOk?"Restored":"Workouts restored. The food part couldn't be read."); } else toast("That's not a Chalk backup"); }catch(e){ S=prev; save(); applyTheme(); render(); toast("That's not a Chalk backup"); } break; }
     case "reset-prog": regen(); bumpProg(); save(); render(); toast("Program rebuilt"); break;
     /* 3 or 4 training days: day 4 is the Athletic day. Rebuilds the days (weights, history and rotation stay). */
+    case "gear": { const g=b.dataset.v; if(!ATH_GEAR[g]||g===gearOf()) break; if(S.active&&S.active.wid==="ATHL"){ toast("Finish your workout first"); break; } setGear(g); save(); render(); toast(ATH_GEAR[g].name+" — Athletic day rebuilt"); break; }
     case "days": { const n=+b.dataset.v; if(!(n===3||n===4)||n===daysOf()) break; if(S.active){ toast("Finish your workout first"); break; } S.days=n; regen(); bumpProg(); save(); render(); toast(n===4?"4 days — Athletic day added":"3 days"); break; }
     /* from Macros → You too: the picker (with Cancel) lives in Train, and Macros would keep showing the same person */
     case "switch-profile": if(S.active){ toast("Finish your workout first"); break; } if(S.profile) S.switchFrom=S.profile; S.profile=null; tab="today"; if(inMacros()&&typeof M.setMode==="function") M.setMode("train"); save(); render(); break;
@@ -2407,7 +2454,7 @@ if(S.active) wakeOn();
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=22, BOOT_AT=Date.now();
+const APP_VERSION=23, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
   /* K5: Macros setup or You has typed numbers that aren't saved yet */
