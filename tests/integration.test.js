@@ -1328,6 +1328,69 @@ async function runF6Pass() {
   } finally { dom.window.close(); }
 }
 
+/* ------------------------------------------------- v21: optional 4th training day (Athletic day) */
+function runFourDayPass() {
+  console.log("v21: 3 or 4 training days");
+  const LIVE = JSON.parse(read("tests/fixtures/chalk-v1-live.json"));
+  for (const who of ["nick", "kat"]) {
+    const S0 = JSON.parse(LIVE[who]); S0.active = null; const raw = JSON.stringify(S0);
+    const { dom, w, d, errors } = boot({ real: true, store: { "chalk.v1": raw, "chalk.bak.d": "2000-01-01" } });
+    const tab = name => click(w, q(d, '#tabs [data-tab="' + name + '"]'));
+    try {
+      t(who + ": a live save still trains 3 days; Settings offers 3 / 4 with 3 on", () => {
+        assert.deepStrictEqual(errors, []);
+        assert.strictEqual(w.eval("daysOf()"), 3);
+        assert.strictEqual(JSON.parse(w.eval("JSON.stringify(S.program.order)")).length, 3);
+        tab("settings");
+        assert.ok(q(d, '#app [data-a="days"][data-v="3"].on'), "3 days is on");
+        assert.ok(q(d, '#app [data-a="days"][data-v="4"]') && !q(d, '#app [data-a="days"][data-v="4"].on'), "4 days is offered, off");
+      });
+      t(who + ": 4 days adds an Athletic day — full body, medium weights, no heavy main lift, rotates, no doubled abs", () => {
+        const ex0 = w.eval("JSON.stringify(S.ex)"), log0 = w.eval("S.log.length");
+        click(w, q(d, '#app [data-a="days"][data-v="4"]'));
+        assert.strictEqual(w.eval("daysOf()"), 4);
+        assert.strictEqual(w.eval("S.days"), 4);
+        const P = JSON.parse(w.eval("JSON.stringify(S.program)"));
+        assert.strictEqual(P.order.length, 4); assert.strictEqual(P.order[3], "ATHL");
+        const A = P.workouts.ATHL;
+        assert.strictEqual(A.name, "Athletic day"); assert.ok(A.noAbs, "carries its own core work");
+        assert.ok(A.items.every(it => !it.main), "no heavy main lift");
+        const lifts = A.items.filter(it => it.t === "lift"), blocks = A.items.filter(it => it.t === "block");
+        assert.ok(lifts.length >= 4 && blocks.length === 2, lifts.length + " lifts, " + blocks.length + " blocks");
+        assert.ok(lifts.filter(it => it.pool && it.pool.length).every(it => it.rot), "every lift slot rotates");
+        const medium = lifts.filter(it => it.lo === 10 && it.hi === 15);
+        assert.ok(medium.length >= 4, "medium-weight rep ranges (10–15): " + medium.length);
+        assert.ok(blocks.some(b => b.name === "Bodyweight") && blocks.some(b => b.name === "Core"), blocks.map(b => b.name).join(","));
+        const bwIds = blocks.find(b => b.name === "Bodyweight").moves.map(m => m.ex);
+        assert.ok(bwIds.length >= 3 && bwIds.every(id => w.eval("NOLOAD(getEx(" + JSON.stringify(id) + ").t)") || w.eval("CARDIO.has(" + JSON.stringify(id) + ")")), "bodyweight moves: " + bwIds.join(","));
+        const groups = new Set([].concat(...A.items.map(it => it.t === "block" ? it.moves.map(m => w.eval("getEx(" + JSON.stringify(m.ex) + ").m")) : [w.eval("getEx(" + JSON.stringify(it.ex) + ").m")])));
+        assert.ok(groups.size >= 4, "full body: " + [...groups].join(","));
+        A.focus.forEach(m => assert.ok(groups.has(m), "focus " + m + " is hit"));
+        /* weights, history and the other days survive the rebuild */
+        assert.strictEqual(w.eval("JSON.stringify(S.ex)"), ex0, "weights untouched");
+        assert.strictEqual(w.eval("S.log.length"), log0, "history untouched");
+        assert.ok(P.order.slice(0, 3).every(id => P.workouts[id] && P.workouts[id].items.length), "the 3 original days are still there");
+        /* planning that day appends no abs even when abs are due */
+        w.eval("S.absNext=true; S.program.absEvery=S.program.absEvery||2; if(!S.program.workouts.ABS) S.program.workouts.ABS={name:'Abs',focus:['Core'],items:[]}; S.plan=null;");
+        const plan = JSON.parse(w.eval("JSON.stringify(planFor('ATHL'))"));
+        assert.strictEqual(plan.abs, false); assert.ok(plan.items.every(it => !it.abs), "no abs items");
+        /* the suggested-day rotation reaches it */
+        const week = JSON.parse(w.eval("JSON.stringify(weekSchedule(8))"));
+        assert.ok(week.includes("ATHL"), "Athletic day comes around: " + week.join(" "));
+        assert.ok(q(d, '#app [data-a="days"][data-v="4"].on'), "4 days is on");
+        assert.ok(JSON.parse(w.localStorage.getItem("chalk.v1")).days === 4, "saved");
+      });
+      t(who + ": back to 3 days drops the Athletic day and keeps everything else", () => {
+        click(w, q(d, '#app [data-a="days"][data-v="3"]'));
+        const P = JSON.parse(w.eval("JSON.stringify(S.program)"));
+        assert.strictEqual(P.order.length, 3); assert.ok(!P.workouts.ATHL);
+        assert.ok(P.order.includes(w.eval("S.next")), "the rotation pointer is a real day");
+      });
+      t(who + ": no errors during the 4-day pass", () => assert.deepStrictEqual(errors.map(String), [], errors.map(String).join(" | ")));
+    } finally { dom.window.close(); }
+  }
+}
+
 runPass("pass 1: stub M.ui (integration wiring)", false);
 const realFiles = ["m-ui.js", "m-trends.js"].filter(exists);
 if (realFiles.length) runPass("pass 2: real " + realFiles.join(" + ") + (realFiles.length < 2 ? " (stub fills the rest)" : ""), true);
@@ -1336,6 +1399,7 @@ runLiveDataPass();
 runPlanStashPass();
 runReplacePass();
 runNarrowPass();
+runFourDayPass();
 
 (async () => {
   await runSwPass();

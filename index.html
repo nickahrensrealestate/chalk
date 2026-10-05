@@ -14,8 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=20">
-<link rel="stylesheet" href="m-trends.css?v=20">
+<link rel="stylesheet" href="m.css?v=21">
+<link rel="stylesheet" href="m-trends.css?v=21">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
@@ -383,12 +383,12 @@ body.upd-on #app.wrap{padding-bottom:calc(var(--upd-h,46px) + 36px)}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=20"></script>
-<script src="m-data.js?v=20"></script>
-<script src="m-food.js?v=20"></script>
-<script src="m-ui.js?v=20"></script>
-<script src="m-trends.js?v=20"></script>
-<script src="m-sync.js?v=20"></script>
+<script src="m-core.js?v=21"></script>
+<script src="m-data.js?v=21"></script>
+<script src="m-food.js?v=21"></script>
+<script src="m-ui.js?v=21"></script>
+<script src="m-trends.js?v=21"></script>
+<script src="m-sync.js?v=21"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -595,8 +595,24 @@ function hiitPool(mix,kind){
 }
 function hiitDayItems(mix,cyc){ const used=new Set(); return [block("Power","timer",40,20,4,hiitPool(mix,"power"),4),block("Sweat","timer",40,20,4,hiitPool(mix,"sweat"),4),block("Core","timer",30,15,3,hiitPool(mix,"core"),4)].map(b=>{ b.id=uid(); b.moves=pickMoves(b,cyc||0,used); return b; }); }
 function liftDayItems(){ const mk=(ex,s,lo,hi)=>({t:"lift",id:uid(),ex,sets:s,lo,hi}); return [mk("squat",3,6,10),mk("bench",3,6,10),mk("cable_row",3,8,12),mk("db_ohp",3,8,12),mk("rdl",3,8,12),mk("cable_crunch",3,10,15)]; }
-function buildProgram(mode,mix,blk){
-  mode=MODE_LABEL[mode]?mode:"weights"; blk=blk||0; const F=mode==="functional"; const style=mode;
+/* Day 4 (optional, any style): a full-body athletic day. No heavy main lift — medium dumbbell / kettlebell work at
+   10–15 reps, lunges and step-ups, carries, then a bodyweight circuit and core. Every slot rotates each session.
+   It carries its own core work, so the every-other-workout abs skip it. */
+function athleticItems(mix){
+  mix=mix||{}; const med=(pool,off)=>slot(pool,3,10,15,{off:off||0});
+  /* the circuit is bodyweight only (box / plyo moves join it when the box dial is up — no med ball, no dumbbells) */
+  const bw=mixPools(POOLS.bw,w(mix.box,POOLS.box).filter(id=>NOLOAD(getEx(id).t)));
+  return [med(POOLS.fullA),med(POOLS.fullB),med(POOLS.fullC),med(POOLS.fullD,1),slot(POOLS.carry,3,30,45),
+    block("Bodyweight","timer",40,20,4,bw,4),block("Core","timer",30,15,3,hiitPool(mix,"core"),4)];
+}
+function addAthletic(P,mix){
+  const items=athleticItems(mix), c=coverage(items);
+  P.order.push("ATHL");
+  P.workouts.ATHL={name:"Athletic day",sub:"Full body · bodyweight · medium weight",focus:["Quads","Glutes","Chest","Back","Shoulders","Core"].filter(m=>c[m]),items,noAbs:true,full:true};
+  return P;
+}
+function buildProgram(mode,mix,blk,days){
+  mode=MODE_LABEL[mode]?mode:"weights"; blk=blk||0; const F=mode==="functional"; const style=mode; const four=days===4;
   const P={ver:5,gen:true,goal:mode,mode,rev:0,order:["PULL","PUSH","LEGS"],absEvery:mode==="weights"?2:0,abs:"ABS",workouts:{}};
   const main=pool=>slot(pool,F?5:4,F?4:6,F?6:10,{main:true,ex:pick(pool,blk)});
   const acc=(pool,off,sets,lo,hi)=>slot(pool,sets||3,lo||(F?6:8),hi||(F?10:12),{off:off||0});
@@ -617,6 +633,7 @@ function buildProgram(mode,mix,blk){
     P.workouts.LOWER={name:"Legs + Glutes",sub:"Foundational lower"+tail,focus:["Quads","Hamstrings","Glutes"],items:lower};
     P.workouts.UPPER={name:"Upper body",sub:"Back · Chest · Shoulders"+tail,focus:["Chest","Back","Shoulders"],items:upper};
     P.workouts.FULL={name:"Full body + deep core",sub:"Hinge · circuits · carries"+tail,focus:["Hamstrings","Core"],items:full};
+    if(four) addAthletic(P,mix);
     return withIds(P);
   }
   let pull,push,legs;
@@ -639,6 +656,7 @@ function buildProgram(mode,mix,blk){
   P.workouts.ABS={name:"Abs",sub:"every other workout",focus:["Core"],items:[slot(POOLS.absM,3,10,15),slot(POOLS.absM,3,10,15,{off:2})]};
   /* shorter styles can't hit every group with two lifts — the focus list shrinks to what the day actually covers */
   if(style!=="weights") ["PULL","PUSH","LEGS"].forEach(k=>{ const W=P.workouts[k]; const c=coverage(W.items); W.focus=W.focus.filter(m=>c[m]); });
+  if(four) addAthletic(P,mix);
   return withIds(P);
 }
 /* Rotation: after each finished day, every rotating slot moves to the next exercise in its pool (never doubling up within the day). */
@@ -653,12 +671,13 @@ function pickMoves(b,c,used){
   if(b.pools) return b.pools.map(pl=>{ let k=c+(b.off||0), ex=pick(pl,k), tries=0; while(used.has(ex)&&tries<pl.length){ k++; ex=pick(pl,k); tries++; } used.add(ex); return {ex}; });
   if(!b.pool||!b.pool.length) return b.moves||[]; const n=Math.min(b.n||4,b.pool.length), o=(c*2)%b.pool.length; const out=[]; for(let k=0;k<b.pool.length&&out.length<n;k++){ const ex=pick(b.pool,o+k); if(used.has(ex)) continue; used.add(ex); out.push({ex}); } return out.length?out:b.pool.slice(0,n).map(ex=>({ex})); }
 function rotateAll(){ Object.keys(S.program.workouts).forEach(rotateDay); }
-function regen(){ S.mix=S.mix||cp(PRESETS.nick.mix); S.goal=S.goal||{mode:"weights",setAt:null}; S.cyc=S.cyc||{}; const oldOrder=(S.program&&S.program.gen&&S.program.order)||[]; S.program=buildProgram(S.goal.mode,S.mix,S.block||0); rotateAll(); const ord=S.program.order; S.next=ord.includes(S.next)?S.next:(ord[oldOrder.indexOf(S.next)]||ord[0]); S.plan=null; S.pick=null; if(S.absNext==null) S.absNext=true; }
+const daysOf=()=>(S.days===4?4:3);
+function regen(){ S.mix=S.mix||cp(PRESETS.nick.mix); S.goal=S.goal||{mode:"weights",setAt:null}; S.cyc=S.cyc||{}; const oldOrder=(S.program&&S.program.gen&&S.program.order)||[]; S.program=buildProgram(S.goal.mode,S.mix,S.block||0,daysOf()); rotateAll(); const ord=S.program.order; S.next=ord.includes(S.next)?S.next:(ord[oldOrder.indexOf(S.next)]||ord[0]); S.plan=null; S.pick=null; if(S.absNext==null) S.absNext=true; }
 /* KJ-02: a borrowed phone keeps each person's training plan. Leaving a person puts their plan (never their workouts,
    weights or history) under their name in its own key; picking them again puts it back exactly. It stays out of
    chalk.v1 on purpose: chalk.v1 is sent as-is as the current person's cloud training backup, so one person's plan
    never rides along in the other person's backup. */
-const PEOPLE_KEY="chalk.people", PLAN_KEYS=["program","mix","goal","block","cyc","next","plan","pick","absNext","lastSummary"];
+const PEOPLE_KEY="chalk.people", PLAN_KEYS=["program","mix","goal","block","cyc","next","plan","pick","absNext","lastSummary","days"];
 function peopleGet(){ try{ const o=JSON.parse(localStorage.getItem(PEOPLE_KEY)||"null"); return o&&typeof o==="object"&&!Array.isArray(o)?o:{}; }catch(e){ return {}; } }
 const plainObj=o=>!!o&&typeof o==="object"&&!Array.isArray(o);
 /* C6: a kept plan is used only when every day in it is whole. A damaged copy (a null exercise, a day missing) would
@@ -674,6 +693,7 @@ function restorePlan(pid){ const pr=ownV(PRESETS,pid), st=pr?ownV(peopleGet(),pi
   /* only fills what a damaged copy lacks: a plan saved by this app passes through unchanged */
   if(!plainObj(S.mix)) S.mix=cp(pr.mix); if(!plainObj(S.goal)) S.goal={mode:pr.goal,setAt:Date.now()};
   if(!plainObj(S.cyc)) S.cyc={}; if(typeof S.block!=="number") S.block=0; if(typeof S.absNext!=="boolean") S.absNext=true;
+  if(S.days!=null&&S.days!==3&&S.days!==4) S.days=null;
   if(S.plan!=null&&!(plainObj(S.plan)&&Array.isArray(S.plan.items)&&S.plan.items.every(plainObj))) S.plan=null;
   if(S.lastSummary!=null&&!(plainObj(S.lastSummary)&&plainObj(S.lastSummary.rec))) S.lastSummary=null;
   if(S.pick!=null&&typeof S.pick!=="string") S.pick=null;
@@ -761,7 +781,7 @@ function upgrade(S){
 /* ================= STATE ================= */
 const KEY = "chalk.v1";
 const cp = o => JSON.parse(JSON.stringify(o));
-function fresh(){ return {v:1,updatedAt:0,settings:{restC:60,restA:45,sound:true,wake:true,theme:"system"},program:buildProgram("weights",PRESETS.nick.mix,0),mix:cp(PRESETS.nick.mix),goal:{mode:"weights",setAt:null},block:0,cyc:{},ex:{},log:[],acts:[],next:"PULL",active:null,custom:{},absNext:true,plan:null}; }
+function fresh(){ return {v:1,updatedAt:0,settings:{restC:60,restA:45,sound:true,wake:true,theme:"system"},program:buildProgram("weights",PRESETS.nick.mix,0),mix:cp(PRESETS.nick.mix),goal:{mode:"weights",setAt:null},block:0,cyc:{},ex:{},log:[],acts:[],next:"PULL",active:null,custom:{},absNext:true,plan:null,days:3}; }
 /* the save is read once per launch (it can be megabytes) */
 let bootRaw=null; try{ bootRaw=localStorage.getItem(KEY); }catch(e){}
 function load(t){ if(t===undefined){ try{ t=localStorage.getItem(KEY); }catch(e){ t=null; } } try{ const s=JSON.parse(t); if(s&&s.v===1) return s; }catch(e){ try{ if(t) localStorage.setItem("chalk.bad",t); }catch(e2){} } return null; }
@@ -1190,6 +1210,8 @@ function bestDay(recent,pointer,prevWid){
   const pi=Math.max(0,o.indexOf(pointer)); const dist=w=>((o.indexOf(w)-pi)%o.length+o.length)%o.length;
   const sc={}; c.forEach(w=>{ sc[w]=dayScore(w,recent); });
   const best=c.slice().sort((a,b)=>(sc[a]-sc[b])||(dist(a)-dist(b)))[0];
+  /* a full-body day (Athletic day) touches everything, so it would never win on freshness: it is light on purpose and takes its turn */
+  if(c.includes(pointer)&&(S.program.workouts[pointer]||{}).full) return pointer;
   if(c.includes(pointer)&&best!==pointer&&!(sc[best]<sc[pointer]/2)) return pointer;
   return best;
 }
@@ -1258,10 +1280,10 @@ function bumpDay(wid){ bumpProg(); if(S.plan&&S.plan.wid!==wid&&wid!==absId()) k
 function planFor(wid){
   const W=S.program.workouts[wid]; const rev=S.program.rev||0;
   if(!S.plan||S.plan.wid!==wid||S.plan.rev!==rev||!S.plan.items){
-    const items=cp(W.items);
-    if(wid!==absId() && absDue()) cp(S.program.workouts[absId()].items).forEach(it=>{ it.abs=true; items.push(it); });
+    const items=cp(W.items), abs=wid!==absId()&&!W.noAbs&&absDue();
+    if(abs) cp(S.program.workouts[absId()].items).forEach(it=>{ it.abs=true; items.push(it); });
     items.forEach(applyRange);
-    S.plan={wid,rev,items,abs:wid!==absId()&&absDue()};
+    S.plan={wid,rev,items,abs};
     save();
   }
   return S.plan;
@@ -1350,7 +1372,8 @@ function finishWorkout(){
   const didAbs=A.items.some(it=>it.abs && it.t!=="block" && it.done.length>0);
   const rec={id:A.id,wid:A.wid,name:A.name,start:A.start,end:now,sets,volume,nsets,blocks,abs:didAbs,results:results.map(r=>({ex:r.ex,block:r.block,from:r.from,to:r.to,kind:r.kind,chg:r.chg,pr:r.pr,range:r.range||null,dsets:r.dsets||0}))};
   S.log.unshift(rec); if(S.log.length>1000) S.log.length=1000;
-  if(absOn()) S.absNext=!didAbs;
+  /* a day that carries its own core work (Athletic day) leaves the abs turn where it was */
+  if(absOn()&&!(S.program.workouts[A.wid]||{}).noAbs) S.absNext=!didAbs;
   S.cyc=S.cyc||{}; if(A.kind==="hiit"){ S.cyc.HIIT=(S.cyc.HIIT||0)+1; } else { S.cyc[A.wid]=(S.cyc[A.wid]||0)+1; rotateDay(A.wid); }
   if(didAbs){ S.cyc.ABS=(S.cyc.ABS||0)+1; rotateDay(absId()); }
   bumpProg();
@@ -2019,6 +2042,7 @@ function viewSettings(){
     <div class="srow"><div><div class="l">Look</div></div>${segs("theme",["system","light","dark"])}</div></div>`;
   h+=`<h2 class="sec">Program</h2>`;
   h+=`<div class="card"><div class="srow"><div><div class="l">${GOAL_LABEL[(S.goal||{}).mode]||"Muscle gains"} · ${Math.max(0,goalDaysLeft())} days left</div><div class="s">${MIXROWS.map(([k,l])=>l+": "+LVL[(S.mix||{})[k]||0]).join(" · ")}</div></div><button class="btn" data-a="checkin">Change</button></div>
+    <div class="srow"><div><div class="l">Training days</div><div class="s">${daysOf()===4?"Day 4 is an Athletic day: full body, bodyweight and medium weights, no heavy lifts.":"Add a 4th day: full body, bodyweight and medium weights, no heavy lifts."}</div></div><div class="seg">${[3,4].map(v=>`<button data-a="days" data-v="${v}" class="${daysOf()===v?"on":""}">${v} days</button>`).join("")}</div></div>
     <div class="srow"><div><div class="l">Exercises rotate</div><div class="s">Accessories change every session, main lifts every 45 days. Swap "from now on" pins one in place.</div></div><button class="btn" data-a="reset-prog">Rebuild</button></div></div>`;
   const hasAbs=!!S.program.workouts[absId()];
   if(hasAbs) h+=`<div class="card"><div class="srow"><div><div class="l">Abs every other workout</div><div class="s">${absOn()?(S.absNext!==false?"Next workout: abs on":"Next workout: abs off"):"Off"}</div></div><button class="toggle ${absOn()?"on":""}" data-a="abs-tog" role="switch" aria-checked="${absOn()}" aria-label="Abs every other workout"><i></i></button></div></div>`;
@@ -2254,6 +2278,8 @@ document.addEventListener("click",e=>{
         let macOk=true; if(mac!=null&&window.M&&M.import){ try{ macOk=M.import(mac)!==false; }catch(e2){ macOk=false; } }
         S=s; upgrade(S); save(); applyTheme(); closeSheet(); render(); toast(macOk?"Restored":"Workouts restored. The food part couldn't be read."); } else toast("That's not a Chalk backup"); }catch(e){ S=prev; save(); applyTheme(); render(); toast("That's not a Chalk backup"); } break; }
     case "reset-prog": regen(); bumpProg(); save(); render(); toast("Program rebuilt"); break;
+    /* 3 or 4 training days: day 4 is the Athletic day. Rebuilds the days (weights, history and rotation stay). */
+    case "days": { const n=+b.dataset.v; if(!(n===3||n===4)||n===daysOf()) break; if(S.active){ toast("Finish your workout first"); break; } S.days=n; regen(); bumpProg(); save(); render(); toast(n===4?"4 days — Athletic day added":"3 days"); break; }
     /* from Macros → You too: the picker (with Cancel) lives in Train, and Macros would keep showing the same person */
     case "switch-profile": if(S.active){ toast("Finish your workout first"); break; } if(S.profile) S.switchFrom=S.profile; S.profile=null; tab="today"; if(inMacros()&&typeof M.setMode==="function") M.setMode("train"); save(); render(); break;
     case "switch-cancel": if(!S.profile&&S.switchFrom&&PRESETS[S.switchFrom]) S.profile=S.switchFrom; delete S.switchFrom; save(); render(); break;
@@ -2364,7 +2390,7 @@ if(S.active) wakeOn();
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=20, BOOT_AT=Date.now();
+const APP_VERSION=21, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
   /* K5: Macros setup or You has typed numbers that aren't saved yet */

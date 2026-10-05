@@ -6,7 +6,7 @@
    To ship a change to any CORE file: bump VERSION here, APP_VERSION and every ?v= in index.html (a test checks).
    Anything not cached: network with a hard 8 s budget for the whole body, else 504. Never a cut-off file.
    Pinned CDN files (scanner, label reader) and fonts are kept after first use, so they work offline. */
-const VERSION = 20;
+const VERSION = 21;
 const CACHE = "chalk-v" + VERSION;
 const CDN = "chalk-cdn";      /* pinned jsdelivr files never change, so they outlive app versions */
 const FONTS = "chalk-fonts";
