@@ -1391,6 +1391,61 @@ function runFourDayPass() {
   }
 }
 
+/* ------------------------------------------------- v22: bodyweight moves you can add anywhere */
+function runBodyweightPass() {
+  console.log("v22: add bodyweight moves (lunges, push-ups, pull-ups, jump squats)");
+  const LIVE = JSON.parse(read("tests/fixtures/chalk-v1-live.json"));
+  const S0 = JSON.parse(LIVE.nick); S0.active = null; const raw = JSON.stringify(S0);
+  const { dom, w, d, errors } = boot({ real: true, store: { "chalk.v1": raw, "chalk.bak.d": "2000-01-01" } });
+  const tab = name => click(w, q(d, '#tabs [data-tab="' + name + '"]'));
+  try {
+    t("the library has the bodyweight staples, each with a figure and no dumbbells in the lunge rig", () => {
+      ["bw_squat", "bw_lunge", "bw_lunge_walk", "bw_split_squat", "chinup", "pushup", "pullup", "jump_squat", "diamond_pushup", "pike_pushup", "bw_calf"].forEach(id => {
+        const L = JSON.parse(w.eval("JSON.stringify(getEx(" + JSON.stringify(id) + "))"));
+        assert.strictEqual(L.t, "bw", id + " is bodyweight");
+        assert.ok(w.eval("!!PAT[getEx(" + JSON.stringify(id) + ").p]"), id + " has a figure");
+      });
+      assert.ok(w.eval("PAT.bwlunge && !PAT.bwlunge.grip && PAT.lunge.grip==='db'"), "the bodyweight lunge figure holds nothing");
+    });
+    t("Today → + Exercise lists a Bodyweight group first with lunges, push-ups, pull-ups and jump squats, labelled bodyweight", () => {
+      tab("today");
+      const wid = w.eval("nextWorkoutId()");
+      w.openAdd({ where: "plan", wid });
+      const sheet = q(d, "#sheetB");
+      const groups = [...sheet.querySelectorAll(".opt-grp")].map(g => g.textContent.trim());
+      assert.strictEqual(groups[0], "Bodyweight", groups.slice(0, 3).join(" | "));
+      const bwRows = []; let el = sheet.querySelector(".opt-grp").nextElementSibling;
+      while (el && !el.classList.contains("opt-grp")) { bwRows.push(el); el = el.nextElementSibling; }
+      const names = bwRows.map(b => b.querySelector("span").textContent.replace(/\s*in today\s*$/, "").trim());
+      ["Reverse Lunge", "Walking Lunge (bodyweight)", "Push-Up", "Pull-Up", "Jump Squat", "Air Squat", "Chin-Up"].forEach(n => assert.ok(names.includes(n), n + " listed: " + names.join(", ")));
+      bwRows.forEach(b => { const m = b.querySelector(".m").textContent; assert.ok(/bodyweight|\d+ lb/.test(m) && !/added weight/.test(m), m); });
+      assert.ok(names.length === new Set(names).size, "no duplicates in the Bodyweight group");
+      w.closeSheet();
+    });
+    t("adding a bodyweight move gives it a rep range that fits it (push-up 10–15, pull-up 5–10, lunge 8–12) and it sits in today's plan", () => {
+      const wid = w.eval("nextWorkoutId()");
+      const add = id => { w.openAdd({ where: "plan", wid }); click(w, q(d, '#sheetB .opt[data-a="add-do"][data-ex="' + id + '"]')); };
+      add("pushup"); add("pullup"); add("bw_lunge"); add("jump_squat");
+      const plan = JSON.parse(w.eval("JSON.stringify(planFor(" + JSON.stringify(wid) + ").items)"));
+      const of = id => plan.filter(it => it.ex === id).pop();
+      assert.deepStrictEqual([of("pushup").lo, of("pushup").hi], [10, 15]);
+      assert.deepStrictEqual([of("pullup").lo, of("pullup").hi], [5, 10]);
+      assert.deepStrictEqual([of("bw_lunge").lo, of("bw_lunge").hi], [8, 12]);
+      assert.deepStrictEqual([of("jump_squat").lo, of("jump_squat").hi], [10, 15]);
+      ["pushup", "pullup", "bw_lunge", "jump_squat"].forEach(id => assert.strictEqual(of(id).sets, 3, id + " 3 sets"));
+      const txt = d.getElementById("app").textContent;
+      ["Push-Up", "Pull-Up", "Reverse Lunge", "Jump Squat"].forEach(n => assert.ok(txt.includes(n), n + " on Today"));
+      assert.ok(/Reverse Lunge\s*BW/.test(txt.replace(/\s+/g, " ")) || /Reverse Lunge.{0,40}BW/.test(txt.replace(/\s+/g, " ")), "a bodyweight move shows BW, not a weight");
+    });
+    t("the bodyweight circuits can draw the new moves", () => {
+      const pool = JSON.parse(w.eval("JSON.stringify(POOLS.bw)"));
+      assert.ok(pool.includes("bw_lunge") && pool.includes("bw_squat"), pool.join(","));
+      assert.ok(JSON.parse(w.eval("JSON.stringify(POOLS.fullD)")).includes("bw_lunge_walk"));
+    });
+    t("no errors during the bodyweight pass", () => assert.deepStrictEqual(errors.map(String), [], errors.map(String).join(" | ")));
+  } finally { dom.window.close(); }
+}
+
 runPass("pass 1: stub M.ui (integration wiring)", false);
 const realFiles = ["m-ui.js", "m-trends.js"].filter(exists);
 if (realFiles.length) runPass("pass 2: real " + realFiles.join(" + ") + (realFiles.length < 2 ? " (stub fills the rest)" : ""), true);
@@ -1400,6 +1455,7 @@ runPlanStashPass();
 runReplacePass();
 runNarrowPass();
 runFourDayPass();
+runBodyweightPass();
 
 (async () => {
   await runSwPass();

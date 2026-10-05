@@ -14,8 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=21">
-<link rel="stylesheet" href="m-trends.css?v=21">
+<link rel="stylesheet" href="m.css?v=22">
+<link rel="stylesheet" href="m-trends.css?v=22">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
@@ -383,12 +383,12 @@ body.upd-on #app.wrap{padding-bottom:calc(var(--upd-h,46px) + 36px)}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=21"></script>
-<script src="m-data.js?v=21"></script>
-<script src="m-food.js?v=21"></script>
-<script src="m-ui.js?v=21"></script>
-<script src="m-trends.js?v=21"></script>
-<script src="m-sync.js?v=21"></script>
+<script src="m-core.js?v=22"></script>
+<script src="m-data.js?v=22"></script>
+<script src="m-food.js?v=22"></script>
+<script src="m-ui.js?v=22"></script>
+<script src="m-trends.js?v=22"></script>
+<script src="m-sync.js?v=22"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -517,6 +517,15 @@ const LIB = {
   band_pull_apart:{n:"Band Pull-Apart",m:"Rear Delts",t:"band",inc:5,rest:45,guess:0,k:null,s:["Traps"],r:15,p:"pullapart"},
   band_walk:{n:"Lateral Band Walk",m:"Glutes",t:"band",inc:5,rest:45,guess:0,k:null,s:[],r:12,ea:true,p:"bandwalk"},
   glute_bridge:{n:"Glute Bridge",m:"Glutes",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Hamstrings","Core"],r:15,p:"bridge"},
+  /* v22: bodyweight staples you can add to any day (they also join the bodyweight circuits) */
+  bw_squat:{n:"Air Squat",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes"],r:20,p:"bwsquat"},
+  bw_lunge:{n:"Reverse Lunge",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes","Hamstrings"],r:12,ea:true,p:"bwlunge"},
+  bw_lunge_walk:{n:"Walking Lunge (bodyweight)",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes","Hamstrings"],r:12,ea:true,p:"bwlunge"},
+  bw_split_squat:{n:"Split Squat (bodyweight)",m:"Quads",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Glutes","Hamstrings"],r:12,ea:true,p:"bwlunge"},
+  chinup:{n:"Chin-Up",m:"Back",t:"bw",inc:5,rest:120,guess:0,k:0,s:["Biceps"],p:"pullup"},
+  diamond_pushup:{n:"Diamond Push-Up",m:"Triceps",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Chest"],r:12,p:"pushup"},
+  pike_pushup:{n:"Pike Push-Up",m:"Shoulders",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Triceps"],r:10,p:"pushup"},
+  bw_calf:{n:"Calf Raise (bodyweight)",m:"Calves",t:"bw",inc:5,rest:30,guess:0,k:0,s:[],r:25,p:"calf"},
 };
 const MUSCLES = ["Chest","Shoulders","Triceps","Back","Rear Delts","Traps","Biceps","Forearms","Quads","Hamstrings","Glutes","Calves","Core"];
 /* ================= ACTIVITIES (walk · hike · golf) =================
@@ -555,7 +564,7 @@ const POOLS={
   absF:["plank","dead_bug","pallof","hanging_knee","mb_twist","bird_dog","ab_wheel","side_plank"],
   ball:["mb_slam","wall_ball","mb_rot_throw","mb_chest_pass","mb_squat_throw","mb_vup","mb_oh_slam","mb_twist"],
   box:["box_jump","step_up","box_burpee","lat_box_hop","pistol_box","dips"],
-  bw:["burpee","jump_squat","mtn_climber","high_knees","skater","pushup","plank_tap","bicycle","bear_crawl","jumping_jack","jump_rope"],
+  bw:["burpee","jump_squat","mtn_climber","high_knees","skater","pushup","plank_tap","bicycle","bear_crawl","jumping_jack","jump_rope","bw_lunge","bw_squat"],
   bal:["bosu_squat","bosu_sl_stand","sl_reach","bosu_pushup","sl_rdl","curtsy","lat_lunge"],
   dbHiit:["db_thruster","db_swing","db_snatch","renegade_row","db_floor_press","db_pushpress","goblet_squat","db_lunge_walk"],
   coreHiit:["dead_bug","bird_dog","side_plank","plank","bicycle","mtn_climber","pallof"],
@@ -565,7 +574,7 @@ const POOLS={
   calfBal:["calf_stand","bosu_sl_stand","calf_seat","sl_reach"],
   delts:["lat_raise","face_pull","band_pull_apart","db_rear_fly","cable_lat_raise"], arms:["pushdown","db_curl","hammer","oh_ext","ez_curl","skull"],
   fullA:["goblet_squat","kb_goblet","split_squat","step_up","db_thruster"], fullB:["pushup","db_bench","db_floor_press","db_ohp","dips"],
-  fullC:["db_row","renegade_row","cable_row","lat_pulldown"], fullD:["db_lunge_walk","step_up","lat_lunge","curtsy","box_jump"],
+  fullC:["db_row","renegade_row","cable_row","lat_pulldown"], fullD:["db_lunge_walk","step_up","lat_lunge","curtsy","box_jump","bw_lunge_walk"],
   deepCore:["pallof","dead_bug","bird_dog","plank","side_plank","hollow_hold","suitcase_carry","ab_wheel","mb_twist"]
 };
 const PRESETS={
@@ -947,6 +956,7 @@ const PAT={
   legext:PP({th:90,s:5,u:10,f:40,hx:100,hy:200},{th:90,s:85,u:10,f:40,hx:100,hy:200},{lie:1,seat:1,pad:1}),
   hipthrust:PP({t:-70,th:100,s:-40,u:-20,f:-10,hx:130,hy:224},{t:-95,th:80,s:-40,u:-20,f:-10,hx:130,hy:200},{lie:1,bench:"short",grip:"hip"}),
   lunge:PP({},{t:5,th:70,s:-25,th2:-40,s2:-50},{grip:"db"}),
+  bwlunge:PP({},{t:5,th:70,s:-25,th2:-40,s2:-50}),
   fly:PP({u:90,f:80,ua:78},{u:90,f:80,ua:78,uy:68},{grip:"db"}),
   cablefly:PP({u:90,f:80,ua:78},{u:90,f:80,ua:78,uy:68},{cable:[10,60]}),
   chestpass:PP({u:40,f:-150,ua:18},{u:90,f:90,ua:12},{grip:"ball"}),
@@ -1882,7 +1892,10 @@ function setsSave(c){
 }
 function openAdd(c){ const inDay=c.where==="prog"&&c.i!=null?[]:ctxList(c).flatMap(x=>x.t==="block"?x.moves.map(v=>v.ex):[x.ex]); openSheet("Add exercise",(c.where==="prog"?"":scopeSeg(c.where))+exerciseList("add-do",ctxAttr(c),null,ctxFocus(c),inDay)); }
 function addDo(c,id){
-  const mk=()=>({t:"lift",id:uid(),ex:id,sets:3,lo:isCompound(id)?6:8,hi:isCompound(id)?10:12});
+  const mk=()=>{ const L=getEx(id); let lo=isCompound(id)?6:8, hi=isCompound(id)?10:12;
+    /* a bodyweight move works in higher reps (its own rep count sets the top); pull-ups, chin-ups and dips stay 5–10 */
+    if(NOLOAD(L.t)){ if(L.r>0){ hi=L.r; lo=Math.max(5,Math.round(L.r*2/3)); } else if(isCompound(id)){ lo=5; hi=10; } else { lo=10; hi=15; } }
+    return {t:"lift",id:uid(),ex:id,sets:3,lo,hi}; };
   if(c.where==="active"){ const A=S.active; const m=mk(); const at=insertBeforeAbs(A.items,{...m,done:[],skipped:false,draft:null}); const PW=S.program.workouts[A.wid]; if(scope==="always"&&PW){ insertBeforeAbs(PW.items,cp(m)); bumpProg(); } else if(scope==="always") toast("Added for today (this day isn't in your program)"); save(); closeSheet(); render(); setTimeout(()=>{ const el=document.getElementById("slot"+at); el&&el.scrollIntoView({behavior:"smooth",block:"nearest"}); },50); }
   else if(c.where==="plan"){ const m=mk(); insertBeforeAbs(S.plan.items,m); if(scope==="always"){ S.program.workouts[S.plan.wid].items.push(cp(m)); bumpProg(); keepPlan(); } save(); closeSheet(); render(); }
   else { const W=S.program.workouts[c.wid]; if(c.i!=null){ W.items[c.i].moves.push({ex:id}); W.items[c.i].rot=false; } else W.items.push(mk()); bumpDay(c.wid); save(); closeSheet(); render(); }
@@ -2117,8 +2130,12 @@ function closeSheet(){
 }
 function exerciseList(action, extra, curId, focus, inDay){
   const ids=Object.keys(LIB).concat(Object.keys(S.custom)); const have=new Set(inDay||[]);
-  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp ${focus&&focus.includes(m)?"foc":""}">${esc(m)}</div>`+list.map(id=>{ const L=getEx(id), E=S.ex[id]; return `<button class="opt ${id===curId?"cur":""}" data-a="${action}" data-ex="${esc(id)}" ${extra}><span>${esc(L.n)}${have.has(id)?` <span class="tag">in today</span>`:""}</span><span class="m">${E&&E.w!=null?fmtW(E.w)+" lb":TYPE_LABEL[L.t]}</span></button>`; }).join(""); };
+  const row=id=>{ const L=getEx(id), E=S.ex[id]; const wl=E&&E.w!=null&&!(NOLOAD(L.t)&&E.w===0)?fmtW(E.w)+" lb":(NOLOAD(L.t)?"bodyweight":TYPE_LABEL[L.t]); return `<button class="opt ${id===curId?"cur":""}" data-a="${action}" data-ex="${esc(id)}" ${extra}><span>${esc(L.n)}${have.has(id)?` <span class="tag">in today</span>`:""}</span><span class="m">${wl}</span></button>`; };
+  const grp=m=>{ const list=ids.filter(id=>getEx(id).m===m); if(!list.length) return ""; return `<div class="opt-grp ${focus&&focus.includes(m)?"foc":""}">${esc(m)}</div>`+list.map(row).join(""); };
   const all=MUSCLES.concat(["Other"]); let h="";
+  /* v22: bodyweight moves first (lunges, push-ups, pull-ups, jump squats…), then by muscle group */
+  const bw=ids.filter(id=>getEx(id).t==="bw").sort((a,b)=>getEx(a).n.localeCompare(getEx(b).n));
+  if(bw.length) h+=`<div class="opt-grp">Bodyweight</div>`+bw.map(id=>{ const L=getEx(id); return row(id).replace('<span class="m">',`<span class="m">${esc(L.m)} · `); }).join("");
   if(focus&&focus.length){ h+=all.filter(m=>focus.includes(m)).map(grp).join(""); const rest=all.filter(m=>!focus.includes(m)); h+=`<button class="opt" data-a="more"><span>All other muscle groups</span><span class="m">show</span></button><div hidden>${rest.map(grp).join("")}</div>`; }
   else h+=all.map(grp).join("");
   h+=`<div class="opt-grp">Custom</div><button class="opt" data-a="${action}" data-ex="__new" ${extra}><span>+ New exercise…</span></button>`;
@@ -2390,7 +2407,7 @@ if(S.active) wakeOn();
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=21, BOOT_AT=Date.now();
+const APP_VERSION=22, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
   /* K5: Macros setup or You has typed numbers that aren't saved yet */
