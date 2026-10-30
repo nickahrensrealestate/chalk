@@ -1489,6 +1489,172 @@ function runBodyweightPass() {
   } finally { dom.window.close(); }
 }
 
+/* ------------------------------------------------- v24: the 25 most common missing moves · shaded 3D figures */
+function runV24Pass() {
+  console.log("v24: 25 missing gym moves, pools refreshed in older programs, figures shaded as solids");
+  const LIVE = JSON.parse(read("tests/fixtures/chalk-v1-live.json"));
+  const S0 = JSON.parse(LIVE.nick); S0.active = null; const raw = JSON.stringify(S0);
+  const { dom, w, d, errors } = boot({ real: true, store: { "chalk.v1": raw, "chalk.bak.d": "2000-01-01" } });
+  const tab = name => click(w, q(d, '#tabs [data-tab="' + name + '"]'));
+  const ex = id => JSON.parse(w.eval("JSON.stringify(getEx(" + JSON.stringify(id) + "))"));
+  const NEW = ["db_fly", "dec_bench", "db_pullover", "assist_dip", "mc_row", "cg_pulldown", "back_ext", "sumo_dl", "good_morning", "hip_add", "lp_calf", "front_raise", "mc_lat_raise", "push_press", "bb_curl", "conc_curl", "rope_hammer", "db_kickback", "rope_pushdown", "crunch_floor", "situp", "leg_raise", "rev_crunch", "woodchop", "battle_rope"];
+  try {
+    t("exactly 25 new moves, each in the library with a figure, a known muscle, known equipment, a weight jump and a rest", () => {
+      const ids = JSON.parse(w.eval("JSON.stringify(LIB_V24)"));
+      assert.deepStrictEqual(ids, NEW);
+      assert.strictEqual(new Set(ids).size, 25);
+      const muscles = JSON.parse(w.eval("JSON.stringify(MUSCLES)"));
+      ids.forEach(id => {
+        assert.ok(w.eval("Object.prototype.hasOwnProperty.call(LIB," + JSON.stringify(id) + ")"), id + " is in LIB, not a custom fallback");
+        const L = ex(id);
+        assert.ok(muscles.includes(L.m), id + " muscle " + L.m);
+        (L.s || []).forEach(m => assert.ok(muscles.includes(m), id + " secondary " + m));
+        assert.ok(w.eval("!!TYPE_LABEL[" + JSON.stringify(L.t) + "]"), id + " equipment " + L.t);
+        assert.ok(w.eval("!!PAT[getEx(" + JSON.stringify(id) + ").p]"), id + " has its own figure (" + L.p + ")");
+        assert.ok(L.inc > 0 && L.rest > 0 && typeof L.n === "string" && L.n.length > 2, id + " inc / rest / name");
+      });
+      const names = ids.map(id => ex(id).n);
+      ["Dumbbell Fly", "Decline Bench Press", "Sumo Deadlift", "Good Morning", "Barbell Curl", "Crunch", "Sit-Up", "Lying Leg Raise", "Cable Woodchop", "Battle Ropes", "Seated Machine Row", "Close-Grip Lat Pulldown"].forEach(n => assert.ok(names.includes(n), n));
+      assert.strictEqual(new Set(names).size, 25, "25 different names");
+      const all = Object.keys(JSON.parse(w.eval("JSON.stringify(LIB)")));
+      assert.ok(all.length >= 140, "library size " + all.length);
+    });
+    t("every new move sits in at least one rotation pool, and the figures of the 25 are all different from one another where the move differs", () => {
+      const POOLS = JSON.parse(w.eval("JSON.stringify(POOLS)"));
+      const flat = new Set([].concat(...Object.values(POOLS)));
+      NEW.forEach(id => assert.ok(flat.has(id), id + " is in a pool"));
+      assert.ok(POOLS.pushMain.includes("dec_bench") && POOLS.legMain.includes("sumo_dl") && POOLS.hinge.includes("sumo_dl"), "heavy moves in the main-lift pools");
+      assert.ok(POOLS.absM.includes("crunch_floor") && POOLS.athCoreBW.includes("leg_raise") && POOLS.coreHiit.includes("situp"), "floor core work in the abs, athletic and HIIT core pools");
+      assert.ok(POOLS.ropes.includes("battle_rope") && !POOLS.bw.includes("battle_rope"), "battle ropes join the sweat blocks, never the bodyweight circuit");
+      const sweat = JSON.parse(w.eval("JSON.stringify(hiitPool({ball:1,balance:0,box:1},'sweat'))"));
+      assert.ok(sweat.includes("battle_rope"), "a sweat block can draw battle ropes");
+      const figs = NEW.map(id => ex(id).p);
+      assert.strictEqual(new Set(figs).size, NEW.length, "25 figures for 25 moves");
+    });
+    t("a program built before v24 is left byte for byte alone, yet its slots rotate through the new moves (the live pool is used, never the saved copy)", () => {
+      const P = JSON.parse(w.eval("JSON.stringify(S.program)"));
+      assert.deepStrictEqual(P, S0.program, "nothing in the saved program moved at boot");
+      /* each saved copy is the first part of the pool it came from */
+      const chest2 = JSON.parse(w.eval("JSON.stringify(S.program.workouts.PUSH.items[1].pool)"));
+      assert.deepStrictEqual(JSON.parse(w.eval("JSON.stringify(livePool(" + JSON.stringify(chest2) + "))")), JSON.parse(w.eval("JSON.stringify(POOLS.chest2)")), "the chest accessory copy resolves to today's chest2 pool");
+      assert.deepStrictEqual(JSON.parse(w.eval("JSON.stringify(livePool(['bench']))")), ["bench"], "a swapped one-move pool is never widened");
+      assert.strictEqual(w.eval("poolMatch(['burpee','box_jump','zzz'])"), null, "a mixed HIIT copy matches nothing");
+      const snap = w.eval("JSON.stringify(S.program)"), cyc = w.eval("JSON.stringify(S.cyc)");
+      const seen = {};
+      ["PULL", "PUSH", "LEGS", "ABS"].forEach(wid => { seen[wid] = new Set(); for (let c = 0; c < 14; c++) { w.eval("S.cyc[" + JSON.stringify(wid) + "]=" + c + "; rotateDay(" + JSON.stringify(wid) + ")"); JSON.parse(w.eval("JSON.stringify(S.program.workouts[" + JSON.stringify(wid) + "].items)")).forEach(it => { if (it.t !== "block") seen[wid].add(it.ex); }); } });
+      ["db_fly", "db_pullover", "assist_dip", "rope_pushdown", "db_kickback", "mc_lat_raise", "front_raise", "push_press"].forEach(id => assert.ok(seen.PUSH.has(id), id + " comes round on push day: " + [...seen.PUSH].join(",")));
+      ["bb_curl", "conc_curl", "rope_hammer", "cg_pulldown", "mc_row"].forEach(id => assert.ok(seen.PULL.has(id), id + " comes round on pull day"));
+      ["good_morning", "back_ext", "lp_calf", "hip_add"].forEach(id => assert.ok(seen.LEGS.has(id), id + " comes round on leg day"));
+      ["crunch_floor", "leg_raise", "rev_crunch", "woodchop", "situp"].forEach(id => assert.ok(seen.ABS.has(id), id + " comes round on abs"));
+      /* main lifts never rotate */
+      assert.ok(!seen.PUSH.has("dec_bench") && !seen.LEGS.has("sumo_dl"), "a main lift only changes at the 45-day check-in");
+      JSON.parse(snap); w.eval("S.program=" + JSON.stringify(JSON.parse(snap)) + "; S.cyc=" + cyc + ";");
+      assert.deepStrictEqual(JSON.parse(w.eval("JSON.stringify(S.program)")), S0.program);
+    });
+    t("Katerina's functional supersets and deep-core block rotate through the new moves too, and her save is untouched", () => {
+      const K = JSON.parse(LIVE.kat); K.active = null;
+      const { dom: d2, w: w2, errors: e2 } = boot({ real: true, store: { "chalk.v1": JSON.stringify(K), "chalk.bak.d": "2000-01-01" } });
+      try {
+        assert.deepStrictEqual(JSON.parse(w2.eval("JSON.stringify(S.program)")), K.program, "untouched at boot");
+        const seen = new Set();
+        ["LOWER", "UPPER", "FULL"].forEach(wid => { for (let c = 0; c < 14; c++) { w2.eval("S.cyc[" + JSON.stringify(wid) + "]=" + c + "; rotateDay(" + JSON.stringify(wid) + ")"); JSON.parse(w2.eval("JSON.stringify(S.program.workouts[" + JSON.stringify(wid) + "].items)")).forEach(it => { if (it.t === "block") it.moves.forEach(m => seen.add(m.ex)); else seen.add(it.ex); }); } });
+        ["woodchop", "good_morning", "front_raise", "rope_pushdown", "bb_curl", "db_fly"].forEach(id => assert.ok(seen.has(id), id + " in Katerina's rotation: " + [...seen].join(",")));
+        assert.deepStrictEqual(e2.map(String), []);
+      } finally { d2.window.close(); }
+    });
+    t("the next regen and a fresh program use the new pools, so new moves rotate in", () => {
+      const fresh = JSON.parse(w.eval("JSON.stringify(buildProgram('weights',{ball:1,balance:0,box:1},0,3,'hotel'))"));
+      const pools = []; Object.values(fresh.workouts).forEach(W => W.items.forEach(it => { if (it.pool) pools.push(it.pool); }));
+      const flat = new Set([].concat(...pools));
+      ["db_fly", "bb_curl", "crunch_floor", "lp_calf", "mc_row"].forEach(id => assert.ok(flat.has(id), id));
+    });
+    t("battle ropes: timed, no weight, their own label, never on the hotel-gym or no-equipment day", () => {
+      const L = ex("battle_rope");
+      assert.strictEqual(L.t, "rope"); assert.strictEqual(L.u, "s"); assert.ok(L.r >= 20);
+      assert.ok(w.eval("NOLOAD('rope')"), "no load");
+      assert.strictEqual(w.eval("TYPE_LABEL.rope"), "battle ropes");
+      assert.ok(!w.eval("gearOk('battle_rope','bw')") && !w.eval("gearOk('battle_rope','hotel')"), "not hotel gear");
+      ["crunch_floor", "situp", "leg_raise", "rev_crunch", "back_ext"].forEach(id => assert.ok(w.eval("gearOk(" + JSON.stringify(id) + ",'bw')"), id + " works with no equipment"));
+      ["mc_row", "cg_pulldown", "dec_bench", "sumo_dl", "woodchop", "rope_pushdown"].forEach(id => assert.ok(!w.eval("gearOk(" + JSON.stringify(id) + ",'hotel')"), id + " needs the real gym"));
+    });
+    t("Today → + Exercise lists the new moves under their muscle groups (and the floor core work under Bodyweight)", () => {
+      tab("today");
+      const wid = w.eval("nextWorkoutId()");
+      w.openAdd({ where: "plan", wid });
+      const sheet = q(d, "#sheetB");
+      const names = [...sheet.querySelectorAll('.opt[data-a="add-do"] > span:first-child')].map(e => e.textContent.replace(/\s*in today\s*$/, "").trim());
+      NEW.forEach(id => assert.ok(names.includes(ex(id).n), ex(id).n + " listed"));
+      const bwRows = []; let el = sheet.querySelector(".opt-grp").nextElementSibling;
+      while (el && !el.classList.contains("opt-grp")) { bwRows.push(el); el = el.nextElementSibling; }
+      const bwNames = bwRows.map(b => b.querySelector("span").textContent.replace(/\s*in today\s*$/, "").trim());
+      ["Crunch", "Sit-Up", "Lying Leg Raise", "Reverse Crunch", "Back Extension (45°)"].forEach(n => assert.ok(bwNames.includes(n), n + " under Bodyweight: " + bwNames.join(", ")));
+      assert.ok(!bwNames.includes("Battle Ropes"), "battle ropes are not a bodyweight move");
+      w.closeSheet();
+    });
+    t("adding them: crunch 13–20, sit-up 10–15, battle ropes 20–30 sec, decline bench 6–10, dumbbell fly 8–12; they sit in today's plan", () => {
+      const wid = w.eval("nextWorkoutId()");
+      const add = id => { w.openAdd({ where: "plan", wid }); click(w, q(d, '#sheetB .opt[data-a="add-do"][data-ex="' + id + '"]')); };
+      ["crunch_floor", "situp", "battle_rope", "dec_bench", "db_fly"].forEach(add);
+      const plan = JSON.parse(w.eval("JSON.stringify(planFor(" + JSON.stringify(wid) + ").items)"));
+      const of = id => plan.filter(it => it.ex === id).pop();
+      assert.deepStrictEqual([of("crunch_floor").lo, of("crunch_floor").hi], [13, 20]);
+      assert.deepStrictEqual([of("situp").lo, of("situp").hi], [10, 15]);
+      assert.deepStrictEqual([of("battle_rope").lo, of("battle_rope").hi], [20, 30]);
+      assert.deepStrictEqual([of("dec_bench").lo, of("dec_bench").hi], [6, 10]);
+      assert.deepStrictEqual([of("db_fly").lo, of("db_fly").hi], [8, 12]);
+      const txt = d.getElementById("app").textContent.replace(/\s+/g, " ");
+      ["Crunch", "Sit-Up", "Battle Ropes", "Decline Bench Press", "Dumbbell Fly"].forEach(n => assert.ok(txt.includes(n), n + " on Today"));
+      assert.ok(/Battle Ropes.{0,80}sec/.test(txt), "battle ropes show seconds");
+    });
+    t("a first-time weight for a new move comes from a related lift (dumbbell fly from the bench, barbell curl from the EZ curl)", () => {
+      const fly = JSON.parse(w.eval("JSON.stringify(plannedW('db_fly'))")), curl = JSON.parse(w.eval("JSON.stringify(plannedW('bb_curl'))"));
+      assert.ok(fly.w == null || (fly.est && fly.w > 0), "fly: " + JSON.stringify(fly));
+      assert.ok(curl.w == null || (curl.est && curl.w > 0), "curl: " + JSON.stringify(curl));
+    });
+    t("the figures are drawn as shaded solids: a gradient per part, a radial highlight on the head, a floor shadow (none when hanging)", () => {
+      const sq = w.eval("animFrame(PAT.squat,0.5,'thigh','side')");
+      assert.ok(/<defs>/.test(sq) && /radialGradient/.test(sq), "defs with the round-part highlight");
+      assert.ok((sq.match(/linearGradient/g) || []).length >= 10, "a gradient across each limb and the torso");
+      assert.ok(/class="sh"/.test(sq) && /class="shd"/.test(sq), "shade overlays and a floor shadow");
+      assert.ok(/class="hd"/.test(sq) && /class="tq/.test(sq) && /class="lm/.test(sq), "the body parts are still there");
+      const ids = sq.match(/id="([^"]+)"/g); assert.strictEqual(new Set(ids).size, ids.length, "gradient ids are unique within a frame");
+      const sq2 = w.eval("animFrame(PAT.squat,0.5,'thigh','front')");
+      const ids2 = sq2.match(/id="([^"]+)"/g); assert.ok(!ids.some(i => ids2.includes(i)), "the side and front views never share a gradient id");
+      const pu = w.eval("animFrame(PAT.pullup,0.5,'torso','side')");
+      assert.ok(!/class="shd"/.test(pu) && !/class="floor"/.test(pu), "no floor, no shadow while hanging");
+      assert.ok(/class="shd"/.test(w.eval("animFrame(PAT.hpress,0.5,'torso','side')")), "a shadow under the bench press");
+    });
+    t("the new figures carry their gear: ropes, a knee pad, a chest pad, elbow pads, one dumbbell for the pullover and the concentration curl, a decline bench", () => {
+      const fr = (p, v) => w.eval("animFrame(PAT." + p + ",0.5,'torso'," + JSON.stringify(v || "side") + ")");
+      assert.ok((fr("battlerope").match(/<path class="cab"[^>]*d="M[^"]*C/g) || []).length === 2, "two rope curves");
+      assert.ok(/class="fur"/.test(fr("assistdip")) && /class="fur"/.test(fr("mcrow")), "a knee pad, a seat and a chest pad");
+      assert.ok((fr("mcrow").match(/stroke-width:9/g) || []).length >= 1, "the chest pad is a thick pad");
+      assert.ok((fr("mclatraise").match(/stroke-width:6/g) || []).length === 2, "an elbow pad each side");
+      const rings = s => (s.match(/class="eq"/g) || []).length;
+      assert.strictEqual(rings(fr("pullover")), 2, "one dumbbell (two ends) for the pullover");
+      assert.strictEqual(rings(fr("conccurl")), 2, "one dumbbell for the concentration curl");
+      assert.strictEqual(rings(fr("dbfly")), 4, "two dumbbells for the fly");
+      assert.ok((fr("decpress").match(/class="fur"/g) || []).length >= 3 && /stroke-width:9/.test(fr("decpress")), "a decline bench with a pad and posts");
+      assert.ok(/class="fur"/.test(fr("backext")) && (fr("backext").match(/stroke-width:9/g) || []).length === 3 && /class="eq"/.test(fr("backext")), "a 45° pad and foot rollers");
+      ["dbfly", "decpress", "pullover", "assistdip", "mcrow", "cgpull", "backext", "sumo", "goodmorning", "hipadd", "lpcalf", "frontraise", "mclatraise", "pushpress", "conccurl", "dbkick", "ropepush", "ropecurl", "crunchfloor", "situp", "legraise", "revcrunch", "woodchop", "battlerope"].forEach(p => {
+        ["side", "front"].forEach(v => { const s = fr(p, v); assert.ok(/^<svg class="rig/.test(s) && /viewBox="[-\d.]+ [-\d.]+ [\d.]+ [\d.]+"/.test(s) && !/NaN/.test(s), p + " " + v + " draws"); });
+      });
+    });
+    t("the body map is shaded too: a sweep across every part and a highlight on the head, both views, muscles still light up", () => {
+      const f = w.eval("bodySVG(false,m=>m==='Chest'?'on':'')"), b = w.eval("bodySVG(true,m=>m==='Back'?'on':'')");
+      [f, b].forEach(s => {
+        assert.ok(/<defs>/.test(s) && /linearGradient/.test(s) && /radialGradient/.test(s));
+        const sk = (s.match(/class="sk"/g) || []).length, mm = (s.match(/class="mm/g) || []).length, sh = (s.match(/class="sh"/g) || []).length;
+        assert.strictEqual(sh, sk + mm, "one shade per skin and muscle path (the head and neck are skin): " + sh + " vs " + (sk + mm));
+      });
+      assert.ok(/class="mm on" data-m="Chest"/.test(f) && /class="mm on" data-m="Back"/.test(b), "the working muscle is on");
+      const ids = (f + b).match(/id="([^"]+)"/g); assert.strictEqual(new Set(ids).size, ids.length, "front and back maps use different gradient ids");
+    });
+    t("sw.js: version 24 everywhere", () => { assert.ok(APPV >= 24 && SWV >= 24, APPV + " / " + SWV); });
+    t("no errors during the v24 pass", () => assert.deepStrictEqual(errors.map(String), [], errors.map(String).join(" | ")));
+  } finally { dom.window.close(); }
+}
+
 runPass("pass 1: stub M.ui (integration wiring)", false);
 const realFiles = ["m-ui.js", "m-trends.js"].filter(exists);
 if (realFiles.length) runPass("pass 2: real " + realFiles.join(" + ") + (realFiles.length < 2 ? " (stub fills the rest)" : ""), true);
@@ -1499,6 +1665,7 @@ runReplacePass();
 runNarrowPass();
 runFourDayPass();
 runBodyweightPass();
+runV24Pass();
 
 (async () => {
   await runSwPass();

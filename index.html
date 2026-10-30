@@ -14,15 +14,15 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=23">
-<link rel="stylesheet" href="m-trends.css?v=23">
+<link rel="stylesheet" href="m.css?v=24">
+<link rel="stylesheet" href="m-trends.css?v=24">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
   --acc:#8F5E08; --acc-ink:#FFFFFF; --acc-soft:#F3E4C2; --ok:#24714A; --ok-soft:#DCEFE3; --warn:#B03A24; --warn-soft:#F6DED9;
   --chip:#EEEAE0; --shadow:0 1px 2px rgba(0,0,0,.06);
   --mus:#2F7DF6; --mus-t:#1F66D6; --mus-line:#1B5FCC; --skin:#ECE9E1; --skin-line:#D0CCC1; --mus0:#DDD9CE; --mus0-line:#C6C1B4;
-  --fig:#8E949C; --fig2:#C9CDD3;
+  --fig:#8E949C; --fig2:#C9CDD3; --shd:.12; --figsh:drop-shadow(0 1.5px 2.5px rgba(0,0,0,.22));
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -30,7 +30,7 @@
     --acc:#F2B33D; --acc-ink:#1A1400; --acc-soft:#33290F; --ok:#58C98A; --ok-soft:#14301F; --warn:#E8654E; --warn-soft:#3A1A14;
     --chip:#262B33; --shadow:none;
     --mus:#3D8BEF; --mus-t:#3D8BEF; --mus-line:#8CC0FF; --skin:#2B3139; --skin-line:#3D444D; --mus0:#353C45; --mus0-line:#4A525B;
-    --fig:#A7ADB5; --fig2:#4A525B;
+    --fig:#A7ADB5; --fig2:#4A525B; --shd:.32; --figsh:drop-shadow(0 2px 3px rgba(0,0,0,.5));
   }
 }
 :root[data-theme="dark"]{
@@ -38,7 +38,7 @@
   --acc:#F2B33D; --acc-ink:#1A1400; --acc-soft:#33290F; --ok:#58C98A; --ok-soft:#14301F; --warn:#E8654E; --warn-soft:#3A1A14;
   --chip:#262B33; --shadow:none;
   --mus:#3D8BEF; --mus-t:#3D8BEF; --mus-line:#8CC0FF; --skin:#2B3139; --skin-line:#3D444D; --mus0:#353C45; --mus0-line:#4A525B;
-  --fig:#A7ADB5; --fig2:#4A525B;
+  --fig:#A7ADB5; --fig2:#4A525B; --shd:.32; --figsh:drop-shadow(0 2px 3px rgba(0,0,0,.5));
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
@@ -179,6 +179,8 @@ a.btn.primary{color:var(--acc-ink)}
 .rig .cab{stroke:var(--mut);stroke-width:2;fill:none}
 .rig .fur{fill:var(--line)}
 .rig .floor{stroke:var(--line);stroke-width:2}
+.rig .shd{fill:#000;opacity:var(--shd,.12)}
+.rig .sh,.an .sh{stroke:none;pointer-events:none}
 
 /* rest timer bar */
 /* full-screen rest countdown */
@@ -233,7 +235,7 @@ select.sel{width:100%;min-height:48px;padding:0 40px 0 14px;border-radius:12px;b
 
 /* anatomy figures */
 .figs{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:4px 56px 0}
-.fig{width:100%;height:auto;max-height:220px;display:block}
+.fig{width:100%;height:auto;max-height:220px;display:block;filter:var(--figsh,none)}
 .an .sk{fill:var(--skin);stroke:var(--skin-line);stroke-width:1}
 .an .mm{fill:var(--mus0);stroke:var(--mus0-line);stroke-width:.8}
 .an .on{fill:var(--mus);stroke:var(--mus-line)}
@@ -383,12 +385,12 @@ body.upd-on #app.wrap{padding-bottom:calc(var(--upd-h,46px) + 36px)}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=23"></script>
-<script src="m-data.js?v=23"></script>
-<script src="m-food.js?v=23"></script>
-<script src="m-ui.js?v=23"></script>
-<script src="m-trends.js?v=23"></script>
-<script src="m-sync.js?v=23"></script>
+<script src="m-core.js?v=24"></script>
+<script src="m-data.js?v=24"></script>
+<script src="m-food.js?v=24"></script>
+<script src="m-ui.js?v=24"></script>
+<script src="m-trends.js?v=24"></script>
+<script src="m-sync.js?v=24"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -533,7 +535,38 @@ const LIB = {
   bench_dip:{n:"Bench Dip (chair or bench)",m:"Triceps",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Chest","Shoulders"],r:15,p:"dips"},
   sl_bridge:{n:"Single-Leg Glute Bridge",m:"Glutes",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Hamstrings","Core"],r:12,ea:true,p:"bridge"},
   prone_y:{n:"Prone Y-Raise",m:"Back",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Rear Delts","Shoulders"],r:12,p:"birddog"},
+  /* v24: the 25 most common gym moves that were still missing (chest flys and pullovers, decline bench, sumo deadlift,
+     good mornings, back extensions, inner thigh, leg-press calves, front / machine lateral raises, push press, machine row,
+     close-grip pulldown, barbell / concentration / rope curls, kickbacks, rope pushdowns, assisted dips, floor core work,
+     cable woodchops and battle ropes). Each has its own figure. */
+  db_fly:{n:"Dumbbell Fly",m:"Chest",t:"db",inc:5,rest:75,guess:25,k:0.2,s:["Shoulders"],p:"dbfly"},
+  dec_bench:{n:"Decline Bench Press",m:"Chest",t:"bb",inc:5,rest:150,guess:135,k:1.0,s:["Triceps","Shoulders"],p:"decpress"},
+  db_pullover:{n:"Dumbbell Pullover",m:"Chest",t:"db",inc:5,rest:75,guess:40,k:0.3,s:["Back","Triceps"],p:"pullover"},
+  assist_dip:{n:"Assisted Dip",m:"Chest",t:"mc",inc:5,rest:90,guess:50,k:null,s:["Triceps"],p:"assistdip"},
+  mc_row:{n:"Seated Machine Row",m:"Back",t:"mc",inc:10,rest:90,guess:90,k:0.9,s:["Biceps","Rear Delts"],p:"mcrow"},
+  cg_pulldown:{n:"Close-Grip Lat Pulldown",m:"Back",t:"cb",inc:10,rest:90,guess:100,k:1.0,s:["Biceps"],p:"cgpull"},
+  back_ext:{n:"Back Extension (45°)",m:"Back",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Glutes","Hamstrings"],p:"backext"},
+  sumo_dl:{n:"Sumo Deadlift",m:"Glutes",t:"bb",inc:10,rest:180,guess:185,k:1.3,s:["Hamstrings","Quads","Back"],p:"sumo"},
+  good_morning:{n:"Good Morning",m:"Hamstrings",t:"bb",inc:5,rest:120,guess:65,k:0.4,s:["Glutes","Back"],p:"goodmorning"},
+  hip_add:{n:"Hip Adduction Machine (inner thigh)",m:"Quads",t:"mc",inc:10,rest:60,guess:90,k:0.65,s:["Glutes"],p:"hipadd"},
+  lp_calf:{n:"Leg Press Calf Raise",m:"Calves",t:"mc",inc:10,rest:60,guess:180,k:1.8,s:[],p:"lpcalf"},
+  front_raise:{n:"Dumbbell Front Raise",m:"Shoulders",t:"db",inc:5,rest:60,guess:15,k:0.2,s:["Chest"],p:"frontraise"},
+  mc_lat_raise:{n:"Machine Lateral Raise",m:"Shoulders",t:"mc",inc:5,rest:60,guess:50,k:0.65,s:["Traps"],p:"mclatraise"},
+  push_press:{n:"Barbell Push Press",m:"Shoulders",t:"bb",inc:5,rest:120,guess:95,k:1.25,s:["Triceps","Quads"],p:"pushpress"},
+  bb_curl:{n:"Barbell Curl",m:"Biceps",t:"bb",inc:5,rest:60,guess:55,k:1.05,s:["Forearms"],p:"bbcurl"},
+  conc_curl:{n:"Concentration Curl",m:"Biceps",t:"db",inc:5,rest:60,guess:20,k:0.4,s:[],ea:true,p:"conccurl"},
+  rope_hammer:{n:"Rope Hammer Curl",m:"Biceps",t:"cb",inc:5,rest:60,guess:50,k:1.0,s:["Forearms"],p:"ropecurl"},
+  db_kickback:{n:"Dumbbell Triceps Kickback",m:"Triceps",t:"db",inc:5,rest:60,guess:15,k:0.3,s:[],p:"dbkick"},
+  rope_pushdown:{n:"Rope Pushdown",m:"Triceps",t:"cb",inc:5,rest:60,guess:45,k:0.9,s:[],p:"ropepush"},
+  crunch_floor:{n:"Crunch",m:"Core",t:"bw",inc:5,rest:45,guess:0,k:0,s:[],r:20,p:"crunchfloor"},
+  situp:{n:"Sit-Up",m:"Core",t:"bw",inc:5,rest:45,guess:0,k:0,s:[],r:15,p:"situp"},
+  leg_raise:{n:"Lying Leg Raise",m:"Core",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Quads"],r:15,p:"legraise"},
+  rev_crunch:{n:"Reverse Crunch",m:"Core",t:"bw",inc:5,rest:45,guess:0,k:0,s:[],r:15,p:"revcrunch"},
+  woodchop:{n:"Cable Woodchop",m:"Core",t:"cb",inc:5,rest:60,guess:30,k:0.5,s:["Shoulders"],r:12,ea:true,p:"woodchop"},
+  battle_rope:{n:"Battle Ropes",m:"Shoulders",t:"rope",inc:5,rest:45,guess:0,k:0,s:["Core","Back"],r:30,u:"s",p:"battlerope"},
 };
+/* every v24 addition, in one place (the upgrade and the tests use it) */
+const LIB_V24=["db_fly","dec_bench","db_pullover","assist_dip","mc_row","cg_pulldown","back_ext","sumo_dl","good_morning","hip_add","lp_calf","front_raise","mc_lat_raise","push_press","bb_curl","conc_curl","rope_hammer","db_kickback","rope_pushdown","crunch_floor","situp","leg_raise","rev_crunch","woodchop","battle_rope"];
 const MUSCLES = ["Chest","Shoulders","Triceps","Back","Rear Delts","Traps","Biceps","Forearms","Quads","Hamstrings","Glutes","Calves","Core"];
 /* ================= ACTIVITIES (walk · hike · golf) =================
    Logged on their own (S.acts), not as sets. Calories = MET × 3.5 × kg ÷ 200 × minutes (the Compendium of Physical
@@ -547,42 +580,42 @@ const ACTS={
   golf:{n:"Golf",verb:"played",em:"⛳",min:255,holes:18,walk:true,metWalk:5.3,metCart:3.5,miPerHole:0.28}
 };
 const ACT_IDS=Object.keys(ACTS);
-const TYPE_LABEL = {bb:"total on bar",db:"each hand",mc:"stack",cb:"stack",bw:"added weight",mb:"med ball",bal:"balance",kb:"kettlebell",band:"band"};
-const NOLOAD=t=>t==="bw"||t==="bal"||t==="band";
+const TYPE_LABEL = {bb:"total on bar",db:"each hand",mc:"stack",cb:"stack",bw:"added weight",mb:"med ball",bal:"balance",kb:"kettlebell",band:"band",rope:"battle ropes"};
+const NOLOAD=t=>t==="bw"||t==="bal"||t==="band"||t==="rope";
 
 /* ================= PROGRAM BUILDER =================
    Every 45 days you pick a goal. muscle = size (8–12 reps, isolation, machines welcome). functional = strength you use
    (heavy compounds, one-leg work, carries, med-ball power, balance). The mix dials (0 none · 1 less · 2 normal · 3 more)
    say how much weights / HIIT / med ball / balance / box you want. Main lifts change every 45-day block; everything else rotates every session. */
 const POOLS={
-  pushMain:["bench","db_bench","inc_bench","chest_press"], pushMainF:["ohp","bench","db_ohp","inc_bench"],
+  pushMain:["bench","db_bench","inc_bench","chest_press","dec_bench"], pushMainF:["ohp","bench","db_ohp","inc_bench"],
   pullMain:["bb_row","pullup","tbar_row","cs_row"], pullMainF:["deadlift","bb_row","pullup","trap_dl"],
-  legMain:["squat","leg_press","hack_squat","front_squat"], legMainF:["squat","trap_dl","front_squat","deadlift"],
-  chest2:["inc_db_press","cable_fly","pec_deck","dips","pushup","db_bench"],
-  shoulder:["db_ohp","mc_ohp","arnold","ohp"], sideDelt:["lat_raise","cable_lat_raise","upright_row"],
-  tri:["pushdown","oh_ext","skull","db_oh_ext","cg_bench","dips"],
-  backV:["lat_pulldown","pullup","assist_pullup","sa_pulldown"], backH:["cable_row","cs_row","db_row","tbar_row"],
+  legMain:["squat","leg_press","hack_squat","front_squat","sumo_dl"], legMainF:["squat","trap_dl","front_squat","deadlift","sumo_dl"],
+  chest2:["inc_db_press","cable_fly","pec_deck","dips","pushup","db_bench","db_fly","db_pullover","assist_dip"],
+  shoulder:["db_ohp","mc_ohp","arnold","ohp","push_press"], sideDelt:["lat_raise","cable_lat_raise","upright_row","mc_lat_raise","front_raise"],
+  tri:["pushdown","oh_ext","skull","db_oh_ext","cg_bench","dips","rope_pushdown","db_kickback"],
+  backV:["lat_pulldown","pullup","assist_pullup","sa_pulldown","cg_pulldown"], backH:["cable_row","cs_row","db_row","tbar_row","mc_row"],
   traps:["shrug","db_shrug","upright_row"], rearDelt:["face_pull","rear_delt","db_rear_fly","cable_rear_fly"],
-  bi:["db_curl","ez_curl","hammer","xbody_hammer","cable_curl","preacher","inc_curl"], forearm:["rev_curl","wrist_curl","farmer_carry"],
-  quad2:["leg_press","leg_ext","hack_squat","goblet_squat","split_squat"], ham:["rdl","leg_curl","lying_curl","db_rdl"],
-  glute:["hip_thrust","cable_kickback","hip_abd","glute_bridge"], calf:["calf_stand","calf_seat"],
+  bi:["db_curl","ez_curl","hammer","xbody_hammer","cable_curl","preacher","inc_curl","bb_curl","conc_curl","rope_hammer"], forearm:["rev_curl","wrist_curl","farmer_carry"],
+  quad2:["leg_press","leg_ext","hack_squat","goblet_squat","split_squat","hip_add"], ham:["rdl","leg_curl","lying_curl","db_rdl","good_morning","back_ext"],
+  glute:["hip_thrust","cable_kickback","hip_abd","glute_bridge"], calf:["calf_stand","calf_seat","lp_calf"],
   unilateral:["split_squat","step_up","db_lunge_walk","sl_rdl","pistol_box"], carry:["farmer_carry","suitcase_carry"],
-  absM:["cable_crunch","mc_crunch","hanging_knee","decline_situp","ab_wheel"],
-  absF:["plank","dead_bug","pallof","hanging_knee","mb_twist","bird_dog","ab_wheel","side_plank"],
+  absM:["cable_crunch","mc_crunch","hanging_knee","decline_situp","ab_wheel","crunch_floor","leg_raise","rev_crunch","woodchop","situp"],
+  absF:["plank","dead_bug","pallof","hanging_knee","mb_twist","bird_dog","ab_wheel","side_plank","woodchop","leg_raise"],
   ball:["mb_slam","wall_ball","mb_rot_throw","mb_chest_pass","mb_squat_throw","mb_vup","mb_oh_slam","mb_twist"],
   box:["box_jump","step_up","box_burpee","lat_box_hop","pistol_box","dips"],
   bw:["burpee","jump_squat","mtn_climber","high_knees","skater","pushup","plank_tap","bicycle","bear_crawl","jumping_jack","jump_rope","bw_lunge","bw_squat"],
   bal:["bosu_squat","bosu_sl_stand","sl_reach","bosu_pushup","sl_rdl","curtsy","lat_lunge"],
   dbHiit:["db_thruster","db_swing","db_snatch","renegade_row","db_floor_press","db_pushpress","goblet_squat","db_lunge_walk"],
-  coreHiit:["dead_bug","bird_dog","side_plank","plank","bicycle","mtn_climber","pallof"],
+  coreHiit:["dead_bug","bird_dog","side_plank","plank","bicycle","mtn_climber","pallof","leg_raise","rev_crunch","crunch_floor","situp"],
   /* functional split (Legs+Glutes · Upper · Full body + deep core) */
-  hinge:["deadlift","kb_swing","trap_dl","rdl"], pullMainU:["bb_row","pullup","cs_row","tbar_row"],
-  hamF:["rdl","db_rdl","kb_swing","leg_curl","sl_rdl"], gluteF:["hip_thrust","glute_bridge","band_walk","cable_kickback","hip_abd"],
+  hinge:["deadlift","kb_swing","trap_dl","rdl","sumo_dl"], pullMainU:["bb_row","pullup","cs_row","tbar_row"],
+  hamF:["rdl","db_rdl","kb_swing","leg_curl","sl_rdl","good_morning","back_ext"], gluteF:["hip_thrust","glute_bridge","band_walk","cable_kickback","hip_abd"],
   calfBal:["calf_stand","bosu_sl_stand","calf_seat","sl_reach"],
-  delts:["lat_raise","face_pull","band_pull_apart","db_rear_fly","cable_lat_raise"], arms:["pushdown","db_curl","hammer","oh_ext","ez_curl","skull"],
+  delts:["lat_raise","face_pull","band_pull_apart","db_rear_fly","cable_lat_raise","front_raise"], arms:["pushdown","db_curl","hammer","oh_ext","ez_curl","skull","rope_pushdown","bb_curl"],
   fullA:["goblet_squat","kb_goblet","split_squat","step_up","db_thruster"], fullB:["pushup","db_bench","db_floor_press","db_ohp","dips"],
   fullC:["db_row","renegade_row","cable_row","lat_pulldown"], fullD:["db_lunge_walk","step_up","lat_lunge","curtsy","box_jump","bw_lunge_walk"],
-  deepCore:["pallof","dead_bug","bird_dog","plank","side_plank","hollow_hold","suitcase_carry","ab_wheel","mb_twist"],
+  deepCore:["pallof","dead_bug","bird_dog","plank","side_plank","hollow_hold","suitcase_carry","ab_wheel","mb_twist","woodchop"],
   /* Athletic day (day 4). "bw": nothing but your body — a hotel room or the living room. "hotel": what a hotel gym has —
      dumbbells, a kettlebell, a med ball, a box or bench, a dip / pull-up station. Never a barbell, machine or cable. */
   athSquatBW:["bw_squat","jump_squat","bw_split_squat","wall_sit","pistol_box"],
@@ -595,7 +628,9 @@ const POOLS={
   athLunge:["db_lunge_walk","step_up","lat_lunge","split_squat","curtsy","bw_lunge_walk"],
   athHingeBW:["glute_bridge","sl_bridge","superman","bw_calf"],
   athHinge:["db_rdl","db_swing","kb_swing","sl_rdl","glute_bridge","sl_bridge"],
-  athCoreBW:["plank","dead_bug","bird_dog","side_plank","hollow_hold","bicycle","mtn_climber"]
+  athCoreBW:["plank","dead_bug","bird_dog","side_plank","hollow_hold","bicycle","mtn_climber","crunch_floor","leg_raise","rev_crunch","situp"],
+  /* v24: battle ropes join the HIIT sweat blocks (never the hotel-gym circuits) */
+  ropes:["battle_rope"]
 };
 const ATH_GEAR={bw:{t:["bw"],name:"No equipment",desc:"bodyweight only — a hotel room or the living room"},hotel:{t:["bw","db","kb","mb","bal","band"],name:"Hotel gym",desc:"bodyweight + light dumbbells, kettlebell, med ball, box, dip / pull-up bar"}};
 const gearOf=()=>(S.d4==="bw"?"bw":"hotel");
@@ -621,7 +656,7 @@ const w=(lvl,arr)=>!lvl?[]:arr.slice(0,lvl===1?3:lvl===2?6:arr.length);
 const mixPools=(...arrs)=>{ const out=[]; const max=Math.max(0,...arrs.map(a=>a.length)); for(let i=0;i<max;i++) arrs.forEach(a=>{ if(a[i]&&!out.includes(a[i])) out.push(a[i]); }); return out; };
 function hiitPool(mix,kind){
   if(kind==="power"){ const p=mixPools(w(mix.ball,POOLS.ball),w(mix.box,POOLS.box)); return p.length>=6?p:mixPools(p,POOLS.bw.slice(0,6)); }
-  if(kind==="sweat") return mixPools(POOLS.bw,w(mix.box,POOLS.box),w(mix.ball,POOLS.ball.slice(0,3)));
+  if(kind==="sweat") return mixPools(POOLS.bw,w(mix.box,POOLS.box),w(mix.ball,POOLS.ball.slice(0,3)),POOLS.ropes);
   if(kind==="core") return mixPools(POOLS.coreHiit,w(mix.ball,["mb_twist","mb_vup","mb_oh_slam"]));
   if(kind==="balance") return mix.balance>0?mixPools(w(mix.balance,POOLS.bal),POOLS.unilateral.slice(0,2)):POOLS.unilateral;
   return mixPools(POOLS.dbHiit,w(mix.ball,POOLS.ball.slice(0,2)));
@@ -707,16 +742,22 @@ function buildProgram(mode,mix,blk,days,gear){
   return withIds(P);
 }
 /* Rotation: after each finished day, every rotating slot moves to the next exercise in its pool (never doubling up within the day). */
+/* v24: new moves join the rotation of a program built before them. A slot keeps its own copy of its pool (and a save is never
+   rewritten just for that), so when a slot rotates, its copy is matched to the pool it came from — the copy is the first part
+   of that pool, new moves are only ever added at the end — and the current pool is the one picked from. A copy that matches
+   nothing (a swapped slot, a mixed HIIT pool) is used as it is. Offsets, main lifts and what's planned today never move. */
+function poolMatch(arr){ if(!Array.isArray(arr)||arr.length<2) return null; let best=null; for(const k in POOLS){ const P=POOLS[k]; if(P.length>arr.length&&arr.every((x,i)=>P[i]===x)&&(!best||P.length<best.length)) best=P; } return best; }
+const livePool=arr=>poolMatch(arr)||arr;
 function rotateDay(wid){
   const W=S.program.workouts[wid]; if(!W) return; const c=(S.cyc&&S.cyc[wid])||0;
   const used=new Set(W.items.filter(it=>!it.rot).flatMap(it=>it.t==="block"?(it.moves||[]).map(m=>m.ex):[it.ex]));
   W.items.forEach(it=>{ if(!it.rot) return;
     if(it.t==="block"){ it.moves=pickMoves(it,c,used); }
-    else if(it.pool&&it.pool.length){ let k=c+(it.off||0), ex=pick(it.pool,k), tries=0; while(used.has(ex)&&tries<it.pool.length){ k++; ex=pick(it.pool,k); tries++; } it.ex=ex; used.add(ex); } });
+    else if(it.pool&&it.pool.length){ const pool=livePool(it.pool); let k=c+(it.off||0), ex=pick(pool,k), tries=0; while(used.has(ex)&&tries<pool.length){ k++; ex=pick(pool,k); tries++; } it.ex=ex; used.add(ex); } });
 }
 function pickMoves(b,c,used){
-  if(b.pools) return b.pools.map(pl=>{ let k=c+(b.off||0), ex=pick(pl,k), tries=0; while(used.has(ex)&&tries<pl.length){ k++; ex=pick(pl,k); tries++; } used.add(ex); return {ex}; });
-  if(!b.pool||!b.pool.length) return b.moves||[]; const n=Math.min(b.n||4,b.pool.length), o=(c*2)%b.pool.length; const out=[]; for(let k=0;k<b.pool.length&&out.length<n;k++){ const ex=pick(b.pool,o+k); if(used.has(ex)) continue; used.add(ex); out.push({ex}); } return out.length?out:b.pool.slice(0,n).map(ex=>({ex})); }
+  if(b.pools) return b.pools.map(pl=>{ pl=livePool(pl); let k=c+(b.off||0), ex=pick(pl,k), tries=0; while(used.has(ex)&&tries<pl.length){ k++; ex=pick(pl,k); tries++; } used.add(ex); return {ex}; });
+  if(!b.pool||!b.pool.length) return b.moves||[]; const pool=livePool(b.pool); const n=Math.min(b.n||4,pool.length), o=(c*2)%pool.length; const out=[]; for(let k=0;k<pool.length&&out.length<n;k++){ const ex=pick(pool,o+k); if(used.has(ex)) continue; used.add(ex); out.push({ex}); } return out.length?out:pool.slice(0,n).map(ex=>({ex})); }
 function rotateAll(){ Object.keys(S.program.workouts).forEach(rotateDay); }
 const daysOf=()=>(S.days===4?4:3);
 function regen(){ S.mix=S.mix||cp(PRESETS.nick.mix); S.goal=S.goal||{mode:"weights",setAt:null}; S.cyc=S.cyc||{}; const oldOrder=(S.program&&S.program.gen&&S.program.order)||[]; S.program=buildProgram(S.goal.mode,S.mix,S.block||0,daysOf(),gearOf()); rotateAll(); const ord=S.program.order; S.next=ord.includes(S.next)?S.next:(ord[oldOrder.indexOf(S.next)]||ord[0]); S.plan=null; S.pick=null; if(S.absNext==null) S.absNext=true; }
@@ -935,10 +976,16 @@ const AN={
     Calves:["M60,348 C56,372 58,396 64,414 L77,414 C83,396 83,372 79,348 C73,356 66,356 60,348 Z"]
   }
 };
+/* v24: the body is shaded as a solid. Every part (skin and muscle alike) carries a translucent light-to-dark sweep across
+   its own width, so limbs and muscle bellies read as rounded instead of flat; the head gets a radial highlight. The sweep
+   is a white / black overlay, so it works on the grey, the blue and both themes, and the mirrored half mirrors it. */
+let BMN=0;
 function bodySVG(back,cls){
-  const M=back?AN.back:AN.front;
-  const half=AN.base.map(d=>`<path class="sk" d="${d}"/>`).join("")+Object.keys(M).map(m=>M[m].map(d=>`<path class="mm ${cls(m)||""}" data-m="${m}" d="${d}"/>`).join("")).join("");
-  return `<svg class="fig an" viewBox="0 0 200 440" role="img" aria-label="${back?"Back":"Front"} view"><path class="sk" d="M88,50 L88,78 L112,78 L112,50 Z"/><ellipse class="sk" cx="100" cy="34" rx="22" ry="27"/><g>${half}</g><g transform="matrix(-1 0 0 1 200 0)">${half}</g></svg>`;
+  const M=back?AN.back:AN.front; const id="bm"+(BMN=(BMN+1)%1e6);
+  const sh=d=>`<path class="sh" fill="url(#${id})" d="${d}"/>`;
+  const half=AN.base.map(d=>`<path class="sk" d="${d}"/>`+sh(d)).join("")+Object.keys(M).map(m=>M[m].map(d=>`<path class="mm ${cls(m)||""}" data-m="${m}" d="${d}"/>`+sh(d)).join("")).join("");
+  const defs=`<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".3"/><stop offset=".34" stop-color="#fff" stop-opacity=".24"/><stop offset=".7" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".14"/></linearGradient><radialGradient id="${id}h" cx=".38" cy=".3" r=".75"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset=".5" stop-color="#fff" stop-opacity=".06"/><stop offset="1" stop-color="#000" stop-opacity=".3"/></radialGradient></defs>`;
+  return `<svg class="fig an" viewBox="0 0 200 440" role="img" aria-label="${back?"Back":"Front"} view">${defs}<path class="sk" d="M88,50 L88,78 L112,78 L112,50 Z"/><path class="sh" fill="url(#${id})" d="M88,50 L88,78 L112,78 L112,50 Z"/><ellipse class="sk" cx="100" cy="34" rx="22" ry="27"/><ellipse class="sh" fill="url(#${id}h)" cx="100" cy="34" rx="21.6" ry="26.6"/><g>${half}</g><g transform="matrix(-1 0 0 1 200 0)">${half}</g></svg>`;
 }
 /* muscle -> which part of the stick figure lights up */
 const SEG={Chest:"torso",Back:"torso",Core:"torso",Traps:"neck",Shoulders:"uarm","Rear Delts":"uarm",Biceps:"uarm",Triceps:"uarm",Forearms:"farm",Quads:"thigh",Hamstrings:"thigh",Glutes:"thigh",Calves:"shin"};
@@ -1031,7 +1078,32 @@ const PAT={
   pullapart:PP({u:90,f:90,ua:10},{u:90,f:90,ua:10,uy:-75},{grip:"band"}),
   bandwalk:PP({th:20,s:-15,ta:8,u:20,f:-120},{th:20,s:-15,ta:30,u:20,f:-120},{grip:"band",bandAt:"feet"}),
   bridge:PP({t:-90,th:148,s:-9,u:80,f:80,hx:130,hy:258},{t:-108,th:94,s:-42,u:80,f:80,hx:130,hy:226},{lie:1}),
+  /* v24 */
+  dbfly:PP({t:-90,u:95,f:108,ua:82,th:60,s:-20,hx:150,hy:180},{t:-90,u:176,f:176,ua:8,th:60,s:-20,hx:150,hy:180},{lie:1,bench:1,grip:"db"}),
+  decpress:PP({t:-112,u:90,f:-118,ua:46,th:112,s:-48,hx:150,hy:178},{t:-112,u:200,f:200,ua:12,th:112,s:-48,hx:150,hy:178},{lie:1,bench:"decline",grip:"bar"}),
+  pullover:PP({t:-90,u:178,f:178,ua:6,th:60,s:-20,hx:150,hy:180},{t:-90,u:258,f:258,ua:6,th:60,s:-20,hx:150,hy:180},{lie:1,bench:1,grip:"db1"}),
+  assistdip:PP({t:12,th:4,s:-68},{t:16,u:-92,f:0,th:4,s:-68},{anchor:[140,156],grip:"barlo",floor:false,kneepad:1}),
+  mcrow:PP({t:-5,th:90,s:-5,u:75,f:75},{t:-8,th:90,s:-5,u:-25,f:60},{seat:1,chestpad:1,cable:[262,150]}),
+  backext:PP({t:118,th:-42,s:-42,u:-83,f:82,hx:132,hy:176},{t:44,th:-42,s:-42,u:-9,f:156,hx:132,hy:176},{lie:1,hyper:1,pad:1}),
+  sumo:PP({ta:30},{t:40,th:72,s:-32,ta:30},{grip:"bar"}),
+  goodmorning:PP({t:3,u:-40,f:-170},{t:78,th:14,s:-8,u:-40,f:-170},{grip:"back"}),
+  hipadd:PP({th:90,s:-5,ta:35,u:10,f:40,hx:140,hy:209},{th:90,s:-5,ta:8,u:10,f:40,hx:140,hy:209},{lie:1,seat:1}),
+  lpcalf:PP({t:-50,th:121,s:115,u:-20,f:60,hx:95,hy:180},{t:-50,th:122,s:127,u:-20,f:60,hx:95,hy:180},{lie:1,plat:1,seat:"recline"}),
+  frontraise:PP({u:4,f:4},{u:92,f:92},{grip:"db"}),
+  mclatraise:PP({t:-5,th:90,s:-5,u:0,f:85,ua:12},{t:-5,th:90,s:-5,u:0,f:85,ua:88},{seat:1,elbowpad:1}),
+  pushpress:PP({t:6,th:28,s:-14,u:20,f:170},{u:180,f:180,rise:5},{grip:"bar"}),
+  conccurl:PP({t:28,th:90,s:-5,u:30,f:38,u2:40,f2:70},{t:28,th:90,s:-5,u:30,f:150,u2:40,f2:70},{seat:1,grip:"db",single:1}),
+  dbkick:PP({t:62,th:14,s:-9,u:-58,f:12},{t:62,th:14,s:-9,u:-58,f:-62},{grip:"db"}),
+  ropepush:PP({u:0,f:112,ua:4},{u:4,f:14,ua:18},{cable:[180,6]}),
+  ropecurl:PP({u:-4,f:6,ua:5},{u:10,f:158,ua:7},{cable:[204,258]}),
+  crunchfloor:PP({t:-90,th:128,s:30,u:150,f:-120,hx:150,hy:250},{t:-62,th:128,s:30,u:178,f:-92,hx:150,hy:250},{lie:1}),
+  situp:PP({t:-90,th:128,s:30,u:100,f:100,hx:150,hy:250},{t:12,th:128,s:30,u:78,f:78,hx:150,hy:250},{lie:1}),
+  legraise:PP({t:-90,th:93,s:93,u:85,f:85,hx:150,hy:250},{t:-90,th:172,s:172,u:85,f:85,hx:150,hy:250},{lie:1}),
+  revcrunch:PP({t:-90,th:140,s:62,u:85,f:85,hx:150,hy:250},{t:-90,th:205,s:105,u:85,f:85,hx:150,hy:242},{lie:1}),
+  woodchop:PP({u:150,f:150,uy:30},{t:22,th:32,s:-16,u:22,f:22,uy:-30},{cable:[22,22]}),
+  battlerope:PP({t:14,th:38,s:-20,u:40,f:112,u2:-12,f2:84},{t:14,th:38,s:-20,u:-12,f:84,u2:40,f2:112},{ropes:[292,258]}),
 };
+PAT.cgpull=Object.assign({},PAT.vpull,{a:Object.assign({},PAT.vpull.a,{ua:10}),b:Object.assign({},PAT.vpull.b,{ua:10})});
 PAT.kbswing=Object.assign({},PAT.swing,{grip:"kb"});
 PAT.kbgoblet=Object.assign({},PAT.goblet,{grip:"kb"});
 PAT.rdldb=Object.assign({},PAT.rdl,{grip:"db"});
@@ -1084,8 +1156,14 @@ function rigPoints(pat,t,view){
    Body parts are filled shapes, not lines: limbs are tapered capsules (thicker at the hip and shoulder), the torso is the
    projected hull of a shoulder-wide chest and a narrower pelvis with real depth, hands are fists, feet are wedges with
    width, the head has a nose on the side it faces (and eyes when it faces you). Each part keeps a thin outline in the
-   background colour, so overlapping parts stay readable. Far-side limbs are lighter; the working part is blue. */
+   background colour, so overlapping parts stay readable. Far-side limbs are lighter; the working part is blue.
+   v24 — every part is shaded as a solid: a light from the upper left runs across each limb (a bright edge, a dark edge,
+   so it reads as a cylinder), the head and every round thing (fists, plates, balls) get a radial highlight, benches and
+   boxes are lit from the top, and the figure throws a soft shadow on the floor. The shading is a translucent white / black
+   overlay, so it works on the blue working part and in both themes without new colours. */
 const RW={uarm:[6.5,5.5],farm:[5.5,4.5],thigh:[8.5,6.5],shin:[6.5,4.5],hand:5,neck:4.5,chest:7,backd:6,hip:6};
+const LIGHT=[-0.55,-0.835];   /* where the light comes from, on screen (up and to the left) */
+let RIGN=0;
 function hull2(pts){ pts=pts.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]); if(pts.length<3) return pts; const cr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]); const lo=[]; for(const q of pts){ while(lo.length>=2&&cr(lo[lo.length-2],lo[lo.length-1],q)<=0) lo.pop(); lo.push(q); } const up=[]; for(let i=pts.length-1;i>=0;i--){ const q=pts[i]; while(up.length>=2&&cr(up[up.length-2],up[up.length-1],q)<=0) up.pop(); up.push(q); } up.pop(); lo.pop(); return lo.concat(up); }
 function rigFrame(pat,p,hiSeg,view){
   view=view==="front"?"front":"side";
@@ -1095,13 +1173,24 @@ function rigFrame(pat,p,hiSeg,view){
   const pts=a=>a.map(q=>f1(q[0])+","+f1(q[1])).join(" ");
   const poly=(a,cls,style)=>`<polygon class="${cls}"${style?` style="${style}"`:""} points="${pts(a)}"/>`;
   const circ=(A,r,cls)=>`<circle class="${cls}" cx="${f1(A[0])}" cy="${f1(A[1])}" r="${f1(r)}"/>`;
-  /* a tapered limb segment from screen point A (half-width wa) to B (half-width wb), round at both ends */
-  const capsule=(A,B,wa,wb,cls)=>{ const dx=B[0]-A[0], dy=B[1]-A[1], L=Math.hypot(dx,dy)||1, nx=-dy/L, ny=dx/L; return `<g class="lm${cls}">`+circ(A,wa,"")+poly([[A[0]+nx*wa,A[1]+ny*wa],[B[0]+nx*wb,B[1]+ny*wb],[B[0]-nx*wb,B[1]-ny*wb],[A[0]-nx*wa,A[1]-ny*wa]],"")+circ(B,wb,"")+`</g>`; };
+  /* shading: one set of gradients per frame, ids unique on the page (several rigs are live at once) */
+  const gid="g"+(RIGN=(RIGN+1)%1e6); let defs="", gk=0;
+  const RAD=`url(#${gid}r)`, VERT=`url(#${gid}v)`;
+  defs+=`<radialGradient id="${gid}r" cx=".36" cy=".33" r=".74"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".45" stop-color="#fff" stop-opacity=".08"/><stop offset="1" stop-color="#000" stop-opacity=".36"/></radialGradient>`;
+  defs+=`<linearGradient id="${gid}v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".3"/><stop offset="1" stop-color="#000" stop-opacity=".22"/></linearGradient>`;
+  /* a linear shade across a part: from its lit edge E1 to its dark edge E2 */
+  const shade=(E1,E2)=>{ const id=gid+"_"+(++gk); defs+=`<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${f1(E1[0])}" y1="${f1(E1[1])}" x2="${f1(E2[0])}" y2="${f1(E2[1])}"><stop offset="0" stop-color="#fff" stop-opacity=".46"/><stop offset=".4" stop-color="#fff" stop-opacity=".07"/><stop offset=".6" stop-color="#000" stop-opacity=".06"/><stop offset="1" stop-color="#000" stop-opacity=".34"/></linearGradient>`; return `url(#${id})`; };
+  /* which way along the normal n is lit */
+  const litN=n=>(n[0]*LIGHT[0]+n[1]*LIGHT[1])>=0?n:[-n[0],-n[1]];
+  const shPoly=(a,fill)=>`<polygon class="sh" fill="${fill}" points="${pts(a)}"/>`;
+  const shCirc=(A,r,fill)=>`<circle class="sh" fill="${fill}" cx="${f1(A[0])}" cy="${f1(A[1])}" r="${f1(r)}"/>`;
+  /* a tapered limb segment from screen point A (half-width wa) to B (half-width wb), round at both ends, lit across its width */
+  const capsule=(A,B,wa,wb,cls)=>{ const dx=B[0]-A[0], dy=B[1]-A[1], L=Math.hypot(dx,dy)||1, nx=-dy/L, ny=dx/L; const n=litN([nx,ny]), M=[(A[0]+B[0])/2,(A[1]+B[1])/2], wm=(wa+wb)/2; const g=shade([M[0]+n[0]*wm,M[1]+n[1]*wm],[M[0]-n[0]*wm,M[1]-n[1]*wm]); const body=[[A[0]+nx*wa,A[1]+ny*wa],[B[0]+nx*wb,B[1]+ny*wb],[B[0]-nx*wb,B[1]-ny*wb],[A[0]-nx*wa,A[1]-ny*wa]]; return `<g class="lm${cls}">`+circ(A,wa,"")+poly(body,"")+circ(B,wb,"")+`</g>`+shCirc(A,wa,g)+shPoly(body,g)+shCirc(B,wb,g); };
   const ink=(A,B,w)=>`<line style="stroke:var(--ink);stroke-width:${w};stroke-linecap:round" x1="${f1(A[0])}" y1="${f1(A[1])}" x2="${f1(B[0])}" y2="${f1(B[1])}"/>`;
-  const ring=(A,r)=>`<circle class="eq" cx="${f1(A[0])}" cy="${f1(A[1])}" r="${r}"/>`;
+  const ring=(A,r)=>`<circle class="eq" cx="${f1(A[0])}" cy="${f1(A[1])}" r="${r}"/>`+(r>=5?shCirc(A,r-1.2,RAD):"");
   const plate=A=>ring(A,15)+`<circle class="eqi" cx="${f1(A[0])}" cy="${f1(A[1])}" r="3"/>`;
-  /* an axis-aligned 3D box given as the side-view rect (x,y,w,h) plus its z range -> the rect its projection covers */
-  const box=(x,y,w,h,z0,z1,rx)=>{ const xs=[Pw(x,y,z0)[0],Pw(x,y,z1)[0],Pw(x+w,y,z0)[0],Pw(x+w,y,z1)[0]]; const x0=Math.min.apply(null,xs), x1=Math.max.apply(null,xs); return `<rect class="fur" x="${f1(x0)}" y="${f1(y)}" width="${f1(x1-x0)}" height="${f1(h)}"${rx?` rx="${rx}"`:""}/>`; };
+  /* an axis-aligned 3D box given as the side-view rect (x,y,w,h) plus its z range -> the rect its projection covers, lit from the top */
+  const box=(x,y,w,h,z0,z1,rx)=>{ const xs=[Pw(x,y,z0)[0],Pw(x,y,z1)[0],Pw(x+w,y,z0)[0],Pw(x+w,y,z1)[0]]; const x0=Math.min.apply(null,xs), x1=Math.max.apply(null,xs); const r=`x="${f1(x0)}" y="${f1(y)}" width="${f1(x1-x0)}" height="${f1(h)}"${rx?` rx="${rx}"`:""}`; return `<rect class="fur" ${r}/><rect class="sh" fill="${VERT}" ${r}/>`; };
   const thick=(A,B)=>`<line style="stroke:var(--line);stroke-width:9;stroke-linecap:round" x1="${f1(A[0])}" y1="${f1(A[1])}" x2="${f1(B[0])}" y2="${f1(B[1])}"/>`;
   const zs=(q,r)=>[P([q[0],q[1],q[2]-r]),P([q[0],q[1],q[2]+r])];   /* both ends of a z-segment of half-length r through figure point q */
   const mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2,(a[2]+b[2])/2];
@@ -1109,7 +1198,7 @@ function rigFrame(pat,p,hiSeg,view){
   /* the figure's forward and up directions (sagittal plane) follow the torso lean */
   const fwd=[cos(p.t),-sin(p.t),0], up=[sin(p.t),cos(p.t),0];
   /* arm: upper arm + forearm + fist; leg: thigh + shin + foot */
-  const armSVG=(L,farc,k1,k2)=>{ const A=P(L[0]),B=P(L[1]),C=P(L[2]); const f=farc?" b2":""; const u=[B[0]-C[0],B[1]-C[1]], l=Math.hypot(u[0],u[1])||1; const fist=[C[0]-u[0]/l*2.5,C[1]-u[1]/l*2.5]; return capsule(A,B,RW.uarm[0],RW.uarm[1],f+hi(k1))+capsule(B,C,RW.farm[0],RW.farm[1],f+hi(k2))+circ(fist,RW.hand,"lm"+f+hi(k2)); };
+  const armSVG=(L,farc,k1,k2)=>{ const A=P(L[0]),B=P(L[1]),C=P(L[2]); const f=farc?" b2":""; const u=[B[0]-C[0],B[1]-C[1]], l=Math.hypot(u[0],u[1])||1; const fist=[C[0]-u[0]/l*2.5,C[1]-u[1]/l*2.5]; return capsule(A,B,RW.uarm[0],RW.uarm[1],f+hi(k1))+capsule(B,C,RW.farm[0],RW.farm[1],f+hi(k2))+circ(fist,RW.hand,"lm"+f+hi(k2))+shCirc(fist,RW.hand-0.8,RAD); };
   const legSVG=(L,farc,k1,k2)=>{ const A=P(L[0]),B=P(L[1]),C=P(L[2]); const f=farc?" b2":""; return capsule(A,B,RW.thigh[0],RW.thigh[1],f+hi(k1))+capsule(B,C,RW.shin[0],RW.shin[1],f+hi(k2))+foot(L,farc,k2); };
   /* foot: a wedge from heel to toe with width across z. Flat on the floor when the ankle is near it, else it hangs square to the shin. */
   const foot=(L,farc,k)=>{ const an=L[2], kn=L[1]; const onFloor=pat.lie||pat.anchor||pat.box?false:(J.hy-an[1])>=RG.FLOOR-10; let fd;
@@ -1118,9 +1207,13 @@ function rigFrame(pat,p,hiSeg,view){
     const toeDown=pat.toes&&rise>0?rise:0;   /* calf raise: the heel comes up with the ankle, the toes stay on the floor */
     const q=[add(add(an,fd,-7),dn,1.5),add(add(add(an,fd,15),dn,2),up,-toeDown*0.85),add(add(add(an,fd,18),dn,6.5),up,-toeDown),add(add(an,fd,-8),dn,6.5)];
     const sp=[]; q.forEach(v=>{ sp.push(P([v[0],v[1],v[2]-4])); sp.push(P([v[0],v[1],v[2]+4])); });
-    return poly(hull2(sp.map(v=>[v[0],v[1]])),"lm ft"+(farc?" b2":"")+hi(k)); };
+    const hull=hull2(sp.map(v=>[v[0],v[1]])); return poly(hull,"lm ft"+(farc?" b2":"")+hi(k))+shPoly(hull,VERT); };
   let s=""; const VB=rigBox(pat)[view];
   if(pat.floor!==false) s+=`<line class="floor" x1="${f1(VB.x-4)}" y1="${RG.FLOOR+9}" x2="${f1(VB.x+VB.s+4)}" y2="${RG.FLOOR+9}"/>`;
+  /* the floor shadow: under the feet when standing, under the whole body when lying or on the hands */
+  if(pat.floor!==false){ const xs=[P(J.leg[2])[0],P(J.leg2[2])[0]]; if(pat.lie||pat.anchor){ xs.push(H[0],SH[0]); [J.arm[2],J.arm2[2]].forEach(h=>{ const q=P(h); if(q[1]>RG.FLOOR-30) xs.push(q[0]); }); }
+    const x0=Math.min.apply(null,xs), x1=Math.max.apply(null,xs); const cx=(x0+x1)/2, rx=Math.max(24,(x1-x0)/2+(pat.lie||pat.anchor?26:16));
+    s+=`<ellipse class="shd" cx="${f1(cx)}" cy="${RG.FLOOR+9}" rx="${f1(rx)}" ry="3.5"/>`; }
   if(pat.box) s+=box(156,RG.FLOOR-34,64,38,-30,30,3);
   /* furniture behind the body: 3D boxes; back rests are thick segments in the sagittal plane */
   const hxw=J.hx, hyw=J.hy, SHw=[hxw+J.shC[0],hyw-J.shC[1]], HDw=[hxw+J.head[0],hyw-J.head[1]];
@@ -1128,13 +1221,20 @@ function rigFrame(pat,p,hiSeg,view){
     if(pat.seat==="recline"){ const nx=-cos(p.t)*10, ny=-sin(p.t)*10; s+=thick(Pw(hxw-nx*0.4,hyw-ny*0.4+10,0),Pw(HDw[0]-nx*0.6,HDw[1]-ny*0.6+12,0)); } }
   if(pat.bench===1){ s+=box(hxw-96,hyw+8,118,9,-16,16,3)+box(hxw-84,hyw+17,7,RG.FLOOR-hyw-17,-3.5,3.5)+box(hxw+8,hyw+17,7,RG.FLOOR-hyw-17,-3.5,3.5); }
   if(pat.bench==="incline"){ s+=thick(Pw(hxw-4,hyw+10,0),Pw(HDw[0]-6,HDw[1]+12,0))+box(hxw-20,hyw+8,44,9,-16,16,3)+box(hxw-2,hyw+17,7,RG.FLOOR-hyw-17,-3.5,3.5); }
+  if(pat.bench==="decline"){ s+=thick(Pw(hxw+4,hyw+9,0),Pw(HDw[0]+4,HDw[1]+9,0))+box(hxw-20,hyw+8,44,9,-16,16,3)+box(hxw-2,hyw+17,7,RG.FLOOR-hyw-17,-3.5,3.5)+box(HDw[0]-4,HDw[1]+14,7,RG.FLOOR-HDw[1]-14,-3.5,3.5); }
   if(pat.bench==="short"){ s+=box(SHw[0]-34,SHw[1]+8,60,9,-16,16,3)+box(SHw[0]-8,SHw[1]+17,7,RG.FLOOR-SHw[1]-17,-3.5,3.5); }
+  /* a 45° back-extension bench: a pad under the hips and thighs, a post, foot rollers come from pat.pad */
+  if(pat.hyper){ const a=Pw(hxw+8,hyw+6,0), b=Pw(hxw-26,hyw+44,0); s+=box(hxw-24,hyw+40,14,RG.FLOOR-hyw-40,-7,7)+thick(a,b)+thick(Pw(hxw+8,hyw+6,-14),Pw(hxw-26,hyw+44,-14))+thick(Pw(hxw+8,hyw+6,14),Pw(hxw-26,hyw+44,14)); }
+  /* the knee pad of an assisted dip / pull-up station */
+  if(pat.kneepad){ const kn=J.leg[1]; s+=box(hxw+kn[0]-30,hyw-kn[1]+8,46,10,-18,18,3); }
   if(pat.grip==="barlo"){ [J.arm[2],J.arm2[2]].forEach(h=>{ s+=box(hxw+h[0]+18,hyw-h[1],6,RG.FLOOR+9-(hyw-h[1]),h[2]-3,h[2]+3); }); }   /* dip-station posts */
   /* limbs and equipment sort by depth against the torso: behind it -> drawn first in the light colour; nearer than the head -> drawn over it */
   let eqB="", eqF="";
   const put=(sv,dep,ref)=>{ if(dep>ref+EPS) eqB+=sv; else eqF+=sv; };
   const both=p.u2==null&&p.f2==null;
   if(pat.cable){ const C=Pw(pat.cable[0],pat.cable[1],0); const ends=pat.cableAt==="foot2"?[J.leg2[2]]:(both?[J.arm[2],J.arm2[2]]:[J.arm[2]]); let c=""; ends.forEach(e=>{ const E=P(e); c+=`<line class="cab" x1="${f1(E[0])}" y1="${f1(E[1])}" x2="${f1(C[0])}" y2="${f1(C[1])}"/>`; }); c+=`<circle class="eqs" cx="${f1(C[0])}" cy="${f1(C[1])}" r="4"/>`; if(C[2]<SH[2]-EPS) eqF+=c; else s+=c; }
+  /* battle ropes: a wave from each hand to the anchor on the floor */
+  if(pat.ropes){ const C=Pw(pat.ropes[0],pat.ropes[1],0); let c=`<circle class="eqs" cx="${f1(C[0])}" cy="${f1(C[1])}" r="4"/>`; [[J.arm[2],1],[J.arm2[2],-1]].forEach(([h,sd])=>{ const E=P(h); const m1=[E[0]+(C[0]-E[0])*0.3,E[1]+(C[1]-E[1])*0.3-18*sd], m2=[E[0]+(C[0]-E[0])*0.7,E[1]+(C[1]-E[1])*0.7+18*sd]; c+=`<path class="cab" style="stroke-width:3.5;stroke:var(--ink);stroke-linecap:round" d="M${f1(E[0])} ${f1(E[1])} C${f1(m1[0])} ${f1(m1[1])} ${f1(m2[0])} ${f1(m2[1])} ${f1(C[0])} ${f1(C[1])}"/>`; }); eqF+=c; }
   const limbs=[{L:J.leg2,k:["thigh","shin"],leg:1,ref:H[2]},{L:J.leg,k:["thigh","shin"],leg:1,ref:H[2]},{L:J.arm2,k:["uarm","farm"],ref:SH[2]},{L:J.arm,k:["uarm","farm"],ref:SH[2]}]
     .map(o=>{ const dep=P(o.L[1])[2]; return Object.assign(o,{far:dep>o.ref+EPS,front:dep<HD[2]-EPS}); });
   const draw=f=>limbs.filter(f).map(o=>o.leg?legSVG(o.L,o.far,o.k[0],o.k[1]):armSVG(o.L,o.far,o.k[0],o.k[1])).join("");
@@ -1142,38 +1242,47 @@ function rigFrame(pat,p,hiSeg,view){
   /* equipment */
   const hc=mid(J.arm[2],J.arm2[2]), HC=P(hc);
   const barbell=(q,ref)=>{ const [A,B]=zs(q,50); put(ink(A,B,5)+plate(A)+plate(B),P(q)[2],ref); };
+  const dumbbell=(h,ref)=>{ const [A,B]=zs(h,11); put(ink(A,B,4)+ring(A,5)+ring(B,5),P(h)[2],ref); };
   if(pat.grip==="bar") barbell(hc,SH[2]);
   else if(pat.grip==="back") barbell([J.shC[0]-8,J.shC[1]+6,0],SH[2]);
   else if(pat.grip==="hip") barbell([0,10,0],H[2]);
-  else if(pat.grip==="db"){ [J.arm[2],J.arm2[2]].forEach(h=>{ const [A,B]=zs(h,11); put(ink(A,B,4)+ring(A,5)+ring(B,5),P(h)[2],SH[2]); }); }
+  else if(pat.grip==="db"){ (pat.single?[J.arm[2]]:[J.arm[2],J.arm2[2]]).forEach(h=>dumbbell(h,SH[2])); }
+  else if(pat.grip==="db1") dumbbell(hc,SH[2]);   /* one dumbbell in both hands (pullover) */
   else if(pat.grip==="ball") put(ring(HC,10),HC[2],SH[2]);
   else if(pat.grip==="wheel"){ const [A,B]=zs([hc[0],hc[1]-4,hc[2]],5), [A2,B2]=zs(hc,20); put(ink(A2,B2,4)+ring(A,9)+ring(B,9),HC[2],SH[2]); }
   else if(pat.grip==="kb"){ const A=P([hc[0],hc[1]-10,hc[2]]); put(ring(A,9)+`<path class="cab" style="stroke:var(--ink);stroke-width:3" d="M${f1(HC[0]-6)} ${f1(HC[1]+2)} A6 6 0 0 1 ${f1(HC[0]+6)} ${f1(HC[1]+2)}"/>`,HC[2],SH[2]); }
   else if(pat.grip==="band"){ const a=pat.bandAt==="feet"?J.leg[2]:J.arm[2], b=pat.bandAt==="feet"?J.leg2[2]:J.arm2[2]; const m=mid(a,b); m[1]-=8; const A=P(a),M=P(m),B=P(b); put(`<polyline class="cab" style="stroke:var(--acc);stroke-width:3;stroke-linejoin:round" points="${f1(A[0])},${f1(A[1])} ${f1(M[0])},${f1(M[1])} ${f1(B[0])},${f1(B[1])}"/>`,M[2],pat.bandAt==="feet"?H[2]:SH[2]); }
   else if(pat.grip==="barhi"){ const [A,B]=zs(hc,45); eqF+=ink(A,B,5)+ring(A,5)+ring(B,5); }
   else if(pat.grip==="barlo"){ [J.arm[2],J.arm2[2]].forEach(h=>{ const A=P([h[0]-26,h[1],h[2]]),B=P([h[0]+26,h[1],h[2]]); eqF+=ink(A,B,5); }); }
+  /* machine lateral raise: a pad outside each elbow */
+  if(pat.elbowpad){ [J.arm[1],J.arm2[1]].forEach((e,i)=>{ const sd=i?-1:1; const [A,B]=zs([e[0],e[1],e[2]+sd*7],4); put(ink(A,B,6),P(e)[2],SH[2]); }); }
   s+=eqB;
   /* torso: the hull of a chest (shoulder-wide, deep) and a pelvis (narrower) with a waist between, so it reads as a body
      from every angle; then the neck; the head sorts against the torso */
   const tp=[]; const shC=J.shC;
   [[RG.SZ,RW.chest,RW.backd,shC,1],[-RG.SZ,RW.chest,RW.backd,shC,1],[RG.SZ-2,RW.chest-1,RW.backd,[shC[0]*0.55,shC[1]*0.55,0],1],[-(RG.SZ-2),RW.chest-1,RW.backd,[shC[0]*0.55,shC[1]*0.55,0],1],[RG.HZ+2,RW.hip,RW.hip,[0,0,0],1],[-(RG.HZ+2),RW.hip,RW.hip,[0,0,0],1]]
     .forEach(([z,df,db,c])=>{ tp.push(P([c[0]+fwd[0]*df,c[1]+fwd[1]*df,z])); tp.push(P([c[0]-fwd[0]*db,c[1]-fwd[1]*db,z])); });
-  const torso=poly(hull2(tp.map(v=>[v[0],v[1]])),"tq"+hi("torso"));
+  const thull=hull2(tp.map(v=>[v[0],v[1]]));
+  /* lit across the torso's width, square to its hip -> shoulder axis */
+  const tax=[SH[0]-H[0],SH[1]-H[1]], tl=Math.hypot(tax[0],tax[1])||1, tn=litN([-tax[1]/tl,tax[0]/tl]); const tc=[(SH[0]+H[0])/2,(SH[1]+H[1])/2]; let tw=0; thull.forEach(q=>{ tw=Math.max(tw,Math.abs((q[0]-tc[0])*tn[0]+(q[1]-tc[1])*tn[1])); }); tw=Math.max(tw,8);
+  const torso=poly(thull,"tq"+hi("torso"))+shPoly(thull,shade([tc[0]+tn[0]*tw,tc[1]+tn[1]*tw],[tc[0]-tn[0]*tw,tc[1]-tn[1]*tw]));
   const neck=capsule(SH,P(J.neck),RW.neck,RW.neck,hi("neck"));
   /* head: a circle, a nose on the facing side, eyes when the face points at the camera */
   const nz=P(add(J.head,fwd,RG.HR+4)), nb=P(add(J.head,fwd,RG.HR-2)), nd=Math.hypot(nz[0]-HD[0],nz[1]-HD[1]);
-  let headSVG=`<circle class="hd" cx="${f1(HD[0])}" cy="${f1(HD[1])}" r="${RG.HR}"/>`;
+  let headSVG=`<circle class="hd" cx="${f1(HD[0])}" cy="${f1(HD[1])}" r="${RG.HR}"/>`+shCirc(HD,RG.HR-0.6,RAD);
   if(nd>RG.HR+1.5){ const ux=(nz[0]-HD[0])/nd, uy=(nz[1]-HD[1])/nd; const nx=-uy, ny=ux; headSVG+=poly([[nz[0],nz[1]],[nb[0]+nx*3.2,nb[1]+ny*3.2],[nb[0]-nx*3.2,nb[1]-ny*3.2]],"hd"); }
   else if(P(add(J.head,fwd,1))[2]<HD[2]-0.5){ const e1=P(add(add(J.head,up,2.5),[0,0,1],4.8)), e2=P(add(add(J.head,up,2.5),[0,0,1],-4.8)); headSVG+=circ(e1,1.8,"eye")+circ(e2,1.8,"eye"); }
   if(HD[2]>SH[2]+EPS) s+=headSVG;
   s+=torso+neck;
+  /* a chest pad (seated machine row) stands against the chest, between the torso and the arms */
+  if(pat.chestpad){ const c=[J.shC[0]+18,J.shC[1]-6,0]; s+=thick(P([c[0],c[1]+14,0]),P([c[0],c[1]-24,0])); }
   s+=draw(o=>!o.far&&!o.front);
   if(!(HD[2]>SH[2]+EPS)) s+=headSVG;
   s+=draw(o=>!o.far&&o.front);
   if(pat.pad){ const an=J.leg[2]; const [A,B]=zs([an[0],an[1],0],14); s+=ink(A,B,3)+ring(A,7)+ring(B,7); }
   if(pat.plat){ const an=J.leg[2]; const c=[an[0]+sin(p.s)*8,an[1]-cos(p.s)*8]; const px=cos(p.s)*34, py=sin(p.s)*34; s+=poly([P([c[0]-px,c[1]-py,-30]),P([c[0]+px,c[1]+py,-30]),P([c[0]+px,c[1]+py,30]),P([c[0]-px,c[1]-py,30])],"eq","fill:none;stroke-width:6;stroke-linejoin:round"); }
   s+=eqF;
-  return `<svg class="rig ${view==="front"?"vf":"vs"}" viewBox="${f1(VB.x)} ${f1(VB.y)} ${f1(VB.s)} ${f1(VB.s)}">${s}</svg>`;
+  return `<svg class="rig ${view==="front"?"vf":"vs"}" viewBox="${f1(VB.x)} ${f1(VB.y)} ${f1(VB.s)} ${f1(VB.s)}"><defs>${defs}</defs>${s}</svg>`;
 }
 /* Picture frame per pattern: a square around everything the figure does (both poses, both views, equipment, bench, floor),
    so the figure fills the box instead of floating small in a fixed 280 × 280 frame. Side and front share one scale. */
@@ -1192,10 +1301,15 @@ function rigBox(pat){
       if(pat.grip==="back"){ take(P([J.shC[0]-8,J.shC[1]+6,-50]),16); take(P([J.shC[0]-8,J.shC[1]+6,50]),16); }
       if(pat.grip==="hip"){ take(P([0,10,-50]),16); take(P([0,10,50]),16); }
       if(pat.grip==="db") [J.arm[2],J.arm2[2]].forEach(h=>{ take(P([h[0],h[1],h[2]-11]),6); take(P([h[0],h[1],h[2]+11]),6); });
+      if(pat.grip==="db1"){ take(P([hc[0],hc[1],-11]),6); take(P([hc[0],hc[1],11]),6); }
       if(pat.cable){ const C=J.Pw(pat.cable[0],pat.cable[1],0); take(C,6); }
+      if(pat.ropes){ const C=J.Pw(pat.ropes[0],pat.ropes[1],0); take(C,8); }
       if(pat.bench===1){ take(J.Pw(J.hx-96,J.hy+8,-16),2); take(J.Pw(J.hx+22,J.hy+8,16),2); }
-      if(pat.bench==="incline"||pat.seat){ take(J.Pw(J.hx-24,J.hy+8,-20),2); take(J.Pw(J.hx+24,J.hy+8,20),2); }
+      if(pat.bench==="incline"||pat.bench==="decline"||pat.seat){ take(J.Pw(J.hx-24,J.hy+8,-20),2); take(J.Pw(J.hx+24,J.hy+8,20),2); }
+      if(pat.bench==="decline"){ const HDw=[J.hx+J.head[0],J.hy-J.head[1]]; take(J.Pw(HDw[0]+4,HDw[1]+14,-4),4); take(J.Pw(HDw[0]+4,HDw[1]+14,4),4); }
       if(pat.bench==="short"){ const SHw=[J.hx+J.shC[0],J.hy-J.shC[1]]; take(J.Pw(SHw[0]-34,SHw[1]+8,-16),2); take(J.Pw(SHw[0]+26,SHw[1]+8,16),2); }
+      if(pat.hyper){ take(J.Pw(J.hx-26,J.hy+44,-14),6); take(J.Pw(J.hx+8,J.hy+6,14),6); }
+      if(pat.kneepad){ const kn=J.leg[1]; take(J.Pw(J.hx+kn[0]-30,J.hy-kn[1]+8,-18),3); take(J.Pw(J.hx+kn[0]+16,J.hy-kn[1]+18,18),3); }
       if(pat.box){ take(J.Pw(156,RG.FLOOR-34,-30),2); take(J.Pw(220,RG.FLOOR+4,30),2); }
     });
     if(pat.floor!==false) y1=Math.max(y1,RG.FLOOR+12);
@@ -2454,7 +2568,7 @@ if(S.active) wakeOn();
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=23, BOOT_AT=Date.now();
+const APP_VERSION=24, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
   /* K5: Macros setup or You has typed numbers that aren't saved yet */
