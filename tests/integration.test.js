@@ -1650,6 +1650,48 @@ function runV24Pass() {
       assert.ok(/class="mm on" data-m="Chest"/.test(f) && /class="mm on" data-m="Back"/.test(b), "the working muscle is on");
       const ids = (f + b).match(/id="([^"]+)"/g); assert.strictEqual(new Set(ids).size, ids.length, "front and back maps use different gradient ids");
     });
+    t("every loaded move steps 5 lb: the +/− buttons, the Up jump and a deload, on barbell, machine and cable moves alike (a med ball keeps 2)", () => {
+      ["deadlift", "leg_press", "cable_row", "lat_pulldown", "hip_thrust", "shrug", "calf_stand", "lp_calf", "sumo_dl", "db_curl", "bench"].forEach(id => assert.strictEqual(w.eval("stepOf(" + JSON.stringify(id) + ")"), 5, id));
+      ["mb_slam", "wall_ball", "mb_twist"].forEach(id => assert.strictEqual(w.eval("stepOf(" + JSON.stringify(id) + ")"), 2, id));
+      const incs = JSON.parse(w.eval("JSON.stringify(Object.keys(LIB).map(id=>LIB[id].inc))"));
+      assert.ok(!incs.includes(10), "no 10-lb jump left in the library");
+      /* an older custom move that still says 10 steps 5 too */
+      w.eval("S.custom.c_old10=S.custom.c_old10||{n:'Old machine',m:'Back',t:'mc',inc:10,rest:75,guess:90,k:1,s:[],p:'cablerow'}");
+      assert.strictEqual(w.eval("stepOf('c_old10')"), 5);
+      /* progression: top of the range on every set -> +5; beaten by 3+ everywhere -> +10; deload lands on a 5 */
+      const up = JSON.parse(w.eval("JSON.stringify(applyProgress({ex:'deadlift',sets:3,lo:6,hi:10},[{w:185,r:10},{w:185,r:10},{w:185,r:10}]))"));
+      assert.deepStrictEqual([up.from, up.to, up.kind], [185, 190, "up"]);
+      const big = JSON.parse(w.eval("JSON.stringify(applyProgress({ex:'leg_press',sets:3,lo:8,hi:12},[{w:270,r:15},{w:270,r:15},{w:270,r:16}]))"));
+      assert.deepStrictEqual([big.from, big.to], [270, 280]);
+      w.eval("exState('cable_row').miss=1");
+      const down = JSON.parse(w.eval("JSON.stringify(applyProgress({ex:'cable_row',sets:3,lo:8,hi:12},[{w:115,r:6},{w:115,r:5},{w:115,r:5}]))"));
+      assert.strictEqual(down.kind, "down"); assert.strictEqual(down.to % 5, 0, "deload to " + down.to); assert.ok(down.to <= 110);
+      const mb = JSON.parse(w.eval("JSON.stringify(applyProgress({ex:'mb_slam',sets:3,lo:10,hi:15},[{w:12,r:15},{w:12,r:15},{w:12,r:15}]))"));
+      assert.deepStrictEqual([mb.from, mb.to], [12, 14], "a med ball still moves 2 lb");
+      /* a first-time estimate lands on a 5 */
+      const est = JSON.parse(w.eval("JSON.stringify(convertWeight('cable_row',115,'lat_pulldown'))"));
+      assert.strictEqual(est.how, "est"); assert.strictEqual(est.w % 5, 0);
+      w.eval("delete S.custom.c_old10; delete S.ex.deadlift; delete S.ex.leg_press; delete S.ex.cable_row; delete S.ex.mb_slam");
+    });
+    t("in a workout the weight stepper moves a deadlift, a leg press and a cable row by 5, not 10; a new custom move is born with 5", () => {
+      tab("today");
+      const wid = w.eval("nextWorkoutId()");
+      w.eval("S.active=null; startWorkout(" + JSON.stringify(wid) + ")");
+      w.eval("S.active.items.unshift({t:'lift',id:'t_dl',ex:'deadlift',sets:3,lo:6,hi:10,done:[],skipped:false,draft:{w:185,r:8}},{t:'lift',id:'t_lp',ex:'leg_press',sets:3,lo:8,hi:12,done:[],skipped:false,draft:{w:270,r:10}}); render()");
+      const val = i => Number(q(d, '#slot' + i + ' input[data-f="w"]').value);
+      click(w, q(d, '#slot0 [data-a="w+"]')); assert.strictEqual(val(0), 190, "deadlift +5");
+      click(w, q(d, '#slot0 [data-a="w-"]')); click(w, q(d, '#slot0 [data-a="w-"]')); assert.strictEqual(val(0), 180, "deadlift −5");
+      click(w, q(d, '#slot1 [data-a="w+"]')); assert.strictEqual(val(1), 275, "leg press +5");
+      click(w, q(d, '#slot1 [data-a="w-"]')); click(w, q(d, '#slot1 [data-a="w-"]')); assert.strictEqual(val(1), 265, "leg press −5");
+      w.eval("discardWorkout()");
+      w.openAdd({ where: "plan", wid });
+      click(w, q(d, '#sheetB .opt[data-a="add-do"][data-ex="__new"]'));
+      q(d, "#nxName").value = "Hammer high row"; q(d, "#nxT").value = "mc"; q(d, "#nxM").value = "Back";
+      click(w, q(d, '#sheetB [data-a="add-do"][data-ex="__create"]'));
+      const made = JSON.parse(w.eval("JSON.stringify(Object.values(S.custom).find(c=>c.n==='Hammer high row'))"));
+      assert.ok(made && made.inc === 5 && made.t === "mc", JSON.stringify(made));
+      w.eval("Object.keys(S.custom).forEach(k=>{ if(S.custom[k].n==='Hammer high row') delete S.custom[k]; }); S.plan=null; save()");
+    });
     t("sw.js: version 24 everywhere", () => { assert.ok(APPV >= 24 && SWV >= 24, APPV + " / " + SWV); });
     t("no errors during the v24 pass", () => assert.deepStrictEqual(errors.map(String), [], errors.map(String).join(" | ")));
   } finally { dom.window.close(); }

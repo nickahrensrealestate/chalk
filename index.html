@@ -14,8 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=24">
-<link rel="stylesheet" href="m-trends.css?v=24">
+<link rel="stylesheet" href="m.css?v=25">
+<link rel="stylesheet" href="m-trends.css?v=25">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
@@ -385,56 +385,56 @@ body.upd-on #app.wrap{padding-bottom:calc(var(--upd-h,46px) + 36px)}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=24"></script>
-<script src="m-data.js?v=24"></script>
-<script src="m-food.js?v=24"></script>
-<script src="m-ui.js?v=24"></script>
-<script src="m-trends.js?v=24"></script>
-<script src="m-sync.js?v=24"></script>
+<script src="m-core.js?v=25"></script>
+<script src="m-data.js?v=25"></script>
+<script src="m-food.js?v=25"></script>
+<script src="m-ui.js?v=25"></script>
+<script src="m-trends.js?v=25"></script>
+<script src="m-sync.js?v=25"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
    m: primary muscle. s: secondary muscles. p: movement pattern for the animated figure.
-   inc: weight jump when you beat the rep range.  rest: seconds.  guess: starting weight shown the first time.  k: load factor for weight conversion between exercises. */
+   inc: weight jump when you beat the rep range (v24: 5 lb for every loaded move, 2 lb for a med ball — see stepOf).  rest: seconds.  guess: starting weight shown the first time.  k: load factor for weight conversion between exercises. */
 const LIB = {
   squat:{n:"Back Squat",m:"Quads",t:"bb",inc:5,rest:150,guess:135,k:1.0,s:["Glutes","Hamstrings","Core"],p:"squat"},
   front_squat:{n:"Front Squat",m:"Quads",t:"bb",inc:5,rest:150,guess:95,k:0.8,s:["Glutes","Core"],p:"goblet"},
-  hack_squat:{n:"Hack Squat",m:"Quads",t:"mc",inc:10,rest:120,guess:90,k:0.8,s:["Glutes"],p:"squat"},
-  leg_press:{n:"Leg Press",m:"Quads",t:"mc",inc:10,rest:120,guess:180,k:1.5,s:["Glutes","Hamstrings"],p:"legpress"},
+  hack_squat:{n:"Hack Squat",m:"Quads",t:"mc",inc:5,rest:120,guess:90,k:0.8,s:["Glutes"],p:"squat"},
+  leg_press:{n:"Leg Press",m:"Quads",t:"mc",inc:5,rest:120,guess:180,k:1.5,s:["Glutes","Hamstrings"],p:"legpress"},
   smith_squat:{n:"Smith Machine Squat",m:"Quads",t:"bb",inc:5,rest:120,guess:95,k:0.9,s:["Glutes","Hamstrings"],p:"squat"},
   goblet_squat:{n:"Goblet Squat",m:"Quads",t:"db",inc:5,rest:90,guess:40,k:0.3,s:["Glutes","Core"],p:"goblet"},
   split_squat:{n:"Bulgarian Split Squat",m:"Quads",t:"db",inc:5,rest:90,guess:25,k:0.2,s:["Glutes","Hamstrings"],p:"lunge"},
   leg_ext:{n:"Leg Extension",m:"Quads",t:"mc",inc:5,rest:75,guess:70,k:0.5,s:[],p:"legext"},
-  deadlift:{n:"Deadlift",m:"Hamstrings",t:"bb",inc:10,rest:180,guess:185,k:1.0,s:["Glutes","Back","Core"],p:"dl"},
-  trap_dl:{n:"Trap Bar Deadlift",m:"Hamstrings",t:"bb",inc:10,rest:150,guess:185,k:1.0,s:["Quads","Glutes","Back"],p:"dl"},
+  deadlift:{n:"Deadlift",m:"Hamstrings",t:"bb",inc:5,rest:180,guess:185,k:1.0,s:["Glutes","Back","Core"],p:"dl"},
+  trap_dl:{n:"Trap Bar Deadlift",m:"Hamstrings",t:"bb",inc:5,rest:150,guess:185,k:1.0,s:["Quads","Glutes","Back"],p:"dl"},
   rdl:{n:"Romanian Deadlift",m:"Hamstrings",t:"bb",inc:5,rest:120,guess:135,k:0.75,s:["Glutes","Back"],p:"rdl"},
   db_rdl:{n:"Dumbbell Romanian Deadlift",m:"Hamstrings",t:"db",inc:5,rest:90,guess:45,k:0.3,s:["Glutes","Back"],p:"rdldb"},
   leg_curl:{n:"Seated Leg Curl",m:"Hamstrings",t:"mc",inc:5,rest:75,guess:80,k:0.4,s:[],p:"legcurl"},
   lying_curl:{n:"Lying Leg Curl",m:"Hamstrings",t:"mc",inc:5,rest:75,guess:70,k:0.35,s:[],p:"legcurl"},
-  hip_thrust:{n:"Barbell Hip Thrust",m:"Glutes",t:"bb",inc:10,rest:120,guess:135,k:1.0,s:["Hamstrings"],p:"hipthrust"},
+  hip_thrust:{n:"Barbell Hip Thrust",m:"Glutes",t:"bb",inc:5,rest:120,guess:135,k:1.0,s:["Hamstrings"],p:"hipthrust"},
   cable_kickback:{n:"Cable Kickback",m:"Glutes",t:"cb",inc:5,rest:60,guess:20,k:0.2,s:["Hamstrings"],p:"kickback"},
-  hip_abd:{n:"Hip Abduction Machine",m:"Glutes",t:"mc",inc:10,rest:60,guess:90,k:0.8,s:[],p:"hipabd"},
+  hip_abd:{n:"Hip Abduction Machine",m:"Glutes",t:"mc",inc:5,rest:60,guess:90,k:0.8,s:[],p:"hipabd"},
   bench:{n:"Bench Press",m:"Chest",t:"bb",inc:5,rest:150,guess:135,k:1.0,s:["Triceps","Shoulders"],p:"hpress"},
   inc_bench:{n:"Incline Bench Press",m:"Chest",t:"bb",inc:5,rest:150,guess:95,k:0.8,s:["Shoulders","Triceps"],p:"ipressbar"},
   db_bench:{n:"Dumbbell Bench Press",m:"Chest",t:"db",inc:5,rest:120,guess:45,k:0.38,s:["Triceps","Shoulders"],p:"hpressdb"},
   inc_db_press:{n:"Incline Dumbbell Press",m:"Chest",t:"db",inc:5,rest:120,guess:40,k:0.33,s:["Shoulders","Triceps"],p:"ipress"},
-  chest_press:{n:"Chest Press Machine",m:"Chest",t:"mc",inc:10,rest:90,guess:90,k:0.9,s:["Triceps"],p:"chestpress"},
+  chest_press:{n:"Chest Press Machine",m:"Chest",t:"mc",inc:5,rest:90,guess:90,k:0.9,s:["Triceps"],p:"chestpress"},
   cable_fly:{n:"Cable Fly",m:"Chest",t:"cb",inc:5,rest:75,guess:25,k:0.25,s:[],p:"cablefly"},
   pec_deck:{n:"Pec Deck",m:"Chest",t:"mc",inc:5,rest:75,guess:80,k:0.7,s:[],p:"pecdeck"},
   dips:{n:"Dips",m:"Chest",t:"bw",inc:5,rest:120,guess:0,k:0,s:["Triceps"],p:"dips"},
   pushup:{n:"Push-Up",m:"Chest",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Triceps","Core"],p:"pushup"},
-  cable_row:{n:"Seated Cable Row",m:"Back",t:"cb",inc:10,rest:90,guess:100,k:1.0,s:["Biceps","Rear Delts"],p:"cablerow"},
-  lat_pulldown:{n:"Lat Pulldown",m:"Back",t:"cb",inc:10,rest:90,guess:100,k:1.0,s:["Biceps"],p:"vpull"},
+  cable_row:{n:"Seated Cable Row",m:"Back",t:"cb",inc:5,rest:90,guess:100,k:1.0,s:["Biceps","Rear Delts"],p:"cablerow"},
+  lat_pulldown:{n:"Lat Pulldown",m:"Back",t:"cb",inc:5,rest:90,guess:100,k:1.0,s:["Biceps"],p:"vpull"},
   pullup:{n:"Pull-Up",m:"Back",t:"bw",inc:5,rest:120,guess:0,k:0,s:["Biceps"],p:"pullup"},
   assist_pullup:{n:"Assisted Pull-Up",m:"Back",t:"mc",inc:5,rest:90,guess:50,k:null,s:["Biceps"],p:"pullup"},
-  cs_row:{n:"Chest-Supported Row",m:"Back",t:"mc",inc:10,rest:90,guess:90,k:0.9,s:["Biceps","Rear Delts"],p:"csrow"},
+  cs_row:{n:"Chest-Supported Row",m:"Back",t:"mc",inc:5,rest:90,guess:90,k:0.9,s:["Biceps","Rear Delts"],p:"csrow"},
   bb_row:{n:"Barbell Row",m:"Back",t:"bb",inc:5,rest:120,guess:95,k:1.0,s:["Biceps","Rear Delts","Hamstrings"],p:"row"},
   db_row:{n:"One-Arm Dumbbell Row",m:"Back",t:"db",inc:5,rest:75,guess:50,k:0.5,s:["Biceps","Rear Delts"],p:"dbrow"},
-  tbar_row:{n:"T-Bar Row",m:"Back",t:"mc",inc:10,rest:90,guess:70,k:0.8,s:["Biceps","Rear Delts"],p:"row"},
+  tbar_row:{n:"T-Bar Row",m:"Back",t:"mc",inc:5,rest:90,guess:70,k:0.8,s:["Biceps","Rear Delts"],p:"row"},
   sa_pulldown:{n:"Straight-Arm Pulldown",m:"Back",t:"cb",inc:5,rest:60,guess:40,k:0.4,s:["Triceps"],p:"sapull"},
   ohp:{n:"Overhead Press",m:"Shoulders",t:"bb",inc:5,rest:120,guess:75,k:1.0,s:["Triceps","Core"],p:"opress"},
   db_ohp:{n:"Dumbbell Shoulder Press",m:"Shoulders",t:"db",inc:5,rest:90,guess:35,k:0.45,s:["Triceps"],p:"opressdb"},
-  mc_ohp:{n:"Machine Shoulder Press",m:"Shoulders",t:"mc",inc:10,rest:90,guess:70,k:1.0,s:["Triceps"],p:"mcpress"},
+  mc_ohp:{n:"Machine Shoulder Press",m:"Shoulders",t:"mc",inc:5,rest:90,guess:70,k:1.0,s:["Triceps"],p:"mcpress"},
   arnold:{n:"Arnold Press",m:"Shoulders",t:"db",inc:5,rest:90,guess:30,k:0.4,s:["Triceps"],p:"opressdb"},
   lat_raise:{n:"Dumbbell Lateral Raise",m:"Shoulders",t:"db",inc:5,rest:60,guess:15,k:0.2,s:[],p:"lraise"},
   cable_lat_raise:{n:"Cable Lateral Raise",m:"Shoulders",t:"cb",inc:5,rest:60,guess:10,k:0.15,s:[],p:"lraise"},
@@ -443,7 +443,7 @@ const LIB = {
   rear_delt:{n:"Rear Delt Fly Machine",m:"Rear Delts",t:"mc",inc:5,rest:60,guess:60,k:0.8,s:["Traps"],p:"rdfly"},
   db_rear_fly:{n:"Dumbbell Rear Delt Fly",m:"Rear Delts",t:"db",inc:5,rest:60,guess:15,k:0.25,s:["Traps"],p:"rearfly"},
   cable_rear_fly:{n:"Cable Rear Delt Fly",m:"Rear Delts",t:"cb",inc:5,rest:60,guess:15,k:0.2,s:[],p:"rearfly"},
-  shrug:{n:"Barbell Shrug",m:"Traps",t:"bb",inc:10,rest:75,guess:135,k:1.0,s:["Forearms"],p:"shrug"},
+  shrug:{n:"Barbell Shrug",m:"Traps",t:"bb",inc:5,rest:75,guess:135,k:1.0,s:["Forearms"],p:"shrug"},
   db_shrug:{n:"Dumbbell Shrug",m:"Traps",t:"db",inc:5,rest:60,guess:50,k:0.4,s:["Forearms"],p:"shrugdb"},
   pushdown:{n:"Triceps Pushdown",m:"Triceps",t:"cb",inc:5,rest:60,guess:50,k:1.0,s:[],p:"pushdown"},
   oh_ext:{n:"Overhead Cable Extension",m:"Triceps",t:"cb",inc:5,rest:60,guess:40,k:0.8,s:[],p:"ohext"},
@@ -464,8 +464,8 @@ const LIB = {
   ab_wheel:{n:"Ab Wheel Rollout",m:"Core",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Back"],p:"rollout"},
   decline_situp:{n:"Decline Sit-Up",m:"Core",t:"bw",inc:5,rest:60,guess:0,k:0,s:[],p:"mccrunch"},
   mc_crunch:{n:"Machine Crunch",m:"Core",t:"mc",inc:5,rest:60,guess:60,k:1.0,s:[],p:"mccrunch"},
-  calf_stand:{n:"Standing Calf Raise",m:"Calves",t:"mc",inc:10,rest:60,guess:100,k:1.0,s:[],p:"calf"},
-  calf_seat:{n:"Seated Calf Raise",m:"Calves",t:"mc",inc:10,rest:60,guess:70,k:0.7,s:[],p:"seatedcalf"},
+  calf_stand:{n:"Standing Calf Raise",m:"Calves",t:"mc",inc:5,rest:60,guess:100,k:1.0,s:[],p:"calf"},
+  calf_seat:{n:"Seated Calf Raise",m:"Calves",t:"mc",inc:5,rest:60,guess:70,k:0.7,s:[],p:"seatedcalf"},
   /* HIIT · dumbbells · med ball · balance (r = default reps in a rep circuit, ea = each side, u:"s" = seconds hold) */
   db_thruster:{n:"Dumbbell Thruster",m:"Quads",t:"db",inc:5,rest:45,guess:20,s:["Shoulders","Glutes"],r:12,p:"thruster"},
   mb_slam:{n:"Med-Ball Slam",m:"Core",t:"mb",inc:2,rest:45,guess:12,s:["Back","Shoulders"],r:15,p:"slam"},
@@ -507,8 +507,8 @@ const LIB = {
   box_burpee:{n:"Burpee Box Jump",m:"Quads",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Chest","Core"],r:8,p:"boxjump"},
   lat_box_hop:{n:"Lateral Box Hop",m:"Calves",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Quads"],r:12,p:"skater"},
   pistol_box:{n:"Pistol Squat to Box",m:"Quads",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Glutes","Core"],r:6,ea:true,p:"pistol"},
-  farmer_carry:{n:"Farmer's Carry",m:"Forearms",t:"db",inc:10,rest:60,guess:50,k:1,s:["Traps","Core"],r:40,u:"s",p:"carry"},
-  suitcase_carry:{n:"Suitcase Carry",m:"Core",t:"db",inc:10,rest:60,guess:50,k:1,s:["Forearms","Traps"],r:30,u:"s",ea:true,p:"carry"},
+  farmer_carry:{n:"Farmer's Carry",m:"Forearms",t:"db",inc:5,rest:60,guess:50,k:1,s:["Traps","Core"],r:40,u:"s",p:"carry"},
+  suitcase_carry:{n:"Suitcase Carry",m:"Core",t:"db",inc:5,rest:60,guess:50,k:1,s:["Forearms","Traps"],r:30,u:"s",ea:true,p:"carry"},
   pallof:{n:"Pallof Press",m:"Core",t:"cb",inc:5,rest:45,guess:30,k:0.3,s:["Shoulders"],r:10,ea:true,p:"pallof"},
   plank:{n:"Plank",m:"Core",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Shoulders"],r:40,u:"s",p:"plank"},
   jump_rope:{n:"Jump Rope",m:"Calves",t:"bw",inc:5,rest:30,guess:0,k:0,s:["Shoulders"],r:45,u:"s",p:"rope"},
@@ -543,13 +543,13 @@ const LIB = {
   dec_bench:{n:"Decline Bench Press",m:"Chest",t:"bb",inc:5,rest:150,guess:135,k:1.0,s:["Triceps","Shoulders"],p:"decpress"},
   db_pullover:{n:"Dumbbell Pullover",m:"Chest",t:"db",inc:5,rest:75,guess:40,k:0.3,s:["Back","Triceps"],p:"pullover"},
   assist_dip:{n:"Assisted Dip",m:"Chest",t:"mc",inc:5,rest:90,guess:50,k:null,s:["Triceps"],p:"assistdip"},
-  mc_row:{n:"Seated Machine Row",m:"Back",t:"mc",inc:10,rest:90,guess:90,k:0.9,s:["Biceps","Rear Delts"],p:"mcrow"},
-  cg_pulldown:{n:"Close-Grip Lat Pulldown",m:"Back",t:"cb",inc:10,rest:90,guess:100,k:1.0,s:["Biceps"],p:"cgpull"},
+  mc_row:{n:"Seated Machine Row",m:"Back",t:"mc",inc:5,rest:90,guess:90,k:0.9,s:["Biceps","Rear Delts"],p:"mcrow"},
+  cg_pulldown:{n:"Close-Grip Lat Pulldown",m:"Back",t:"cb",inc:5,rest:90,guess:100,k:1.0,s:["Biceps"],p:"cgpull"},
   back_ext:{n:"Back Extension (45°)",m:"Back",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Glutes","Hamstrings"],p:"backext"},
-  sumo_dl:{n:"Sumo Deadlift",m:"Glutes",t:"bb",inc:10,rest:180,guess:185,k:1.3,s:["Hamstrings","Quads","Back"],p:"sumo"},
+  sumo_dl:{n:"Sumo Deadlift",m:"Glutes",t:"bb",inc:5,rest:180,guess:185,k:1.3,s:["Hamstrings","Quads","Back"],p:"sumo"},
   good_morning:{n:"Good Morning",m:"Hamstrings",t:"bb",inc:5,rest:120,guess:65,k:0.4,s:["Glutes","Back"],p:"goodmorning"},
-  hip_add:{n:"Hip Adduction Machine (inner thigh)",m:"Quads",t:"mc",inc:10,rest:60,guess:90,k:0.65,s:["Glutes"],p:"hipadd"},
-  lp_calf:{n:"Leg Press Calf Raise",m:"Calves",t:"mc",inc:10,rest:60,guess:180,k:1.8,s:[],p:"lpcalf"},
+  hip_add:{n:"Hip Adduction Machine (inner thigh)",m:"Quads",t:"mc",inc:5,rest:60,guess:90,k:0.65,s:["Glutes"],p:"hipadd"},
+  lp_calf:{n:"Leg Press Calf Raise",m:"Calves",t:"mc",inc:5,rest:60,guess:180,k:1.8,s:[],p:"lpcalf"},
   front_raise:{n:"Dumbbell Front Raise",m:"Shoulders",t:"db",inc:5,rest:60,guess:15,k:0.2,s:["Chest"],p:"frontraise"},
   mc_lat_raise:{n:"Machine Lateral Raise",m:"Shoulders",t:"mc",inc:5,rest:60,guess:50,k:0.65,s:["Traps"],p:"mclatraise"},
   push_press:{n:"Barbell Push Press",m:"Shoulders",t:"bb",inc:5,rest:120,guess:95,k:1.25,s:["Triceps","Quads"],p:"pushpress"},
@@ -896,6 +896,9 @@ function save(){ S.updatedAt=Date.now(); try{ localStorage.setItem(KEY,lsText(S)
 /* own keys only: an exercise id like "__proto__" from a hostile backup must never reach Object.prototype (SE-01) */
 const ownV=(o,k)=>o&&Object.prototype.hasOwnProperty.call(o,k)?o[k]:undefined;
 function getEx(id){ return ownV(LIB,id) || ownV(S.custom,id) || {n:String(id),m:"Other",t:"mc",inc:5,rest:75,guess:50}; }
+/* v24: every loaded move goes up and down 5 lb at a time — the +/− stepper, the progression jump and a first-time estimate all use
+   this. A med ball comes in 2-lb steps and keeps them. The inc saved on an older custom move (some said 10) no longer matters. */
+function stepOf(id){ return getEx(id).t==="mb"?2:5; }
 function exState(id){ const E=ownV(S.ex,id); if(E) return E; const f={w:null,miss:0,best:0,hist:[]}; if(badId(id)) return f; return (S.ex[id]=f); }
 const roundTo=(v,inc)=>Math.max(0,Math.round(v/inc)*inc);
 const fmtW=w=>{ const n=typeof w==="number"?w:Number(w); return n%1?n.toFixed(1):String(n); };
@@ -925,9 +928,9 @@ function applyProgress(slot, done){
     E.miss=0;
   } else if(allHi){
     const big=reps.every(r=>r>=slot.hi+3);
-    next=roundTo(wmax+L.inc*(big?2:1),Math.min(L.inc,5)); note="Up"; kind="up"; E.miss=0;
+    const st=stepOf(id); next=roundTo(wmax+st*(big?2:1),st); note="Up"; kind="up"; E.miss=0;
   } else if(allLo){ E.miss=0; }
-  else { E.miss=(E.miss||0)+1; if(E.miss>=2){ next=Math.max(0,Math.min(roundTo(wmax*0.9,Math.min(L.inc,5)),wmax-Math.min(L.inc,5))); note="Deload"; kind="down"; E.miss=0; } else { note="Retry"; kind="retry"; } }
+  else { E.miss=(E.miss||0)+1; if(E.miss>=2){ const st=stepOf(id); next=Math.max(0,Math.min(roundTo(wmax*0.9,st),wmax-st)); note="Deload"; kind="down"; E.miss=0; } else { note="Retry"; kind="retry"; } }
   /* volume: two sessions in a row past the top of the range by 2+ on every set adds a set (up to 5); a deload takes one away */
   let dsets=0;
   if(allHi && reps.every(r=>r>=slot.hi+2)){ E.streak=(E.streak||0)+1; if(E.streak>=2){ E.streak=0; if((slot.planned||slot.sets)<5){ E.sets=(slot.planned||slot.sets)+1; dsets=1; note+=" · +1 set"; } } } else E.streak=0;
@@ -1515,7 +1518,7 @@ function finishWorkout(){
         if(full){
           note="Up"; kind="up";
           if(b.mode==="timer"){ if(P.rounds<5){P.rounds++; chg=`${P.rounds} rounds`;} else if(P.rest>10){P.rest-=5; chg=`${P.rest}s rest`;} else if(P.work<60){P.work=Math.min(60,P.work+5); chg=`${P.work}s work`;} else { note="Done"; kind="hold"; chg="maxed — add a move"; } }
-          else { if(P.rounds<4){P.rounds++; chg=`${P.rounds} rounds`;} else { P.rounds=3; P.moves.forEach(m=>{ const L=getEx(m.ex); if(!NOLOAD(L.t)){ m.w=roundTo((m.w||0)+L.inc,L.inc); exState(m.ex).w=m.w; } else { m.reps=(m.reps||L.r||12)+2; exState(m.ex).reps=m.reps; } }); chg="heavier · 3 rounds"; } }
+          else { if(P.rounds<4){P.rounds++; chg=`${P.rounds} rounds`;} else { P.rounds=3; P.moves.forEach(m=>{ const L=getEx(m.ex); if(!NOLOAD(L.t)){ const st=stepOf(m.ex); m.w=roundTo((m.w||0)+st,st); exState(m.ex).w=m.w; } else { m.reps=(m.reps||L.r||12)+2; exState(m.ex).reps=m.reps; } }); chg="heavier · 3 rounds"; } }
         }
       }
       blocks.push({name:b.name,mode:b.mode,done:b.done,rounds:b.rounds,work:b.work,rest:b.rest,moves:b.moves});
@@ -1968,7 +1971,7 @@ function convertWeight(fromId,w,toId){
   const A=getEx(fromId), B=getEx(toId);
   if(NOLOAD(B.t)) return {w:0,how:"bw"};
   if(A.k==null||B.k==null||!A.k||w==null) return {w:null,how:"unknown"};
-  return {w:roundTo(w/A.k*B.k,B.inc),how:"est"};
+  return {w:roundTo(w/A.k*B.k,stepOf(toId)),how:"est"};
 }
 /* T3-04: cardio and timed moves (a burpee, a plank) never stand in for a loaded lift like a squat */
 const CARDIO=new Set(["burpee","jump_squat","mtn_climber","high_knees","skater","plank_tap","bicycle","bear_crawl","jumping_jack","jump_rope","box_jump","box_burpee","lat_box_hop"]);
@@ -2326,7 +2329,7 @@ function createCustom(){
   const t=document.getElementById("nxT").value, m=document.getElementById("nxM").value;
   const id="c_"+n.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"")+"_"+uid().slice(-3);
   const pByM={Chest:"hpressdb",Shoulders:"opressdb",Triceps:"pushdown",Back:"cablerow","Rear Delts":"rearfly",Traps:"shrugdb",Biceps:"curl",Forearms:"wrist",Quads:"squat",Hamstrings:"rdldb",Glutes:"hipthrust",Calves:"calf",Core:"crunch"};
-  S.custom[id]={n,m,t,inc:t==="mc"||t==="cb"?10:5,rest:t==="bb"?120:75,guess:NOLOAD(t)?0:(t==="db"||t==="kb"?25:50),k:NOLOAD(t)?0:(t==="db"||t==="kb"?null:1),s:[],p:pByM[m]||"generic"};
+  S.custom[id]={n,m,t,inc:5,rest:t==="bb"?120:75,guess:NOLOAD(t)?0:(t==="db"||t==="kb"?25:50),k:NOLOAD(t)?0:(t==="db"||t==="kb"?null:1),s:[],p:pByM[m]||"generic"};
   return id;
 }
 /* ================= EVENTS ================= */
@@ -2385,7 +2388,7 @@ document.addEventListener("click",e=>{
       if(id==="__create"){ id=createCustom(); if(!id) break; }
       addDo(c,id); break; }
     /* active workout */
-    case "w-": case "w+": { const sl=A.items[i], d=slotDraft(sl), inc=getEx(sl.ex).inc; const st=inc===10?5:inc; d.w=Math.max(0,roundTo(Number(d.w)||0,st)+(a==="w+"?inc:-inc)); const inp=b.parentElement&&b.parentElement.querySelector("input"); if(inp) inp.value=fmtW(d.w); else render(); saveSoon(); break; }
+    case "w-": case "w+": { const sl=A.items[i], d=slotDraft(sl), st=stepOf(sl.ex); d.w=Math.max(0,roundTo(Number(d.w)||0,st)+(a==="w+"?st:-st)); const inp=b.parentElement&&b.parentElement.querySelector("input"); if(inp) inp.value=fmtW(d.w); else render(); saveSoon(); break; }
     case "r-": case "r+": { const sl=A.items[i], d=slotDraft(sl); d.r=Math.max(0,(Number(d.r)||0)+(a==="r+"?1:-1)); const inp=b.parentElement&&b.parentElement.querySelector("input"); if(inp) inp.value=d.r; else render(); saveSoon(); break; }
     case "log": logSet(i); break;
     case "rm-set": removeSet(i,+b.dataset.j); break;
@@ -2568,7 +2571,7 @@ if(S.active) wakeOn();
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=24, BOOT_AT=Date.now();
+const APP_VERSION=25, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
   /* K5: Macros setup or You has typed numbers that aren't saved yet */
