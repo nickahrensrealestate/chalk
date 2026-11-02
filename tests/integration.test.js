@@ -1697,6 +1697,133 @@ function runV24Pass() {
   } finally { dom.window.close(); }
 }
 
+/* ------------------------------------------------- v26: three more lunges (dumbbell forward, dumbbell reverse, barbell) */
+function runV26Pass() {
+  console.log("v26: dumbbell forward lunge, dumbbell reverse lunge, barbell lunge");
+  const LIVE = JSON.parse(read("tests/fixtures/chalk-v1-live.json"));
+  const S0 = JSON.parse(LIVE.nick); S0.active = null; const raw = JSON.stringify(S0);
+  const { dom, w, d, errors } = boot({ real: true, store: { "chalk.v1": raw, "chalk.bak.d": "2000-01-01" } });
+  const tab = name => click(w, q(d, '#tabs [data-tab="' + name + '"]'));
+  const ex = id => JSON.parse(w.eval("JSON.stringify(getEx(" + JSON.stringify(id) + "))"));
+  const NEW = ["db_lunge", "db_rev_lunge", "bb_lunge"];
+  const NAMES = ["Dumbbell Forward Lunge", "Dumbbell Reverse Lunge", "Barbell Lunge"];
+  try {
+    t("exactly three new lunges, each in the library: a quad move, reps per side, a figure, a 5-lb step, a rest and a load factor", () => {
+      const ids = JSON.parse(w.eval("JSON.stringify(LIB_V26)"));
+      assert.deepStrictEqual(ids, NEW);
+      assert.deepStrictEqual(ids.map(id => ex(id).n), NAMES);
+      const all = JSON.parse(w.eval("JSON.stringify(Object.keys(LIB))"));
+      assert.strictEqual(new Set(all.map(id => ex(id).n)).size, all.length, "no two moves share a name");
+      ids.forEach(id => {
+        assert.ok(w.eval("Object.prototype.hasOwnProperty.call(LIB," + JSON.stringify(id) + ")"), id + " is in LIB, not a custom fallback");
+        const L = ex(id);
+        assert.strictEqual(L.m, "Quads", id + " muscle");
+        assert.ok(L.s.includes("Glutes") && L.s.includes("Hamstrings"), id + " secondary");
+        assert.strictEqual(L.ea, true, id + " counts each side");
+        assert.strictEqual(L.inc, 5, id + " steps 5 lb");
+        assert.strictEqual(w.eval("stepOf(" + JSON.stringify(id) + ")"), 5);
+        assert.ok(L.rest >= 60 && L.guess > 0 && L.k > 0, id + " rest / first weight / load factor");
+        assert.ok(w.eval("!!PAT[getEx(" + JSON.stringify(id) + ").p]"), id + " has a figure (" + L.p + ")");
+      });
+      assert.strictEqual(ex("db_lunge").t, "db"); assert.strictEqual(ex("db_rev_lunge").t, "db"); assert.strictEqual(ex("bb_lunge").t, "bb");
+      assert.strictEqual(w.eval("TYPE_LABEL[getEx('bb_lunge').t]"), "total on bar");
+      assert.strictEqual(w.eval("TYPE_LABEL[getEx('db_lunge').t]"), "each hand");
+    });
+    t("the figures: the forward lunge steps forward with dumbbells, the reverse lunge steps the near leg back, the barbell lunge carries the bar on the back", () => {
+      const P = JSON.parse(w.eval("JSON.stringify({f:PAT.lunge,r:PAT.revlunge,b:PAT.bblunge})"));
+      assert.strictEqual(P.f.grip, "db"); assert.strictEqual(P.r.grip, "db"); assert.strictEqual(P.b.grip, "back");
+      assert.ok(P.f.b.th > 0 && P.f.b.th2 < 0, "forward: near leg forward, far leg back");
+      assert.ok(P.r.b.th < 0 && P.r.b.th2 > 0, "reverse: near leg back, far leg forward");
+      assert.ok(P.b.b.th > 0 && P.b.b.th2 < 0 && P.b.a.f === P.b.b.f && P.b.a.f < -90, "barbell: steps forward, hands stay on the bar");
+      const bwr = JSON.parse(w.eval("JSON.stringify(PAT[getEx('bw_lunge').p])"));
+      assert.ok(!bwr.grip && bwr.b.th < 0 && bwr.b.th2 > 0, "the bodyweight Reverse Lunge now steps back too, holding nothing");
+      const fr = (p, v) => w.eval("animFrame(PAT." + p + ",0.5,'thigh'," + JSON.stringify(v) + ")");
+      const rings = s => (s.match(/class="eq"/g) || []).length;
+      ["revlunge", "bblunge"].forEach(p => ["side", "front"].forEach(v => { const s = fr(p, v); assert.ok(/^<svg class="rig/.test(s) && /viewBox="[-\d.]+ [-\d.]+ [\d.]+ [\d.]+"/.test(s) && !/NaN/.test(s) && /class="shd"/.test(s), p + " " + v + " draws with a floor shadow"); }));
+      assert.strictEqual(rings(fr("revlunge", "side")), 4, "two dumbbells on the reverse lunge");
+      assert.strictEqual(rings(fr("lunge", "side")), 4, "two dumbbells on the forward lunge");
+      assert.strictEqual(rings(fr("bblunge", "side")), rings(fr("squat", "side")), "the same bar and plates as the back squat on the barbell lunge");
+      assert.ok(rings(fr("bblunge", "side")) >= 2, "plates drawn");
+    });
+    t("every new lunge sits in a rotation pool, only at the end of it, and the barbell one never reaches the hotel-gym or no-equipment day", () => {
+      const POOLS = JSON.parse(w.eval("JSON.stringify(POOLS)"));
+      const flat = new Set([].concat(...Object.values(POOLS)));
+      NEW.forEach(id => assert.ok(flat.has(id), id + " is in a pool"));
+      assert.deepStrictEqual(POOLS.unilateral.slice(-3), NEW, "leg day's one-leg slot ends with the three");
+      assert.ok(POOLS.quad2[POOLS.quad2.length - 1] === "bb_lunge", "the barbell lunge joins the quad accessories");
+      assert.deepStrictEqual(POOLS.athLunge.slice(-2), ["db_lunge", "db_rev_lunge"], "the dumbbell lunges join the Athletic day's lunge slot");
+      assert.ok(!POOLS.athLunge.includes("bb_lunge") && !POOLS.athLungeBW.includes("bb_lunge") && !POOLS.athLungeBW.includes("db_lunge") && !POOLS.bw.includes("db_lunge"), "no barbell on the Athletic day, no dumbbells on the no-equipment day");
+      assert.ok(POOLS.fullA.includes("db_lunge") && POOLS.fullD.includes("db_rev_lunge") && POOLS.dbHiit.includes("db_rev_lunge"), "Katerina's full-body supersets and the HIIT dumbbell block can draw them");
+      Object.keys(POOLS).forEach(k => { const P = POOLS[k]; const i = Math.min(...NEW.map(id => P.indexOf(id)).filter(i => i >= 0).concat([P.length])); assert.ok(P.slice(i).every(id => NEW.includes(id)), k + ": new moves only at the end: " + P.join(",")); });
+      assert.ok(w.eval("gearOk('db_lunge','hotel') && gearOk('db_rev_lunge','hotel')"), "dumbbell lunges fit a hotel gym");
+      assert.ok(!w.eval("gearOk('bb_lunge','hotel') || gearOk('bb_lunge','bw') || gearOk('db_lunge','bw')"), "barbell needs the real gym; dumbbells aren't 'no equipment'");
+    });
+    t("a program built before v26 is left byte for byte alone at boot, yet leg day's one-leg slot rotates through the three", () => {
+      assert.deepStrictEqual(JSON.parse(w.eval("JSON.stringify(S.program)")), S0.program, "nothing in the saved program moved at boot");
+      const snap = w.eval("JSON.stringify(S.program)"), cyc = w.eval("JSON.stringify(S.cyc)");
+      const seen = new Set();
+      for (let c = 0; c < 16; c++) { w.eval("S.cyc.LEGS=" + c + "; rotateDay('LEGS')"); JSON.parse(w.eval("JSON.stringify(S.program.workouts.LEGS.items)")).forEach(it => { if (it.t !== "block") seen.add(it.ex); }); }
+      NEW.forEach(id => assert.ok(seen.has(id), id + " comes round on leg day: " + [...seen].join(",")));
+      w.eval("S.program=" + JSON.stringify(JSON.parse(snap)) + "; S.cyc=" + cyc + ";");
+      assert.deepStrictEqual(JSON.parse(w.eval("JSON.stringify(S.program)")), S0.program);
+    });
+    t("Katerina's lower-body and full-body supersets rotate through them too, and her save is untouched", () => {
+      const K = JSON.parse(LIVE.kat); K.active = null;
+      const { dom: d2, w: w2, errors: e2 } = boot({ real: true, store: { "chalk.v1": JSON.stringify(K), "chalk.bak.d": "2000-01-01" } });
+      try {
+        assert.deepStrictEqual(JSON.parse(w2.eval("JSON.stringify(S.program)")), K.program, "untouched at boot");
+        const seen = new Set();
+        ["LOWER", "FULL"].forEach(wid => { for (let c = 0; c < 16; c++) { w2.eval("S.cyc[" + JSON.stringify(wid) + "]=" + c + "; rotateDay(" + JSON.stringify(wid) + ")"); JSON.parse(w2.eval("JSON.stringify(S.program.workouts[" + JSON.stringify(wid) + "].items)")).forEach(it => { if (it.t === "block") it.moves.forEach(m => seen.add(m.ex)); else seen.add(it.ex); }); } });
+        NEW.forEach(id => assert.ok(seen.has(id), id + " in Katerina's rotation: " + [...seen].join(",")));
+        assert.deepStrictEqual(e2.map(String), []);
+      } finally { d2.window.close(); }
+    });
+    t("a fresh program and the 4th (Athletic) day draw them: barbell on leg day, dumbbells on the hotel-gym day, none on the no-equipment day", () => {
+      const fresh = JSON.parse(w.eval("JSON.stringify(buildProgram('weights',{ball:1,balance:0,box:1},0,4,'hotel'))"));
+      const of = wid => { const out = new Set(); fresh.workouts[wid].items.forEach(it => { if (it.pool) it.pool.forEach(x => out.add(x)); }); return out; };
+      NEW.forEach(id => assert.ok(of("LEGS").has(id), id + " on leg day"));
+      assert.ok(of("ATHL").has("db_lunge") && of("ATHL").has("db_rev_lunge") && !of("ATHL").has("bb_lunge"), "hotel-gym Athletic day");
+      const bw = JSON.parse(w.eval("JSON.stringify(athleticDay({ball:1,balance:0,box:1},'bw'))"));
+      const bwIds = new Set(); bw.items.forEach(it => { if (it.pool) it.pool.forEach(x => bwIds.add(x)); if (it.pools) it.pools.forEach(p => p.forEach(x => bwIds.add(x))); });
+      NEW.forEach(id => assert.ok(!bwIds.has(id), id + " never on the no-equipment day"));
+    });
+    t("Today → + Exercise lists the three under Quads (never under Bodyweight); adding one gives 8–12 reps × 3 sets, each side, and it sits in today's plan", () => {
+      tab("today");
+      const wid = w.eval("nextWorkoutId()");
+      w.openAdd({ where: "plan", wid });
+      const sheet = q(d, "#sheetB");
+      const names = [...sheet.querySelectorAll('.opt[data-a="add-do"] > span:first-child')].map(e => e.textContent.replace(/\s*in today\s*$/, "").trim());
+      NAMES.forEach(n => assert.ok(names.includes(n), n + " listed"));
+      const bwRows = []; let el = sheet.querySelector(".opt-grp").nextElementSibling;
+      while (el && !el.classList.contains("opt-grp")) { bwRows.push(el); el = el.nextElementSibling; }
+      const bwNames = bwRows.map(b => b.querySelector("span").textContent.replace(/\s*in today\s*$/, "").trim());
+      NAMES.forEach(n => assert.ok(!bwNames.includes(n), n + " is not a bodyweight move"));
+      assert.ok(bwNames.includes("Reverse Lunge"), "the bodyweight reverse lunge is still there");
+      const row = id => sheet.querySelector('.opt[data-a="add-do"][data-ex="' + id + '"] .m').textContent;
+      assert.ok(/each hand|\d+ lb/.test(row("db_lunge")) && /total on bar|\d+ lb/.test(row("bb_lunge")), row("db_lunge") + " / " + row("bb_lunge"));
+      w.closeSheet();
+      const add = id => { w.openAdd({ where: "plan", wid }); click(w, q(d, '#sheetB .opt[data-a="add-do"][data-ex="' + id + '"]')); };
+      NEW.forEach(add);
+      const plan = JSON.parse(w.eval("JSON.stringify(planFor(" + JSON.stringify(wid) + ").items)"));
+      const of = id => plan.filter(it => it.ex === id).pop();
+      NEW.forEach(id => { assert.deepStrictEqual([of(id).sets, of(id).lo, of(id).hi], [3, 8, 12], id); });
+      const txt = d.getElementById("app").textContent.replace(/\s+/g, " ");
+      NAMES.forEach(n => assert.ok(txt.includes(n), n + " on Today"));
+      assert.ok(/Barbell Lunge.{0,80}each side/.test(txt) && /Dumbbell Reverse Lunge.{0,80}each side/.test(txt), "shown as each side");
+      w.eval("S.plan=null; save()");
+    });
+    t("a first-time weight comes from a related leg lift and lands on a 5: the dumbbell lunges from the split squat / goblet, the barbell lunge from the squat", () => {
+      const est = (a, wt, b) => JSON.parse(w.eval("JSON.stringify(convertWeight(" + JSON.stringify(a) + "," + wt + "," + JSON.stringify(b) + "))"));
+      const e1 = est("squat", 185, "bb_lunge"); assert.strictEqual(e1.how, "est"); assert.ok(e1.w % 5 === 0 && e1.w >= 75 && e1.w <= 115, "barbell lunge from a 185 squat: " + e1.w);
+      const e2 = est("split_squat", 30, "db_rev_lunge"); assert.strictEqual(e2.how, "est"); assert.ok(e2.w % 5 === 0 && e2.w >= 15 && e2.w <= 30, "reverse lunge from a 30 split squat: " + e2.w);
+      const e3 = est("goblet_squat", 50, "db_lunge"); assert.strictEqual(e3.how, "est"); assert.ok(e3.w % 5 === 0 && e3.w >= 15 && e3.w <= 35, "forward lunge from a 50 goblet: " + e3.w);
+      NEW.forEach(id => { const p = JSON.parse(w.eval("JSON.stringify(plannedW(" + JSON.stringify(id) + "))")); assert.ok(p.w == null || p.w > 0, id + ": " + JSON.stringify(p)); });
+    });
+    t("sw.js: version 26 everywhere", () => { assert.ok(APPV >= 26 && SWV >= 26, APPV + " / " + SWV); });
+    t("no errors during the v26 pass", () => assert.deepStrictEqual(errors.map(String), [], errors.map(String).join(" | ")));
+  } finally { dom.window.close(); }
+}
+
 runPass("pass 1: stub M.ui (integration wiring)", false);
 const realFiles = ["m-ui.js", "m-trends.js"].filter(exists);
 if (realFiles.length) runPass("pass 2: real " + realFiles.join(" + ") + (realFiles.length < 2 ? " (stub fills the rest)" : ""), true);
@@ -1708,6 +1835,7 @@ runNarrowPass();
 runFourDayPass();
 runBodyweightPass();
 runV24Pass();
+runV26Pass();
 
 (async () => {
   await runSwPass();

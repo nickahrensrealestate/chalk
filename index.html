@@ -14,8 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=25">
-<link rel="stylesheet" href="m-trends.css?v=25">
+<link rel="stylesheet" href="m.css?v=26">
+<link rel="stylesheet" href="m-trends.css?v=26">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
@@ -385,12 +385,12 @@ body.upd-on #app.wrap{padding-bottom:calc(var(--upd-h,46px) + 36px)}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=25"></script>
-<script src="m-data.js?v=25"></script>
-<script src="m-food.js?v=25"></script>
-<script src="m-ui.js?v=25"></script>
-<script src="m-trends.js?v=25"></script>
-<script src="m-sync.js?v=25"></script>
+<script src="m-core.js?v=26"></script>
+<script src="m-data.js?v=26"></script>
+<script src="m-food.js?v=26"></script>
+<script src="m-ui.js?v=26"></script>
+<script src="m-trends.js?v=26"></script>
+<script src="m-sync.js?v=26"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -521,7 +521,7 @@ const LIB = {
   glute_bridge:{n:"Glute Bridge",m:"Glutes",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Hamstrings","Core"],r:15,p:"bridge"},
   /* v22: bodyweight staples you can add to any day (they also join the bodyweight circuits) */
   bw_squat:{n:"Air Squat",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes"],r:20,p:"bwsquat"},
-  bw_lunge:{n:"Reverse Lunge",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes","Hamstrings"],r:12,ea:true,p:"bwlunge"},
+  bw_lunge:{n:"Reverse Lunge",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes","Hamstrings"],r:12,ea:true,p:"bwrevlunge"},
   bw_lunge_walk:{n:"Walking Lunge (bodyweight)",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes","Hamstrings"],r:12,ea:true,p:"bwlunge"},
   bw_split_squat:{n:"Split Squat (bodyweight)",m:"Quads",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Glutes","Hamstrings"],r:12,ea:true,p:"bwlunge"},
   chinup:{n:"Chin-Up",m:"Back",t:"bw",inc:5,rest:120,guess:0,k:0,s:["Biceps"],p:"pullup"},
@@ -564,9 +564,17 @@ const LIB = {
   rev_crunch:{n:"Reverse Crunch",m:"Core",t:"bw",inc:5,rest:45,guess:0,k:0,s:[],r:15,p:"revcrunch"},
   woodchop:{n:"Cable Woodchop",m:"Core",t:"cb",inc:5,rest:60,guess:30,k:0.5,s:["Shoulders"],r:12,ea:true,p:"woodchop"},
   battle_rope:{n:"Battle Ropes",m:"Shoulders",t:"rope",inc:5,rest:45,guess:0,k:0,s:["Core","Back"],r:30,u:"s",p:"battlerope"},
+  /* v26: the three gym lunges that were still missing. The loaded forward and reverse lunge (a dumbbell in each hand) and
+     the barbell lunge (bar on the back, step forward). Each counts reps per side and has its own figure; the reverse lunge
+     figure steps back, the other two step forward. */
+  db_lunge:{n:"Dumbbell Forward Lunge",m:"Quads",t:"db",inc:5,rest:60,guess:20,k:0.15,s:["Glutes","Hamstrings"],r:10,ea:true,p:"lunge"},
+  db_rev_lunge:{n:"Dumbbell Reverse Lunge",m:"Quads",t:"db",inc:5,rest:60,guess:20,k:0.15,s:["Glutes","Hamstrings"],r:10,ea:true,p:"revlunge"},
+  bb_lunge:{n:"Barbell Lunge",m:"Quads",t:"bb",inc:5,rest:90,guess:65,k:0.5,s:["Glutes","Hamstrings","Core"],r:8,ea:true,p:"bblunge"},
 };
 /* every v24 addition, in one place (the upgrade and the tests use it) */
 const LIB_V24=["db_fly","dec_bench","db_pullover","assist_dip","mc_row","cg_pulldown","back_ext","sumo_dl","good_morning","hip_add","lp_calf","front_raise","mc_lat_raise","push_press","bb_curl","conc_curl","rope_hammer","db_kickback","rope_pushdown","crunch_floor","situp","leg_raise","rev_crunch","woodchop","battle_rope"];
+/* every v26 addition (the three lunges), in one place for the tests */
+const LIB_V26=["db_lunge","db_rev_lunge","bb_lunge"];
 const MUSCLES = ["Chest","Shoulders","Triceps","Back","Rear Delts","Traps","Biceps","Forearms","Quads","Hamstrings","Glutes","Calves","Core"];
 /* ================= ACTIVITIES (walk · hike · golf) =================
    Logged on their own (S.acts), not as sets. Calories = MET × 3.5 × kg ÷ 200 × minutes (the Compendium of Physical
@@ -597,24 +605,24 @@ const POOLS={
   backV:["lat_pulldown","pullup","assist_pullup","sa_pulldown","cg_pulldown"], backH:["cable_row","cs_row","db_row","tbar_row","mc_row"],
   traps:["shrug","db_shrug","upright_row"], rearDelt:["face_pull","rear_delt","db_rear_fly","cable_rear_fly"],
   bi:["db_curl","ez_curl","hammer","xbody_hammer","cable_curl","preacher","inc_curl","bb_curl","conc_curl","rope_hammer"], forearm:["rev_curl","wrist_curl","farmer_carry"],
-  quad2:["leg_press","leg_ext","hack_squat","goblet_squat","split_squat","hip_add"], ham:["rdl","leg_curl","lying_curl","db_rdl","good_morning","back_ext"],
+  quad2:["leg_press","leg_ext","hack_squat","goblet_squat","split_squat","hip_add","bb_lunge"], ham:["rdl","leg_curl","lying_curl","db_rdl","good_morning","back_ext"],
   glute:["hip_thrust","cable_kickback","hip_abd","glute_bridge"], calf:["calf_stand","calf_seat","lp_calf"],
-  unilateral:["split_squat","step_up","db_lunge_walk","sl_rdl","pistol_box"], carry:["farmer_carry","suitcase_carry"],
+  unilateral:["split_squat","step_up","db_lunge_walk","sl_rdl","pistol_box","db_lunge","db_rev_lunge","bb_lunge"], carry:["farmer_carry","suitcase_carry"],
   absM:["cable_crunch","mc_crunch","hanging_knee","decline_situp","ab_wheel","crunch_floor","leg_raise","rev_crunch","woodchop","situp"],
   absF:["plank","dead_bug","pallof","hanging_knee","mb_twist","bird_dog","ab_wheel","side_plank","woodchop","leg_raise"],
   ball:["mb_slam","wall_ball","mb_rot_throw","mb_chest_pass","mb_squat_throw","mb_vup","mb_oh_slam","mb_twist"],
   box:["box_jump","step_up","box_burpee","lat_box_hop","pistol_box","dips"],
   bw:["burpee","jump_squat","mtn_climber","high_knees","skater","pushup","plank_tap","bicycle","bear_crawl","jumping_jack","jump_rope","bw_lunge","bw_squat"],
   bal:["bosu_squat","bosu_sl_stand","sl_reach","bosu_pushup","sl_rdl","curtsy","lat_lunge"],
-  dbHiit:["db_thruster","db_swing","db_snatch","renegade_row","db_floor_press","db_pushpress","goblet_squat","db_lunge_walk"],
+  dbHiit:["db_thruster","db_swing","db_snatch","renegade_row","db_floor_press","db_pushpress","goblet_squat","db_lunge_walk","db_rev_lunge"],
   coreHiit:["dead_bug","bird_dog","side_plank","plank","bicycle","mtn_climber","pallof","leg_raise","rev_crunch","crunch_floor","situp"],
   /* functional split (Legs+Glutes · Upper · Full body + deep core) */
   hinge:["deadlift","kb_swing","trap_dl","rdl","sumo_dl"], pullMainU:["bb_row","pullup","cs_row","tbar_row"],
   hamF:["rdl","db_rdl","kb_swing","leg_curl","sl_rdl","good_morning","back_ext"], gluteF:["hip_thrust","glute_bridge","band_walk","cable_kickback","hip_abd"],
   calfBal:["calf_stand","bosu_sl_stand","calf_seat","sl_reach"],
   delts:["lat_raise","face_pull","band_pull_apart","db_rear_fly","cable_lat_raise","front_raise"], arms:["pushdown","db_curl","hammer","oh_ext","ez_curl","skull","rope_pushdown","bb_curl"],
-  fullA:["goblet_squat","kb_goblet","split_squat","step_up","db_thruster"], fullB:["pushup","db_bench","db_floor_press","db_ohp","dips"],
-  fullC:["db_row","renegade_row","cable_row","lat_pulldown"], fullD:["db_lunge_walk","step_up","lat_lunge","curtsy","box_jump","bw_lunge_walk"],
+  fullA:["goblet_squat","kb_goblet","split_squat","step_up","db_thruster","db_lunge"], fullB:["pushup","db_bench","db_floor_press","db_ohp","dips"],
+  fullC:["db_row","renegade_row","cable_row","lat_pulldown"], fullD:["db_lunge_walk","step_up","lat_lunge","curtsy","box_jump","bw_lunge_walk","db_rev_lunge"],
   deepCore:["pallof","dead_bug","bird_dog","plank","side_plank","hollow_hold","suitcase_carry","ab_wheel","mb_twist","woodchop"],
   /* Athletic day (day 4). "bw": nothing but your body — a hotel room or the living room. "hotel": what a hotel gym has —
      dumbbells, a kettlebell, a med ball, a box or bench, a dip / pull-up station. Never a barbell, machine or cable. */
@@ -625,7 +633,7 @@ const POOLS={
   athPullBW:["superman","inverted_row","prone_y"],
   athPull:["pullup","chinup","db_row","renegade_row","inverted_row"],
   athLungeBW:["bw_lunge","bw_lunge_walk","jump_lunge","skater","bw_split_squat"],
-  athLunge:["db_lunge_walk","step_up","lat_lunge","split_squat","curtsy","bw_lunge_walk"],
+  athLunge:["db_lunge_walk","step_up","lat_lunge","split_squat","curtsy","bw_lunge_walk","db_lunge","db_rev_lunge"],
   athHingeBW:["glute_bridge","sl_bridge","superman","bw_calf"],
   athHinge:["db_rdl","db_swing","kb_swing","sl_rdl","glute_bridge","sl_bridge"],
   athCoreBW:["plank","dead_bug","bird_dog","side_plank","hollow_hold","bicycle","mtn_climber","crunch_floor","leg_raise","rev_crunch","situp"],
@@ -1045,6 +1053,10 @@ const PAT={
   hipthrust:PP({t:-70,th:100,s:-40,u:-20,f:-10,hx:130,hy:224},{t:-95,th:80,s:-40,u:-20,f:-10,hx:130,hy:200},{lie:1,bench:"short",grip:"hip"}),
   lunge:PP({},{t:5,th:70,s:-25,th2:-40,s2:-50},{grip:"db"}),
   bwlunge:PP({},{t:5,th:70,s:-25,th2:-40,s2:-50}),
+  /* v26: the reverse lunge steps the near leg back (the far leg bends in front); the barbell lunge steps forward under a bar on the back */
+  revlunge:PP({},{t:5,th:-40,s:-50,th2:70,s2:-25},{grip:"db"}),
+  bblunge:PP({t:8,u:-40,f:-170},{t:10,th:70,s:-25,th2:-40,s2:-50,u:-40,f:-170},{grip:"back"}),
+  bwrevlunge:PP({},{t:5,th:-40,s:-50,th2:70,s2:-25}),
   fly:PP({u:90,f:80,ua:78},{u:90,f:80,ua:78,uy:68},{grip:"db"}),
   cablefly:PP({u:90,f:80,ua:78},{u:90,f:80,ua:78,uy:68},{cable:[10,60]}),
   chestpass:PP({u:40,f:-150,ua:18},{u:90,f:90,ua:12},{grip:"ball"}),
@@ -2571,7 +2583,7 @@ if(S.active) wakeOn();
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=25, BOOT_AT=Date.now();
+const APP_VERSION=26, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
   /* K5: Macros setup or You has typed numbers that aren't saved yet */
