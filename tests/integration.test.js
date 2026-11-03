@@ -1629,7 +1629,7 @@ function runV24Pass() {
       assert.ok((fr("battlerope").match(/<path class="cab"[^>]*d="M[^"]*C/g) || []).length === 2, "two rope curves");
       assert.ok(/class="fur"/.test(fr("assistdip")) && /class="fur"/.test(fr("mcrow")), "a knee pad, a seat and a chest pad");
       assert.ok((fr("mcrow").match(/stroke-width:9/g) || []).length >= 1, "the chest pad is a thick pad");
-      assert.ok((fr("mclatraise").match(/stroke-width:6/g) || []).length === 2, "an elbow pad each side");
+      assert.ok((fr("mclatraise").match(/stroke-width:[56]\.\d/g) || []).length === 2, "an elbow pad each side");
       const rings = s => (s.match(/class="eq"/g) || []).length;
       assert.strictEqual(rings(fr("pullover")), 2, "one dumbbell (two ends) for the pullover");
       assert.strictEqual(rings(fr("conccurl")), 2, "one dumbbell for the concentration curl");
@@ -1824,6 +1824,84 @@ function runV26Pass() {
   } finally { dom.window.close(); }
 }
 
+/* ------------------------------------------------- v27: joints move the way a body can · a turned camera with perspective */
+function runV27Pass() {
+  console.log("v27: shortest-arc joints, vertical forearms on every press, three-part moves, turned camera + perspective");
+  const LIVE = JSON.parse(read("tests/fixtures/chalk-v1-live.json"));
+  const S0 = JSON.parse(LIVE.nick); S0.active = null; const raw = JSON.stringify(S0);
+  const { dom, w, errors } = boot({ real: true, store: { "chalk.v1": raw, "chalk.bak.d": "2000-01-01" } });
+  const dirs = (p, t) => JSON.parse(w.eval("JSON.stringify(rigJoints(PAT." + p + ",poseAt(PAT." + p + "," + t + "),'side').D)"));
+  const ang = (A, B) => Math.acos(Math.max(-1, Math.min(1, A[0] * B[0] + A[1] * B[1] + A[2] * B[2]))) * 180 / Math.PI;
+  const elbow = (D, far) => 180 - ang(far ? D.U2 : D.U, far ? D.F2 : D.F), knee = (D, far) => 180 - ang(far ? D.T2 : D.T, far ? D.S2 : D.S);
+  const hand = (p, t) => { const J = JSON.parse(w.eval("JSON.stringify((()=>{ const J=rigJoints(PAT." + p + ",poseAt(PAT." + p + "," + t + "),'side'); return {h:J.arm[2],e:J.arm[1],s:J.arm[0]}; })())")); return J; };
+  try {
+    t("the close-grip bench and the Arnold press have figures of their own; every press, the pulldown, the pull-up and the skull crusher were rebuilt", () => {
+      assert.strictEqual(w.eval("getEx('cg_bench').p"), "cgpress");
+      assert.strictEqual(w.eval("getEx('arnold').p"), "arnold");
+      assert.strictEqual(w.eval("getEx('bench').p"), "hpress");
+      ["hpress", "cgpress", "hpressdb", "ipress", "ipressbar", "decpress", "floorpress", "chestpress", "opress", "opressdb", "arnold", "mcpress", "skull", "dbfly", "thruster", "jump", "upright", "snatch", "pushpress"].forEach(p => assert.ok(w.eval("!!(PAT." + p + "&&PAT." + p + ".m)"), p + " is a three-part move (a → m → b)"));
+      assert.ok(w.eval("PAT.arnold.a.u<60 && PAT.arnold.a.ua<20 && PAT.arnold.m.ua>50 && PAT.arnold.b.u===180"), "Arnold: bells in front, elbows swing out, then overhead");
+    });
+    t("bench press: the forearms stay vertical, the elbows start out to the sides and below the bench, the arms lock out straight up, and the hands never slide along the bar", () => {
+      const z0 = hand("hpress", 0).h[2];
+      for (let i = 0; i <= 20; i++) { const t = i / 20, D = dirs("hpress", t), H = hand("hpress", t);
+        assert.ok(D.F[1] > 0.85, "t=" + t + " forearm points up (" + D.F[1].toFixed(2) + ")");
+        assert.ok(Math.abs(H.h[2] - z0) < 7, "t=" + t + " grip width held: " + H.h[2].toFixed(1) + " vs " + z0.toFixed(1));
+        assert.ok(elbow(D) >= 50 && elbow(D) <= 181, "t=" + t + " elbow " + elbow(D).toFixed(0) + "°");
+        assert.ok(H.h[1] >= H.e[1] - 1, "t=" + t + " the hand is above the elbow");
+      }
+      const D0 = dirs("hpress", 0), D1 = dirs("hpress", 1);
+      assert.ok(D0.U[1] < -0.3 && D0.U[2] > 0.7, "bottom: upper arm out and below the bench " + JSON.stringify(D0.U));
+      assert.ok(D1.U[1] > 0.8 && D1.F[1] > 0.8 && elbow(D1) > 170, "top: straight up");
+      assert.ok(hand("hpress", 1).h[1] - hand("hpress", 0).h[1] > 40, "the bar rises");
+      ["cgpress", "hpressdb", "floorpress"].forEach(p => { for (let i = 0; i <= 20; i++) { const D = dirs(p, i / 20); assert.ok(D.F[1] > 0.8, p + " forearm up at t=" + i / 20); } });
+      ["ipress", "ipressbar", "decpress"].forEach(p => { for (let i = 0; i <= 20; i++) { const D = dirs(p, i / 20); assert.ok(elbow(D) >= 55, p + " elbow " + elbow(D).toFixed(0) + " at t=" + i / 20); } });
+    });
+    t("no elbow or knee ever folds past what a body can do, and no limb jumps between frames — every pattern, every phase", () => {
+      const names = JSON.parse(w.eval("JSON.stringify(Object.keys(PAT))"));
+      assert.ok(names.length >= 110, names.length + " patterns");
+      const bad = [];
+      names.forEach(p => { let prev = null; for (let i = 0; i <= 40; i++) { const t = i / 40, D = dirs(p, t);
+        [["elbow", elbow(D)], ["elbow2", elbow(D, 1)], ["knee", knee(D)], ["knee2", knee(D, 1)]].forEach(([n, a]) => { if (a < 12) bad.push(p + " t=" + t.toFixed(2) + " " + n + " " + a.toFixed(0) + "°"); });
+        if (prev) ["U", "F", "U2", "F2", "T", "S", "T2", "S2"].forEach(k => { const d = ang(prev[k], D[k]); if (d > 14) bad.push(p + " t=" + t.toFixed(2) + " " + k + " jumps " + d.toFixed(0) + "°"); });
+        prev = D; } });
+      assert.deepStrictEqual(bad, []);
+    });
+    t("the forearm takes the short way round: the skull crusher never dips below the bench, the overhead extension never swings through the face, the chest pass never swings through the floor", () => {
+      for (let i = 0; i <= 20; i++) { const t = i / 20;
+        { const H = hand("skull", t); assert.ok(H.h[1] > 8 && H.h[0] < 0, "skull t=" + t + " the bar stays above the face, toward the head: " + JSON.stringify(H.h)); assert.ok(dirs("skull", t).U[1] > 0.9, "skull t=" + t + " upper arms stay vertical"); }
+        assert.ok(dirs("ohext", t).F[0] < 0.25, "ohext t=" + t);
+        assert.ok(dirs("chestpass", t).F[1] > -0.2, "chestpass t=" + t);
+        assert.ok(dirs("facepull", t).F[1] > -0.5, "facepull t=" + t); }
+    });
+    t("a forearm or shin can have its own abduction (fa / sa), the far side copies the near side, and a mid pose is hit exactly at t = 0.5", () => {
+      const fp = JSON.parse(w.eval("JSON.stringify(fullPose({u:30,ua:54,f:180,fa:0,th:10,ta:20}))"));
+      assert.deepStrictEqual([fp.fa, fp.fa2, fp.ua2, fp.sa, fp.sa2, fp.u2, fp.f2], [0, 0, 54, 20, 20, 30, 180]);
+      const fp2 = JSON.parse(w.eval("JSON.stringify(fullPose({u:30,ua:54,f:180}))"));
+      assert.deepStrictEqual([fp2.fa, fp2.fa2], [54, 54], "no fa: the forearm keeps the upper arm's abduction");
+      const mid = JSON.parse(w.eval("JSON.stringify((()=>{ const p=poseAt(PAT.arnold,0.5); return [p.u,p.ua,p.f,p.fa]; })())"));
+      assert.deepStrictEqual(mid, [w.eval("PAT.arnold.m.u"), w.eval("PAT.arnold.m.ua"), w.eval("PAT.arnold.m.f"), w.eval("PAT.arnold.m.fa")]);
+      const D = JSON.parse(w.eval("JSON.stringify(limbDirs({u:0,ua:0,f:180,fa:0}))"));
+      assert.ok(Math.abs(D.F[1] - 1) < 1e-9 && Math.abs(D.U[1] + 1) < 1e-9, "f 180 / fa 0 is straight up");
+      const S = JSON.parse(w.eval("JSON.stringify(slerp([1,0,0],[0,1,0],0.5,[0,0,1]))"));
+      assert.ok(Math.abs(S[0] - Math.SQRT1_2) < 1e-6 && Math.abs(S[1] - Math.SQRT1_2) < 1e-6, "slerp halfway");
+      assert.deepStrictEqual(JSON.parse(w.eval("JSON.stringify(slerp([1,0,0],[-1,0,0],0.5,[0,0,1]))")), [0, 0, 1], "antipodal falls back to the hint");
+    });
+    t("the camera is turned a little and has perspective: the far arm peeks out in the side view, the near bar plate draws bigger than the far one, benches are real boxes", () => {
+      assert.ok(w.eval("VIEW.side[1]<-0.1 && VIEW.side[1]>-0.5 && VIEW.front[0]>0.1 && VIEW.front[0]<0.5"), "both views are off-axis");
+      const sv = w.eval("animFrame(PAT.hpress,1,'torso','side')");
+      const rs = [...sv.matchAll(/<circle class="eq" cx="[-\d.]+" cy="[-\d.]+" r="([\d.]+)"\/>/g)].map(m => +m[1]).filter(r => r > 10);
+      assert.strictEqual(rs.length, 2, "two plates");
+      assert.ok(Math.abs(rs[0] - rs[1]) > 1.5 && Math.abs(rs[0] - rs[1]) < 6, "plates differ by perspective: " + rs.join(" / "));
+      const fur = (sv.match(/<polygon class="fur"/g) || []).length; assert.ok(fur >= 9 && fur % 3 === 0, "three faces per box: " + fur);
+      const pts = JSON.parse(w.eval("JSON.stringify(rigPoints(PAT.squat,0,'side'))"));
+      assert.ok(Math.abs(pts.arm[1][0] - pts.arm2[1][0]) > 4, "the far elbow is offset from the near one in the side view");
+    });
+    t("sw.js: version 27 everywhere", () => { assert.ok(APPV >= 27 && SWV >= 27, APPV + " / " + SWV); });
+    t("no errors during the v27 pass", () => assert.deepStrictEqual(errors.map(String), [], errors.map(String).join(" | ")));
+  } finally { dom.window.close(); }
+}
+
 runPass("pass 1: stub M.ui (integration wiring)", false);
 const realFiles = ["m-ui.js", "m-trends.js"].filter(exists);
 if (realFiles.length) runPass("pass 2: real " + realFiles.join(" + ") + (realFiles.length < 2 ? " (stub fills the rest)" : ""), true);
@@ -1835,6 +1913,7 @@ runNarrowPass();
 runFourDayPass();
 runBodyweightPass();
 runV24Pass();
+runV27Pass();
 runV26Pass();
 
 (async () => {

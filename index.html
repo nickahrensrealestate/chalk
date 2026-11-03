@@ -14,8 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=26">
-<link rel="stylesheet" href="m-trends.css?v=26">
+<link rel="stylesheet" href="m.css?v=27">
+<link rel="stylesheet" href="m-trends.css?v=27">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
@@ -385,12 +385,12 @@ body.upd-on #app.wrap{padding-bottom:calc(var(--upd-h,46px) + 36px)}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=26"></script>
-<script src="m-data.js?v=26"></script>
-<script src="m-food.js?v=26"></script>
-<script src="m-ui.js?v=26"></script>
-<script src="m-trends.js?v=26"></script>
-<script src="m-sync.js?v=26"></script>
+<script src="m-core.js?v=27"></script>
+<script src="m-data.js?v=27"></script>
+<script src="m-food.js?v=27"></script>
+<script src="m-ui.js?v=27"></script>
+<script src="m-trends.js?v=27"></script>
+<script src="m-sync.js?v=27"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -435,7 +435,7 @@ const LIB = {
   ohp:{n:"Overhead Press",m:"Shoulders",t:"bb",inc:5,rest:120,guess:75,k:1.0,s:["Triceps","Core"],p:"opress"},
   db_ohp:{n:"Dumbbell Shoulder Press",m:"Shoulders",t:"db",inc:5,rest:90,guess:35,k:0.45,s:["Triceps"],p:"opressdb"},
   mc_ohp:{n:"Machine Shoulder Press",m:"Shoulders",t:"mc",inc:5,rest:90,guess:70,k:1.0,s:["Triceps"],p:"mcpress"},
-  arnold:{n:"Arnold Press",m:"Shoulders",t:"db",inc:5,rest:90,guess:30,k:0.4,s:["Triceps"],p:"opressdb"},
+  arnold:{n:"Arnold Press",m:"Shoulders",t:"db",inc:5,rest:90,guess:30,k:0.4,s:["Triceps"],p:"arnold"},
   lat_raise:{n:"Dumbbell Lateral Raise",m:"Shoulders",t:"db",inc:5,rest:60,guess:15,k:0.2,s:[],p:"lraise"},
   cable_lat_raise:{n:"Cable Lateral Raise",m:"Shoulders",t:"cb",inc:5,rest:60,guess:10,k:0.15,s:[],p:"lraise"},
   upright_row:{n:"Cable Upright Row",m:"Traps",t:"cb",inc:5,rest:60,guess:60,k:0.5,s:["Shoulders"],p:"upright"},
@@ -448,7 +448,7 @@ const LIB = {
   pushdown:{n:"Triceps Pushdown",m:"Triceps",t:"cb",inc:5,rest:60,guess:50,k:1.0,s:[],p:"pushdown"},
   oh_ext:{n:"Overhead Cable Extension",m:"Triceps",t:"cb",inc:5,rest:60,guess:40,k:0.8,s:[],p:"ohext"},
   skull:{n:"Skull Crusher",m:"Triceps",t:"bb",inc:5,rest:75,guess:50,k:0.9,s:[],p:"skull"},
-  cg_bench:{n:"Close-Grip Bench Press",m:"Triceps",t:"bb",inc:5,rest:120,guess:95,k:2.2,s:["Chest"],p:"hpress"},
+  cg_bench:{n:"Close-Grip Bench Press",m:"Triceps",t:"bb",inc:5,rest:120,guess:95,k:2.2,s:["Chest"],p:"cgpress"},
   db_oh_ext:{n:"Dumbbell Overhead Extension",m:"Triceps",t:"db",inc:5,rest:60,guess:40,k:1.0,s:[],p:"ohext"},
   ez_curl:{n:"EZ-Bar Curl",m:"Biceps",t:"bb",inc:5,rest:60,guess:50,k:1.0,s:["Forearms"],p:"bbcurl"},
   db_curl:{n:"Dumbbell Curl",m:"Biceps",t:"db",inc:5,rest:60,guess:25,k:0.5,s:[],p:"curl"},
@@ -1008,43 +1008,55 @@ const SEG={Chest:"torso",Back:"torso",Core:"torso",Traps:"neck",Shoulders:"uarm"
    uy = swing of the arm about the vertical axis (+ toward the front); ua2/ta2/uy2 for the far limb. One rig is drawn from the side and from the front.
    The figure animates between pose a and pose b. */
 const ST={t:0,u:0,f:0,th:0,s:0};
-const PP=(a,b,o)=>Object.assign({v:"side",a:Object.assign({},ST,a),b:Object.assign({},ST,b)},o||{});
+/* v27: a pattern is pose a -> pose b (and back). An optional pose m in the middle gives a three-part move (the Arnold press,
+   a jump: arms swing forward then up), so the figure never has to pick the short way round between two far-apart poses. */
+const PP=(a,b,o)=>{ o=o||{}; const r=Object.assign({v:"side",a:Object.assign({},ST,a),b:Object.assign({},ST,b)},o); if(o.m) r.m=Object.assign({},ST,o.m); return r; };
 const PAT={
   squat:PP({t:8,u:-40,f:-170},{t:35,th:85,s:-40,u:-40,f:-170},{grip:"back"}),
   bwsquat:PP({t:5,u:60,f:60},{t:30,th:85,s:-40,u:80,f:80}),
-  goblet:PP({t:5,u:40,f:-160},{t:25,th:85,s:-40,u:40,f:-160},{grip:"db"}),
+  goblet:PP({t:5,u:-6,ua:32,f:143,fa:-28},{t:25,th:85,s:-40,u:-6,ua:32,f:143,fa:-28},{grip:"db1"}),
   legpress:PP({t:-50,th:155,s:75,u:-20,f:60,hx:95,hy:180},{t:-50,th:120,s:120,u:-20,f:60,hx:95,hy:180},{lie:1,plat:1,seat:"recline"}),
   dl:PP({},{t:60,th:45,s:-20},{grip:"bar"}),
   rdl:PP({},{t:80,th:10,s:-6},{grip:"bar"}),
-  hpress:PP({t:-90,u:100,f:-110,ua:48,th:60,s:-20,hx:150,hy:180},{t:-90,u:180,f:180,ua:14,th:60,s:-20,hx:150,hy:180},{lie:1,bench:1,grip:"bar"}),
-  ipress:PP({t:-60,u:80,f:-130,ua:45,th:60,s:-20,hx:150,hy:180},{t:-60,u:150,f:150,ua:12,th:60,s:-20,hx:150,hy:180},{lie:1,bench:"incline",grip:"db"}),
-  chestpress:PP({t:-10,th:90,s:-5,u:70,f:-120,ua:40},{t:-10,th:90,s:-5,u:95,f:95,ua:12},{seat:1,grip:"db"}),
-  floorpress:PP({t:-90,u:100,f:-110,ua:40,th:120,s:-30,hx:150,hy:250},{t:-90,u:180,f:180,ua:12,th:120,s:-30,hx:150,hy:250},{lie:1,grip:"db"}),
-  opress:PP({u:20,f:170},{u:180,f:180},{grip:"bar"}),
-  vpull:PP({t:-8,th:90,s:-5,u:172,f:172,ua:35},{t:-12,th:90,s:-5,u:-40,f:135,ua:35},{seat:1,cable:[146,6]}),
-  pullup:PP({u:180,f:180,th:8,s:-70,ua:27},{u:-40,f:135,th:8,s:-70,ua:27},{anchor:[140,50],grip:"barhi",floor:false}),
+  /* v27: every press is built from where the hands are (IK), with the forearms vertical under the bar at the bottom, the elbows out
+     and a touch below the bench, and a middle pose so the bar rises straight and the hands never slide along the bar */
+  hpress:PP({t:-90,u:31,ua:54,f:-178,fa:0,th:60,s:-20,hx:150,hy:180},{t:-90,u:180,ua:30,f:180,fa:21,th:60,s:-20,hx:150,hy:180},{lie:1,bench:1,grip:"bar",m:{t:-90,u:169,ua:73,f:175,fa:-9,th:60,s:-20,hx:150,hy:180}}),
+  cgpress:PP({t:-90,u:54,ua:32,f:-160,fa:-3,th:60,s:-20,hx:150,hy:180},{t:-90,u:180,ua:16,f:180,fa:12,th:60,s:-20,hx:150,hy:180},{lie:1,bench:1,grip:"bar",m:{t:-90,u:148,ua:63,f:-179,fa:-28,th:60,s:-20,hx:150,hy:180}}),
+  hpressdb:PP({t:-90,u:28,ua:55,f:179,fa:2,th:60,s:-20,hx:150,hy:180},{t:-90,u:180,ua:19,f:180,fa:4,th:60,s:-20,hx:150,hy:180},{lie:1,bench:1,grip:"db",m:{t:-90,u:169,ua:72,f:175,fa:-15,th:60,s:-20,hx:150,hy:180}}),
+  ipress:PP({t:-60,u:25,ua:43,f:171,fa:11,th:60,s:-20,hx:150,hy:180},{t:-60,u:151,ua:22,f:151,fa:1,th:60,s:-20,hx:150,hy:180},{lie:1,bench:"incline",grip:"db",m:{t:-60,u:102,ua:61,f:164,fa:-10,th:60,s:-20,hx:150,hy:180}}),
+  ipressbar:PP({t:-60,u:27,ua:41,f:174,fa:10,th:60,s:-20,hx:150,hy:180},{t:-60,u:150,ua:29,f:150,fa:22,th:60,s:-20,hx:150,hy:180},{lie:1,bench:"incline",grip:"bar",m:{t:-60,u:102,ua:63,f:163,fa:-4,th:60,s:-20,hx:150,hy:180}}),
+  chestpress:PP({t:-10,th:90,s:-5,u:-61,ua:52,f:113,fa:3},{t:-10,th:90,s:-5,u:100,ua:33,f:100,fa:10},{seat:1,grip:"db",m:{t:-10,th:90,s:-5,u:69,ua:73,f:110,fa:-13}}),
+  floorpress:PP({t:-90,u:45,ua:67,f:-177,fa:0,th:120,s:-30,hx:150,hy:250},{t:-90,u:180,ua:19,f:180,fa:4,th:120,s:-30,hx:150,hy:250},{lie:1,grip:"db",m:{t:-90,u:172,ua:68,f:176,fa:-17,th:120,s:-30,hx:150,hy:250}}),
+  opress:PP({u:46,ua:3,f:-141,fa:28},{u:180,ua:16,f:180,fa:11},{grip:"bar",m:{u:98,ua:26,f:-150,fa:2}}),
+  /* dumbbells: elbows out to the sides, forearms vertical, the bells meet overhead */
+  opressdb:PP({u:74,ua:67,f:179,fa:-2},{u:180,ua:19,f:180,fa:4},{grip:"db",m:{u:152,ua:60,f:175,fa:-2}}),
+  /* Arnold press: start with the bells in front of the shoulders, palms in; the elbows swing out to the sides on the way up, then press */
+  arnold:PP({u:40,ua:8,f:-174,fa:12},{u:180,ua:19,f:180,fa:4},{grip:"db",m:{u:74,ua:67,f:179,fa:-2}}),
+  vpull:PP({t:-8,th:90,s:-5,u:178,ua:42,f:178,fa:28},{t:-12,th:90,s:-5,u:-21,ua:41,f:146,fa:29},{seat:1,cable:[146,6]}),
+  cgpull:PP({t:-8,th:90,s:-5,u:178,ua:32,f:178,fa:8},{t:-12,th:90,s:-5,u:-22,ua:28,f:145,fa:13},{seat:1,cable:[146,6]}),
+  pullup:PP({u:178,ua:26,f:178,fa:24,th:8,s:-70},{u:-24,ua:24,f:142,fa:29,th:8,s:-70},{anchor:[140,50],grip:"barhi",floor:false}),
   row:PP({t:60,th:15,s:-10},{t:60,th:15,s:-10,u:-70,f:-20},{grip:"bar"}),
-  csrow:PP({t:45,th:15,s:-10},{t:45,th:15,s:-10,u:-70,f:-20},{grip:"db"}),
-  dbrow:PP({t:70,th:15,s:-10},{t:70,th:15,s:-10,u:-75,f:-20},{grip:"db"}),
+  csrow:PP({t:45,th:15,s:-10,u:40,f:40},{t:45,th:15,s:-10,u:-60,f:-10},{grip:"db",prone:1}),
+  dbrow:PP({t:70,th:15,s:-10,u2:30,f2:30},{t:70,th:15,s:-10,u:-75,f:-20,u2:30,f2:30},{grip:"db",single:1,brace:1}),
   cablerow:PP({th:80,s:10,u:80,f:80},{th:80,s:10,t:-5,u:-50,f:60},{seat:1,cable:[276,140]}),
   sapull:PP({t:15,u:150,f:150},{t:25,u:10,f:10},{cable:[210,6]}),
   curl:PP({u:-3,f:5},{u:8,f:160},{grip:"db"}),
   bbcurl:PP({u:-3,f:5},{u:8,f:160},{grip:"bar"}),
   pushdown:PP({u:0,f:110},{u:0,f:15},{cable:[180,6]}),
-  ohext:PP({u:175,f:-40},{u:175,f:175},{grip:"db"}),
-  skull:PP({t:-90,u:180,f:-90,th:60,s:-20,hx:150,hy:180},{t:-90,u:180,f:180,th:60,s:-20,hx:150,hy:180},{lie:1,bench:1,grip:"bar"}),
+  ohext:PP({u:165,ua:-1,f:-77,fa:20},{u:-178,ua:19,f:-178,fa:-3},{grip:"db"}),
+  skull:PP({t:-90,u:-168,ua:5,f:-51,fa:19,th:60,s:-20,hx:150,hy:180},{t:-90,u:-173,ua:14,f:-173,fa:9,th:60,s:-20,hx:150,hy:180},{lie:1,bench:1,grip:"bar",m:{t:-90,u:172,ua:-6,f:-119,fa:34,th:60,s:-20,hx:150,hy:180}}),
   dips:PP({t:15,th:-10,s:-60},{t:20,u:-90,f:0,th:-10,s:-60},{anchor:[140,156],grip:"barlo",floor:false}),
   pushup:PP({t:67,th:-67,s:-67},{t:78,th:-78,s:-78,u:-68,f:46},{anchor:[210,262]}),
   renegade:PP({t:67,th:-67,s:-67,u2:0,f2:0},{t:67,th:-67,s:-67,u2:-70,f2:-20},{anchor:[210,262],grip:"db"}),
   mclimber:PP({t:67,th:-67,s:-67,th2:60,s2:-90},{t:67,th:-67,s:-67,th2:45,s2:-105},{anchor:[210,262]}),
   plank:PP({t:67,th:-67,s:-67},{t:69,th:-67,s:-67},{anchor:[210,262]}),
   rearfly:PP({t:75,th:15,s:-10,u:-5,f:15,ua:6},{t:75,th:15,s:-10,u:-5,f:15,ua:84},{grip:"db"}),
-  facepull:PP({u:90,f:90,ua:8},{u:105,f:-70,ua:58},{cable:[276,70]}),
+  facepull:PP({u:99,ua:13,f:99,fa:11},{u:-75,ua:54,f:128,fa:12},{cable:[276,70]}),
   shrug:PP({},{shr:9},{grip:"bar"}),
   shrugdb:PP({},{shr:9},{grip:"db"}),
   crunch:PP({t:20,s:-90,u:150,f:-120},{t:75,s:-90,u:150,f:-120},{cable:[276,20],ax:80}),
-  mccrunch:PP({t:-15,th:90,s:-10,u:60,f:-120},{t:45,th:90,s:-10,u:60,f:-120},{seat:1}),
-  kneeraise:PP({u:180,f:180,th:5,s:-20,ua:27},{u:180,f:180,th:100,s:-70,ua:27},{anchor:[140,30],grip:"barhi",floor:false}),
+  mccrunch:PP({t:-15,th:90,s:-10,u:124,ua:58,f:-129,fa:-29},{t:45,th:90,s:-10,u:76,ua:70,f:152,fa:-36},{seat:1}),
+  kneeraise:PP({u:180,f:180,th:5,s:-20,ua:27},{u:180,f:180,th:100,s:-10,ua:27},{anchor:[140,30],grip:"barhi",floor:false}),
   rollout:PP({t:30,s:-90,u:60,f:60},{t:85,s:-90,u:100,f:100},{grip:"wheel",ax:60}),
   calf:PP({},{rise:18},{toes:1}),
   seatedcalf:PP({th:90,s:-10,u:10,f:40},{th:90,s:-10,u:10,f:40,rise:9},{seat:1,toes:1}),
@@ -1058,16 +1070,16 @@ const PAT={
   bblunge:PP({t:8,u:-40,f:-170},{t:10,th:70,s:-25,th2:-40,s2:-50,u:-40,f:-170},{grip:"back"}),
   bwrevlunge:PP({},{t:5,th:-40,s:-50,th2:70,s2:-25}),
   fly:PP({u:90,f:80,ua:78},{u:90,f:80,ua:78,uy:68},{grip:"db"}),
-  cablefly:PP({u:90,f:80,ua:78},{u:90,f:80,ua:78,uy:68},{cable:[10,60]}),
-  chestpass:PP({u:40,f:-150,ua:18},{u:90,f:90,ua:12},{grip:"ball"}),
+  cablefly:PP({u:35,ua:78,f:155,fa:74},{u:76,ua:23,f:110,fa:22},{cable:[10,60]}),
+  chestpass:PP({u:15,ua:25,f:178,fa:-9},{u:92,ua:19,f:92,fa:5},{grip:"ball"}),
   generic:PP({},{t:5,th:20,s:-10,u:-20,f:-10}),
-  jump:PP({t:20,th:50,s:-25,u:-30,f:-10},{u:180,f:180,rise:14}),
-  slam:PP({u:180,f:180},{t:50,th:20,s:-10,u:60,f:60},{grip:"ball"}),
-  thruster:PP({t:25,th:85,s:-40,u:40,f:-160},{u:180,f:180},{grip:"db"}),
-  ballthruster:PP({t:25,th:85,s:-40,u:40,f:-160},{u:180,f:180},{grip:"ball"}),
+  jump:PP({t:20,th:50,s:-25,u:-30,f:-10},{u:180,f:180,rise:14},{m:{t:10,th:25,s:-12,u:90,ua:19,f:90,fa:4,rise:7}}),
+  slam:PP({u:180,f:180},{t:60,th:60,s:-40,u:25,f:25},{grip:"ball"}),
+  thruster:PP({t:25,th:85,s:-40,u:36,ua:18,f:-165,fa:16},{u:180,ua:19,f:180,fa:4},{grip:"db",m:{t:5,th:5,s:-2,u:36,ua:18,f:-165,fa:16}}),
+  ballthruster:PP({t:25,th:85,s:-40,u:36,ua:8,f:-165,fa:6},{u:180,ua:10,f:180,fa:4},{grip:"ball",m:{t:5,th:5,s:-2,u:36,ua:8,f:-165,fa:6}}),
   swing:PP({t:65,th:25,s:-15,u:-15,f:-15},{u:90,f:90},{grip:"db"}),
-  snatch:PP({t:65,th:30,s:-15,u:-10,f:-10},{u:180,f:180},{grip:"db"}),
-  twist:PP({t:-35,th:70,s:-100,u:60,f:60,uy:-40,uy2:40,hx:130,hy:230},{t:-35,th:70,s:-100,u:60,f:60,uy:40,uy2:-40,hx:130,hy:230},{lie:1,grip:"ball"}),
+  snatch:PP({t:65,th:30,s:-15,u:-10,f:-10,u2:-5,f2:-5},{u:180,ua:19,f:180,fa:0,u2:0,f2:0},{grip:"db",single:1,m:{t:20,th:10,s:-5,u:42,ua:63,f:-171,fa:-19,u2:0,f2:0,rise:2}}),
+  twist:PP({t:-35,th:70,s:-50,u:60,f:60,uy:-40,uy2:40,hx:130,hy:230},{t:-35,th:70,s:-50,u:60,f:60,uy:40,uy2:-40,hx:130,hy:230},{lie:1,grip:"ball"}),
   vup:PP({t:-90,th:90,s:90,u:-90,f:-90,hx:140,hy:250},{t:-40,th:140,s:140,u:-250,f:-250,hx:140,hy:250},{lie:1}),
   balance:PP({th2:-30,s2:-80,u:40,f:40},{th2:-35,s2:-85,u:45,f:45}),
   slrdl:PP({},{t:80,th:8,s:-5,th2:-85,s2:-85},{grip:"db"}),
@@ -1075,38 +1087,38 @@ const PAT={
   deadbug:PP({t:-90,th:180,s:90,u:180,f:180,th2:180,s2:90,u2:180,f2:180,hx:150,hy:250},{t:-90,th:180,s:90,u:180,f:180,th2:120,s2:120,u2:270,f2:270,hx:150,hy:250},{lie:1}),
   highknees:PP({u:30,f:-60},{u:-30,f:-120,th2:100,s2:-50,rise:4}),
   kickback:PP({t:15,u:60,f:60},{t:20,u:60,f:60,th2:-60,s2:-60},{cable:[276,250],cableAt:"foot2"}),
-  upright:PP({},{u:100,f:-110},{grip:"bar"}),
+  upright:PP({u:2,f:2,ua:10},{u:123,ua:81,f:170,fa:-53},{grip:"bar",m:{u:19,ua:70,f:10,fa:-45}}),
   wrist:PP({th:90,s:-10,u:35,f:80},{th:90,s:-10,u:35,f:100},{seat:1,grip:"db"}),
   lraise:PP({ua:8},{ua:88},{grip:"db"}),
   jack:PP({ua:10,ta:6},{ua:170,ta:32,rise:6}),
   skater:PP({t:10,th:20,s:-15,ta:10,u:35,f:110,ua:20},{t:15,th:40,s:-30,ta:42,u:35,f:110,ua:40}),
   hipabd:PP({th:90,s:-5,ta:8,u:10,f:40,hx:140,hy:209},{th:90,s:-5,ta:35,u:10,f:40,hx:140,hy:209},{lie:1,seat:1}),
   rdfly:PP({t:-5,th:90,s:-5,u:90,f:90,ua:10},{t:-5,th:90,s:-5,u:90,f:90,ua:10,uy:-70},{seat:1}),
-  pecdeck:PP({t:-5,th:90,s:-5,u:90,f:90,ua:78},{t:-5,th:90,s:-5,u:90,f:90,ua:78,uy:68},{seat:1}),
-  mcpress:PP({t:-5,th:90,s:-5,u:20,f:170},{t:-5,th:90,s:-5,u:180,f:180},{seat:1}),
+  pecdeck:PP({t:-5,th:90,s:-5,u:97,ua:84,f:180,fa:0},{t:-5,th:90,s:-5,u:95,ua:10,f:180,fa:0},{seat:1,elbowpad:1}),
+  mcpress:PP({t:-5,th:90,s:-5,u:74,ua:67,f:179,fa:-2},{t:-5,th:90,s:-5,u:180,ua:19,f:180,fa:4},{seat:1,m:{t:-5,th:90,s:-5,u:152,ua:60,f:175,fa:-2}}),
   boxjump:PP({t:20,th:50,s:-25,u:-30,f:-10,ax:96},{t:5,th:10,s:-5,u:30,f:30,rise:34,ax:186},{box:1}),
   pistol:PP({u:60,f:60},{t:30,th:85,s:-40,u:80,f:80,th2:90,s2:90}),
   carry:PP({th:15,s:-10,th2:-15,s2:5},{th:-15,s:5,th2:15,s2:-10},{grip:"db"}),
-  pallof:PP({u:40,f:-150},{u:90,f:90},{cable:[10,120]}),
+  pallof:PP({u:7,ua:32,f:157,fa:-35},{u:69,ua:6,f:106,fa:-5},{cable:[10,120]}),
   rope:PP({u:-10,f:60},{u:-10,f:60,rise:10}),
   hollow:PP({t:-70,th:150,s:150,u:-60,f:-60,hx:150,hy:250},{t:-64,th:144,s:144,u:-66,f:-66,hx:150,hy:250},{lie:1}),
   pullapart:PP({u:90,f:90,ua:10},{u:90,f:90,ua:10,uy:-75},{grip:"band"}),
   bandwalk:PP({th:20,s:-15,ta:8,u:20,f:-120},{th:20,s:-15,ta:30,u:20,f:-120},{grip:"band",bandAt:"feet"}),
   bridge:PP({t:-90,th:148,s:-9,u:80,f:80,hx:130,hy:258},{t:-108,th:94,s:-42,u:80,f:80,hx:130,hy:226},{lie:1}),
   /* v24 */
-  dbfly:PP({t:-90,u:95,f:108,ua:82,th:60,s:-20,hx:150,hy:180},{t:-90,u:176,f:176,ua:8,th:60,s:-20,hx:150,hy:180},{lie:1,bench:1,grip:"db"}),
-  decpress:PP({t:-112,u:90,f:-118,ua:46,th:112,s:-48,hx:150,hy:178},{t:-112,u:200,f:200,ua:12,th:112,s:-48,hx:150,hy:178},{lie:1,bench:"decline",grip:"bar"}),
+  dbfly:PP({t:-90,u:28,ua:75,f:168,fa:58,th:60,s:-20,hx:150,hy:180},{t:-90,u:180,ua:26,f:180,fa:-7,th:60,s:-20,hx:150,hy:180},{lie:1,bench:1,grip:"db",m:{t:-90,u:173,ua:66,f:176,fa:22,th:60,s:-20,hx:150,hy:180}}),
+  decpress:PP({t:-112,u:23,ua:63,f:-175,fa:-5,th:112,s:4,hx:150,hy:178},{t:-112,u:-158,ua:31,f:-158,fa:20,th:112,s:4,hx:150,hy:178},{lie:1,bench:"decline",grip:"bar",m:{t:-112,u:-155,ua:72,f:-168,fa:-9,th:112,s:4,hx:150,hy:178}}),
   pullover:PP({t:-90,u:178,f:178,ua:6,th:60,s:-20,hx:150,hy:180},{t:-90,u:258,f:258,ua:6,th:60,s:-20,hx:150,hy:180},{lie:1,bench:1,grip:"db1"}),
   assistdip:PP({t:12,th:4,s:-68},{t:16,u:-92,f:0,th:4,s:-68},{anchor:[140,156],grip:"barlo",floor:false,kneepad:1}),
   mcrow:PP({t:-5,th:90,s:-5,u:75,f:75},{t:-8,th:90,s:-5,u:-25,f:60},{seat:1,chestpad:1,cable:[262,150]}),
-  backext:PP({t:118,th:-42,s:-42,u:-83,f:82,hx:132,hy:176},{t:44,th:-42,s:-42,u:-9,f:156,hx:132,hy:176},{lie:1,hyper:1,pad:1}),
-  sumo:PP({ta:30},{t:40,th:72,s:-32,ta:30},{grip:"bar"}),
+  backext:PP({t:118,th:-42,s:-42,u:116,ua:59,f:27,fa:-30,hx:132,hy:176},{t:44,th:-42,s:-42,u:76,ua:70,f:154,fa:-36,hx:132,hy:176},{lie:1,hyper:1,pad:1}),
+  sumo:PP({ta:20,sa:8},{t:40,th:72,s:-32,ta:20,sa:8},{grip:"bar"}),
   goodmorning:PP({t:3,u:-40,f:-170},{t:78,th:14,s:-8,u:-40,f:-170},{grip:"back"}),
   hipadd:PP({th:90,s:-5,ta:35,u:10,f:40,hx:140,hy:209},{th:90,s:-5,ta:8,u:10,f:40,hx:140,hy:209},{lie:1,seat:1}),
   lpcalf:PP({t:-50,th:121,s:115,u:-20,f:60,hx:95,hy:180},{t:-50,th:122,s:127,u:-20,f:60,hx:95,hy:180},{lie:1,plat:1,seat:"recline"}),
   frontraise:PP({u:4,f:4},{u:92,f:92},{grip:"db"}),
   mclatraise:PP({t:-5,th:90,s:-5,u:0,f:85,ua:12},{t:-5,th:90,s:-5,u:0,f:85,ua:88},{seat:1,elbowpad:1}),
-  pushpress:PP({t:6,th:28,s:-14,u:20,f:170},{u:180,f:180,rise:5},{grip:"bar"}),
+  pushpress:PP({t:6,th:28,s:-14,u:46,ua:3,f:-141,fa:28},{u:180,ua:16,f:180,fa:11,rise:5},{grip:"bar",m:{t:2,th:4,s:-2,u:98,ua:26,f:-150,fa:2,rise:3}}),
   conccurl:PP({t:28,th:90,s:-5,u:30,f:38,u2:40,f2:70},{t:28,th:90,s:-5,u:30,f:150,u2:40,f2:70},{seat:1,grip:"db",single:1}),
   dbkick:PP({t:62,th:14,s:-9,u:-58,f:12},{t:62,th:14,s:-9,u:-58,f:-62},{grip:"db"}),
   ropepush:PP({u:0,f:112,ua:4},{u:4,f:14,ua:18},{cable:[180,6]}),
@@ -1118,53 +1130,67 @@ const PAT={
   woodchop:PP({u:150,f:150,uy:30},{t:22,th:32,s:-16,u:22,f:22,uy:-30},{cable:[22,22]}),
   battlerope:PP({t:14,th:38,s:-20,u:40,f:112,u2:-12,f2:84},{t:14,th:38,s:-20,u:-12,f:84,u2:40,f2:112},{ropes:[292,258]}),
 };
-PAT.cgpull=Object.assign({},PAT.vpull,{a:Object.assign({},PAT.vpull.a,{ua:10}),b:Object.assign({},PAT.vpull.b,{ua:10})});
 PAT.kbswing=Object.assign({},PAT.swing,{grip:"kb"});
 PAT.kbgoblet=Object.assign({},PAT.goblet,{grip:"kb"});
 PAT.rdldb=Object.assign({},PAT.rdl,{grip:"db"});
-PAT.hpressdb=Object.assign({},PAT.hpress,{grip:"db"});
-PAT.ipressbar=Object.assign({},PAT.ipress,{grip:"bar"});
-PAT.opressdb=Object.assign({},PAT.opress,{grip:"db"});
 
 const RG={Lt:64,Ln:18,Lu:36,Lf:32,Lth:58,Ls:54,FLOOR:262,ANK:140,HR:13,HZ:8,SZ:14};
 /* Camera per view as [sinθ, cosθ]: screenX = x·sinθ + z·cosθ, screenY = −y, depth = x·cosθ − z·sinθ (bigger = further from the camera).
-   side = θ 90°: the camera sits on the figure's near (+z) side and the figure faces screen-right — today's picture.
-   front = θ 180°: the camera is in front of the figure, so it faces you. (θ 0° gives the same silhouette mirrored, but its depth runs
-   the other way — the camera would be behind the figure's back and an arm reaching toward you would sort behind the torso.) */
-const VIEW={side:[1,0],front:[0,-1]};
-const lerpPose=(a,b,t)=>{ const o={}; for(const k in a) o[k]=typeof a[k]==="number"?a[k]+((b[k]==null?a[k]:b[k])-a[k])*t:a[k]; const K={th2:a.th,s2:a.s,u2:a.u,f2:a.f,ua:0,ta:0,uy:0,ua2:a.ua||0,ta2:a.ta||0,uy2:a.uy||0,rise:0,shr:0}; for(const k in b) if(o[k]==null) o[k]=(k in K&&typeof b[k]==="number")?K[k]+(b[k]-K[k])*t:b[k]; return o; };
+   side = θ 90° would be a flat profile: the camera on the figure's near (+z) side, the figure facing screen-right. front = θ 180°
+   is a flat front. v27 turns both a little (side 104°, front 162°) so the far arm and leg peek out from behind the near ones
+   and a bar or bench shows its depth, and adds a mild perspective (PD: the camera distance in figure units — nearer parts draw
+   a touch bigger, like a photo from a few metres). CY is the camera height on screen. */
+const VIEW={side:[Math.sin(104*Math.PI/180),Math.cos(104*Math.PI/180)],front:[Math.sin(162*Math.PI/180),Math.cos(162*Math.PI/180)]};
+const PD=560, CY=262-100;
+const lerpPose=(a,b,t)=>{ const o={}; for(const k in a) o[k]=typeof a[k]==="number"?a[k]+((b[k]==null?a[k]:b[k])-a[k])*t:a[k]; const K={th2:a.th,s2:a.s,u2:a.u,f2:a.f,ua:0,ta:0,uy:0,ua2:a.ua||0,ta2:a.ta||0,uy2:a.uy||0,rise:0,shr:0,fa:a.ua||0,fa2:a.fa!=null?a.fa:(a.ua2!=null?a.ua2:(a.ua||0)),sa:a.ta||0,sa2:a.sa!=null?a.sa:(a.ta2!=null?a.ta2:(a.ta||0)),fy:a.uy||0,fy2:a.fy!=null?a.fy:(a.uy2!=null?a.uy2:(a.uy||0))}; for(const k in b) if(o[k]==null) o[k]=(k in K&&typeof b[k]==="number")?K[k]+(b[k]-K[k])*t:b[k]; o.pa=a; o.pb=b; o.tt=t; return o; };
+/* the pose of a pattern at time t (0 = pose a, 1 = pose b, through m when there is one) */
+function poseAt(pat,t){ if(pat.m) return t<0.5?lerpPose(pat.a,pat.m,t*2):lerpPose(pat.m,pat.b,t*2-1); return lerpPose(pat.a,pat.b,t); }
 const f1=n=>(+n).toFixed(1);
+const DEG=Math.PI/180, sinD=a=>Math.sin(a*DEG), cosD=a=>Math.cos(a*DEG);
+/* a limb segment's direction: starts pointing down, lifted out of the sagittal plane by its abduction ab (toward its own side sd),
+   flexed by a (about z, + forward), then swung about the vertical axis by sw (+ toward the front) */
+function limbDir(a,ab,sw,sd){ const ca=cosD(ab); let X=sinD(a)*ca, Y=-cosD(a)*ca, Z=sd*sinD(ab); if(sw){ const c=cosD(sw), s=sinD(sw)*sd, X2=X*c+Z*s; Z=Z*c-X*s; X=X2; } return [X,Y,Z]; }
+/* every limb angle of a pose with the defaults filled in: the far limb copies the near one; a forearm (fa, fy) or shin (sa) copies
+   its upper segment's abduction and swing unless the pose says otherwise — that is what lets a bench press keep its forearms
+   vertical while the upper arms are out to the sides */
+function fullPose(q){ const n=k=>q[k]||0, pick=(k,d)=>q[k]!=null?q[k]:d; const o={u:n("u"),f:n("f"),th:n("th"),s:n("s"),ua:n("ua"),ta:n("ta"),uy:n("uy")};
+  o.u2=pick("u2",o.u); o.f2=pick("f2",o.f); o.th2=pick("th2",o.th); o.s2=pick("s2",o.s); o.ua2=pick("ua2",o.ua); o.ta2=pick("ta2",o.ta); o.uy2=pick("uy2",o.uy);
+  o.fa=pick("fa",o.ua); o.fa2=pick("fa2",q.fa!=null?q.fa:o.ua2); o.sa=pick("sa",o.ta); o.sa2=pick("sa2",q.sa!=null?q.sa:o.ta2); o.fy=pick("fy",o.uy); o.fy2=pick("fy2",q.fy!=null?q.fy:o.uy2); return o; }
+function limbDirs(q){ q=fullPose(q); return {U:limbDir(q.u,q.ua,q.uy,1),F:limbDir(q.f,q.fa,q.fy,1),U2:limbDir(q.u2,q.ua2,q.uy2,-1),F2:limbDir(q.f2,q.fa2,q.fy2,-1),T:limbDir(q.th,q.ta,0,1),S:limbDir(q.s,q.sa,0,1),T2:limbDir(q.th2,q.ta2,0,-1),S2:limbDir(q.s2,q.sa2,0,-1)}; }
+/* the shortest arc between two directions. Antipodal directions have no shortest arc, so the angle-blended direction H decides. */
+function slerp(A,B,t,H){ const dot=Math.max(-1,Math.min(1,A[0]*B[0]+A[1]*B[1]+A[2]*B[2])); if(dot>0.9995) return A; if(dot<-0.9995) return H; const w=Math.acos(dot), sw=Math.sin(w), ka=Math.sin((1-t)*w)/sw, kb=Math.sin(t*w)/sw; return [A[0]*ka+B[0]*kb,A[1]*ka+B[1]*kb,A[2]*ka+B[2]*kb]; }
 /* 3D skeleton. Figure space: x forward, y up, z lateral (+z = the near side, toward the side-view camera). Hip centre at the origin,
-   hips at z ±HZ, shoulders at z ±SZ. A limb segment starts pointing down, is lifted out of the sagittal plane by its abduction
-   (ua/ta, toward its own side sd: +1 near, −1 far), flexed by its angle (u/f/th/s, about z, + forward) and finally swung about the
-   vertical axis by uy (+ = toward the front). The forearm/shin keep the upper segment's abduction and swing and add their own flexion.
-   Returns figure-space joints plus P(), which projects a figure point to [screenX, screenY, depth] for the requested view. */
+   hips at z ±HZ, shoulders at z ±SZ. Each limb segment is a direction (limbDir) from the pose's angles. v27: between two poses the
+   joints no longer come from blended angles — each segment's direction travels the shortest arc from its pose-a direction to its
+   pose-b direction (slerp), so an elbow or knee never swings the long way round through the floor, and the forearm / shin have
+   their own abduction. Returns figure-space joints plus P(), which projects a figure point to [screenX, screenY, depth]. */
 function rigJoints(pat,p,view){
-  const d=Math.PI/180, sin=a=>Math.sin(a*d), cos=a=>Math.cos(a*d), n=k=>p[k]||0;
+  const sin=sinD, cos=cosD, n=k=>p[k]||0;
   const rise=n("rise"), shr=n("shr");
-  const th2=p.th2!=null?p.th2:p.th, s2=p.s2!=null?p.s2:p.s, u2=p.u2!=null?p.u2:p.u, f2=p.f2!=null?p.f2:p.f;
-  const ua=n("ua"), ta=n("ta"), uy=n("uy"), ua2=p.ua2!=null?p.ua2:ua, ta2=p.ta2!=null?p.ta2:ta, uy2=p.uy2!=null?p.uy2:uy;
-  const dir=(a,ab,sw,sd)=>{ const ca=cos(ab); let X=sin(a)*ca, Y=-cos(a)*ca, Z=sd*sin(ab); if(sw){ const c=cos(sw), s=sin(sw)*sd, X2=X*c+Z*s; Z=Z*c-X*s; X=X2; } return [X,Y,Z]; };
   const add=(o,v,L)=>[o[0]+v[0]*L,o[1]+v[1]*L,o[2]+v[2]*L];
-  const limb=(o,a1,a2,ab,sw,sd,L1,L2)=>{ const m=add(o,dir(a1,ab,sw,sd),L1); return [o,m,add(m,dir(a2,ab,sw,sd),L2)]; };
+  let D;
+  if(p.pa&&p.pb){ const Da=limbDirs(p.pa), Db=limbDirs(p.pb), Dh=limbDirs(p); D={}; for(const k in Da) D[k]=slerp(Da[k],Db[k],p.tt,Dh[k]); }
+  else D=limbDirs(p);
+  const limb=(o,U,F,L1,L2)=>{ const m=add(o,U,L1); return [o,m,add(m,F,L2)]; };
   const shC=[sin(p.t)*RG.Lt,cos(p.t)*RG.Lt+shr,0];
   const neck=[shC[0]+sin(p.t)*RG.Ln,shC[1]+cos(p.t)*RG.Ln,0];
   const head=[shC[0]+sin(p.t)*(RG.Ln+RG.HR),shC[1]+cos(p.t)*(RG.Ln+RG.HR),0];
-  const arm=limb([shC[0],shC[1],RG.SZ],p.u,p.f,ua,uy,1,RG.Lu,RG.Lf), arm2=limb([shC[0],shC[1],-RG.SZ],u2,f2,ua2,uy2,-1,RG.Lu,RG.Lf);
-  const leg=limb([0,0,RG.HZ],p.th,p.s,ta,0,1,RG.Lth,RG.Ls), leg2=limb([0,0,-RG.HZ],th2,s2,ta2,0,-1,RG.Lth,RG.Ls);
+  const arm=limb([shC[0],shC[1],RG.SZ],D.U,D.F,RG.Lu,RG.Lf), arm2=limb([shC[0],shC[1],-RG.SZ],D.U2,D.F2,RG.Lu,RG.Lf);
+  const leg=limb([0,0,RG.HZ],D.T,D.S,RG.Lth,RG.Ls), leg2=limb([0,0,-RG.HZ],D.T2,D.S2,RG.Lth,RG.Ls);
   /* hip centre in the side frame (screen x, screen y): the near ankle sits on the floor at ANK (or hx/hy when lying), then rise, then the near-hand anchor */
   let hx,hy;
   if(pat.lie){ hx=p.hx; hy=p.hy; } else { hy=RG.FLOOR+leg[2][1]; hx=(p.ax||pat.ax||RG.ANK)-leg[2][0]; }
   hy-=rise;
   if(pat.anchor){ hx=pat.anchor[0]-arm[2][0]; hy=pat.anchor[1]+arm[2][1]; }
   const V=VIEW[view]||VIEW.side, sn=V[0], cs=V[1];
-  const Pw=(X,Y,z)=>[140+(X-140)*sn+z*cs,Y,(X-140)*cs-z*sn];   /* side-frame point (screen x, screen y) at lateral z -> [screenX, screenY, depth] */
+  /* side-frame point (screen x, screen y) at lateral z -> [screenX, screenY, depth], with the perspective scale about the camera axis */
+  const Pw=(X,Y,z)=>{ const sx=140+(X-140)*sn+z*cs, dep=(X-140)*cs-z*sn, k=PD/(PD+dep); return [140+(sx-140)*k,CY+(Y-CY)*k,dep]; };
   const P=q=>Pw(hx+q[0],hy-q[1],q[2]);
-  return {hx,hy,rise,sin,cos,Pw,P,shC,neck,head,arm,arm2,leg,leg2};
+  return {hx,hy,rise,sin,cos,Pw,P,shC,neck,head,arm,arm2,leg,leg2,D};
 }
 /* projected joints of a pattern at time t (used by tests): [screenX, screenY] per joint */
 function rigPoints(pat,t,view){
-  const J=rigJoints(pat,lerpPose(pat.a,pat.b,t),view==="front"?"front":"side"), P=q=>J.P(q).slice(0,2);
+  const J=rigJoints(pat,poseAt(pat,t),view==="front"?"front":"side"), P=q=>J.P(q).slice(0,2);
   return {hip:P([0,0,0]),sh:P(J.shC),neck:P(J.neck),head:P(J.head),arm:J.arm.map(P),arm2:J.arm2.map(P),leg:J.leg.map(P),leg2:J.leg2.map(P)};
 }
 /* ---- drawing the figure ----
@@ -1187,25 +1213,31 @@ function rigFrame(pat,p,hiSeg,view){
   const hi=k=>hiSeg===k?" hi":"";
   const pts=a=>a.map(q=>f1(q[0])+","+f1(q[1])).join(" ");
   const poly=(a,cls,style)=>`<polygon class="${cls}"${style?` style="${style}"`:""} points="${pts(a)}"/>`;
-  const circ=(A,r,cls)=>`<circle class="${cls}" cx="${f1(A[0])}" cy="${f1(A[1])}" r="${f1(r)}"/>`;
+  /* v27: the perspective scale at a projected point (its depth is P()[2]) — nearer parts draw a touch bigger */
+  const ks=A=>PD/(PD+(A[2]||0));
+  const circ=(A,r,cls)=>`<circle class="${cls}" cx="${f1(A[0])}" cy="${f1(A[1])}" r="${f1(r*ks(A))}"/>`;
   /* shading: one set of gradients per frame, ids unique on the page (several rigs are live at once) */
   const gid="g"+(RIGN=(RIGN+1)%1e6); let defs="", gk=0;
   const RAD=`url(#${gid}r)`, VERT=`url(#${gid}v)`;
   defs+=`<radialGradient id="${gid}r" cx=".36" cy=".33" r=".74"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".45" stop-color="#fff" stop-opacity=".08"/><stop offset="1" stop-color="#000" stop-opacity=".36"/></radialGradient>`;
   defs+=`<linearGradient id="${gid}v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".3"/><stop offset="1" stop-color="#000" stop-opacity=".22"/></linearGradient>`;
+  const VERT2=`url(#${gid}w)`; defs+=`<linearGradient id="${gid}w" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".16"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".16"/></linearGradient>`;
   /* a linear shade across a part: from its lit edge E1 to its dark edge E2 */
-  const shade=(E1,E2)=>{ const id=gid+"_"+(++gk); defs+=`<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${f1(E1[0])}" y1="${f1(E1[1])}" x2="${f1(E2[0])}" y2="${f1(E2[1])}"><stop offset="0" stop-color="#fff" stop-opacity=".46"/><stop offset=".4" stop-color="#fff" stop-opacity=".07"/><stop offset=".6" stop-color="#000" stop-opacity=".06"/><stop offset="1" stop-color="#000" stop-opacity=".34"/></linearGradient>`; return `url(#${id})`; };
+  const shade=(E1,E2)=>{ const id=gid+"_"+(++gk); defs+=`<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${f1(E1[0])}" y1="${f1(E1[1])}" x2="${f1(E2[0])}" y2="${f1(E2[1])}"><stop offset="0" stop-color="#fff" stop-opacity=".52"/><stop offset=".38" stop-color="#fff" stop-opacity=".08"/><stop offset=".62" stop-color="#000" stop-opacity=".08"/><stop offset="1" stop-color="#000" stop-opacity=".42"/></linearGradient>`; return `url(#${id})`; };
   /* which way along the normal n is lit */
   const litN=n=>(n[0]*LIGHT[0]+n[1]*LIGHT[1])>=0?n:[-n[0],-n[1]];
   const shPoly=(a,fill)=>`<polygon class="sh" fill="${fill}" points="${pts(a)}"/>`;
-  const shCirc=(A,r,fill)=>`<circle class="sh" fill="${fill}" cx="${f1(A[0])}" cy="${f1(A[1])}" r="${f1(r)}"/>`;
+  const shCirc=(A,r,fill)=>`<circle class="sh" fill="${fill}" cx="${f1(A[0])}" cy="${f1(A[1])}" r="${f1(r*ks(A))}"/>`;
   /* a tapered limb segment from screen point A (half-width wa) to B (half-width wb), round at both ends, lit across its width */
-  const capsule=(A,B,wa,wb,cls)=>{ const dx=B[0]-A[0], dy=B[1]-A[1], L=Math.hypot(dx,dy)||1, nx=-dy/L, ny=dx/L; const n=litN([nx,ny]), M=[(A[0]+B[0])/2,(A[1]+B[1])/2], wm=(wa+wb)/2; const g=shade([M[0]+n[0]*wm,M[1]+n[1]*wm],[M[0]-n[0]*wm,M[1]-n[1]*wm]); const body=[[A[0]+nx*wa,A[1]+ny*wa],[B[0]+nx*wb,B[1]+ny*wb],[B[0]-nx*wb,B[1]-ny*wb],[A[0]-nx*wa,A[1]-ny*wa]]; return `<g class="lm${cls}">`+circ(A,wa,"")+poly(body,"")+circ(B,wb,"")+`</g>`+shCirc(A,wa,g)+shPoly(body,g)+shCirc(B,wb,g); };
-  const ink=(A,B,w)=>`<line style="stroke:var(--ink);stroke-width:${w};stroke-linecap:round" x1="${f1(A[0])}" y1="${f1(A[1])}" x2="${f1(B[0])}" y2="${f1(B[1])}"/>`;
-  const ring=(A,r)=>`<circle class="eq" cx="${f1(A[0])}" cy="${f1(A[1])}" r="${r}"/>`+(r>=5?shCirc(A,r-1.2,RAD):"");
-  const plate=A=>ring(A,15)+`<circle class="eqi" cx="${f1(A[0])}" cy="${f1(A[1])}" r="3"/>`;
-  /* an axis-aligned 3D box given as the side-view rect (x,y,w,h) plus its z range -> the rect its projection covers, lit from the top */
-  const box=(x,y,w,h,z0,z1,rx)=>{ const xs=[Pw(x,y,z0)[0],Pw(x,y,z1)[0],Pw(x+w,y,z0)[0],Pw(x+w,y,z1)[0]]; const x0=Math.min.apply(null,xs), x1=Math.max.apply(null,xs); const r=`x="${f1(x0)}" y="${f1(y)}" width="${f1(x1-x0)}" height="${f1(h)}"${rx?` rx="${rx}"`:""}`; return `<rect class="fur" ${r}/><rect class="sh" fill="${VERT}" ${r}/>`; };
+  const capsule=(A,B,wa,wb,cls)=>{ wa*=ks(A); wb*=ks(B); const dx=B[0]-A[0], dy=B[1]-A[1], L=Math.hypot(dx,dy)||1, nx=-dy/L, ny=dx/L; const n=litN([nx,ny]), M=[(A[0]+B[0])/2,(A[1]+B[1])/2], wm=(wa+wb)/2; const g=shade([M[0]+n[0]*wm,M[1]+n[1]*wm],[M[0]-n[0]*wm,M[1]-n[1]*wm]); const body=[[A[0]+nx*wa,A[1]+ny*wa],[B[0]+nx*wb,B[1]+ny*wb],[B[0]-nx*wb,B[1]-ny*wb],[A[0]-nx*wa,A[1]-ny*wa]]; return `<g class="lm${cls}">`+circ(A,wa,"")+poly(body,"")+circ(B,wb,"")+`</g>`+shCirc(A,wa,g)+shPoly(body,g)+shCirc(B,wb,g); };
+  const ink=(A,B,w)=>`<line style="stroke:var(--ink);stroke-width:${f1(w*(ks(A)+ks(B))/2)};stroke-linecap:round" x1="${f1(A[0])}" y1="${f1(A[1])}" x2="${f1(B[0])}" y2="${f1(B[1])}"/>`;
+  const ring=(A,r)=>`<circle class="eq" cx="${f1(A[0])}" cy="${f1(A[1])}" r="${f1(r*ks(A))}"/>`+(r>=5?shCirc(A,r-1.2,RAD):"");
+  const plate=A=>ring(A,15)+`<circle class="eqi" cx="${f1(A[0])}" cy="${f1(A[1])}" r="${f1(3*ks(A))}"/>`;
+  /* an axis-aligned 3D box given as the side-view rect (x,y,w,h) plus its z range. v27: drawn as a real box — the top face
+     (lit), the face toward the camera and the end face (darker), so a bench or a seat shows its depth under the turned camera */
+  const box=(x,y,w,h,z0,z1)=>{ const c=(X,Y,z)=>Pw(X,Y,z).slice(0,2);
+    const nf=[c(x,y,z1),c(x+w,y,z1),c(x+w,y+h,z1),c(x,y+h,z1)], top=[c(x,y,z0),c(x+w,y,z0),c(x+w,y,z1),c(x,y,z1)], end=[c(x+w,y,z0),c(x+w,y+h,z0),c(x+w,y+h,z1),c(x+w,y,z1)];
+    return poly(top,"fur")+shPoly(top,"rgba(255,255,255,.28)")+poly(end,"fur")+shPoly(end,"rgba(0,0,0,.3)")+poly(nf,"fur")+shPoly(nf,VERT); };
   const thick=(A,B)=>`<line style="stroke:var(--line);stroke-width:9;stroke-linecap:round" x1="${f1(A[0])}" y1="${f1(A[1])}" x2="${f1(B[0])}" y2="${f1(B[1])}"/>`;
   const zs=(q,r)=>[P([q[0],q[1],q[2]-r]),P([q[0],q[1],q[2]+r])];   /* both ends of a z-segment of half-length r through figure point q */
   const mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2,(a[2]+b[2])/2];
@@ -1240,6 +1272,10 @@ function rigFrame(pat,p,hiSeg,view){
   if(pat.bench==="short"){ s+=box(SHw[0]-34,SHw[1]+8,60,9,-16,16,3)+box(SHw[0]-8,SHw[1]+17,7,RG.FLOOR-SHw[1]-17,-3.5,3.5); }
   /* a 45° back-extension bench: a pad under the hips and thighs, a post, foot rollers come from pat.pad */
   if(pat.hyper){ const a=Pw(hxw+8,hyw+6,0), b=Pw(hxw-26,hyw+44,0); s+=box(hxw-24,hyw+40,14,RG.FLOOR-hyw-40,-7,7)+thick(a,b)+thick(Pw(hxw+8,hyw+6,-14),Pw(hxw-26,hyw+44,-14))+thick(Pw(hxw+8,hyw+6,14),Pw(hxw-26,hyw+44,14)); }
+  /* chest-supported row: an incline pad under the chest (along the torso, on its front), on a post */
+  if(pat.prone){ const fw=[cos(p.t),-sin(p.t)]; const a=Pw(hxw+fw[0]*9,hyw+fw[1]*9,0), b=Pw(SHw[0]+fw[0]*9,SHw[1]+fw[1]*9,0); s+=box(SHw[0]-4,SHw[1]+14,8,RG.FLOOR-SHw[1]-14,-4,4)+thick(a,b); }
+  /* one-arm row: the far hand rests on a bench */
+  if(pat.brace){ const h=J.arm2[2]; const bx=hxw+h[0], by=hyw-h[1]+4; s+=box(bx-26,by,52,8,-30,-14,3)+box(bx-20,by+8,6,RG.FLOOR-by-8,-24,-20); }
   /* the knee pad of an assisted dip / pull-up station */
   if(pat.kneepad){ const kn=J.leg[1]; s+=box(hxw+kn[0]-30,hyw-kn[1]+8,46,10,-18,18,3); }
   if(pat.grip==="barlo"){ [J.arm[2],J.arm2[2]].forEach(h=>{ s+=box(hxw+h[0]+18,hyw-h[1],6,RG.FLOOR+9-(hyw-h[1]),h[2]-3,h[2]+3); }); }   /* dip-station posts */
@@ -1280,12 +1316,13 @@ function rigFrame(pat,p,hiSeg,view){
   const thull=hull2(tp.map(v=>[v[0],v[1]]));
   /* lit across the torso's width, square to its hip -> shoulder axis */
   const tax=[SH[0]-H[0],SH[1]-H[1]], tl=Math.hypot(tax[0],tax[1])||1, tn=litN([-tax[1]/tl,tax[0]/tl]); const tc=[(SH[0]+H[0])/2,(SH[1]+H[1])/2]; let tw=0; thull.forEach(q=>{ tw=Math.max(tw,Math.abs((q[0]-tc[0])*tn[0]+(q[1]-tc[1])*tn[1])); }); tw=Math.max(tw,8);
-  const torso=poly(thull,"tq"+hi("torso"))+shPoly(thull,shade([tc[0]+tn[0]*tw,tc[1]+tn[1]*tw],[tc[0]-tn[0]*tw,tc[1]-tn[1]*tw]));
+  const torso=poly(thull,"tq"+hi("torso"))+shPoly(thull,shade([tc[0]+tn[0]*tw,tc[1]+tn[1]*tw],[tc[0]-tn[0]*tw,tc[1]-tn[1]*tw]))+shPoly(thull,VERT2);
   const neck=capsule(SH,P(J.neck),RW.neck,RW.neck,hi("neck"));
   /* head: a circle, a nose on the facing side, eyes when the face points at the camera */
   const nz=P(add(J.head,fwd,RG.HR+4)), nb=P(add(J.head,fwd,RG.HR-2)), nd=Math.hypot(nz[0]-HD[0],nz[1]-HD[1]);
-  let headSVG=`<circle class="hd" cx="${f1(HD[0])}" cy="${f1(HD[1])}" r="${RG.HR}"/>`+shCirc(HD,RG.HR-0.6,RAD);
-  if(nd>RG.HR+1.5){ const ux=(nz[0]-HD[0])/nd, uy=(nz[1]-HD[1])/nd; const nx=-uy, ny=ux; headSVG+=poly([[nz[0],nz[1]],[nb[0]+nx*3.2,nb[1]+ny*3.2],[nb[0]-nx*3.2,nb[1]-ny*3.2]],"hd"); }
+  const HRk=RG.HR*ks(HD);
+  let headSVG=`<circle class="hd" cx="${f1(HD[0])}" cy="${f1(HD[1])}" r="${f1(HRk)}"/>`+shCirc(HD,RG.HR-0.6,RAD);
+  if(nd>HRk+1.5){ const ux=(nz[0]-HD[0])/nd, uy=(nz[1]-HD[1])/nd; const nx=-uy, ny=ux; headSVG+=poly([[nz[0],nz[1]],[nb[0]+nx*3.2,nb[1]+ny*3.2],[nb[0]-nx*3.2,nb[1]-ny*3.2]],"hd"); }
   else if(P(add(J.head,fwd,1))[2]<HD[2]-0.5){ const e1=P(add(add(J.head,up,2.5),[0,0,1],4.8)), e2=P(add(add(J.head,up,2.5),[0,0,1],-4.8)); headSVG+=circ(e1,1.8,"eye")+circ(e2,1.8,"eye"); }
   if(HD[2]>SH[2]+EPS) s+=headSVG;
   s+=torso+neck;
@@ -1307,7 +1344,7 @@ function rigBox(pat){
   const out={};
   const views=["side","front"]; let side=0;
   views.forEach(v=>{ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; const take=(q,r)=>{ x0=Math.min(x0,q[0]-r); x1=Math.max(x1,q[0]+r); y0=Math.min(y0,q[1]-r); y1=Math.max(y1,q[1]+r); };
-    [0,0.5,1].forEach(t=>{ const p=lerpPose(pat.a,pat.b,t), J=rigJoints(pat,p,v), P=J.P;
+    [0,0.25,0.5,0.75,1].forEach(t=>{ const p=poseAt(pat,t), J=rigJoints(pat,p,v), P=J.P;
       take(P([0,0,0]),RG.HZ+10); take(P(J.shC),RG.SZ+9); take(P(J.head),RG.HR+5);
       [J.arm,J.arm2].forEach(L=>L.forEach(q=>take(P(q),9))); [J.leg,J.leg2].forEach(L=>L.forEach(q=>take(P(q),11)));
       [J.leg[2],J.leg2[2]].forEach(an=>{ take(P([an[0]+18,an[1]-7,an[2]-4]),2); take(P([an[0]+18,an[1]-7,an[2]+4]),2); take(P([an[0]-8,an[1]-7,an[2]]),2); });
@@ -1324,6 +1361,7 @@ function rigBox(pat){
       if(pat.bench==="decline"){ const HDw=[J.hx+J.head[0],J.hy-J.head[1]]; take(J.Pw(HDw[0]+4,HDw[1]+14,-4),4); take(J.Pw(HDw[0]+4,HDw[1]+14,4),4); }
       if(pat.bench==="short"){ const SHw=[J.hx+J.shC[0],J.hy-J.shC[1]]; take(J.Pw(SHw[0]-34,SHw[1]+8,-16),2); take(J.Pw(SHw[0]+26,SHw[1]+8,16),2); }
       if(pat.hyper){ take(J.Pw(J.hx-26,J.hy+44,-14),6); take(J.Pw(J.hx+8,J.hy+6,14),6); }
+      if(pat.brace){ const h=J.arm2[2]; take(J.Pw(J.hx+h[0]-26,J.hy-h[1]+4,-30),3); take(J.Pw(J.hx+h[0]+26,J.hy-h[1]+12,-14),3); }
       if(pat.kneepad){ const kn=J.leg[1]; take(J.Pw(J.hx+kn[0]-30,J.hy-kn[1]+8,-18),3); take(J.Pw(J.hx+kn[0]+16,J.hy-kn[1]+18,18),3); }
       if(pat.box){ take(J.Pw(156,RG.FLOOR-34,-30),2); take(J.Pw(220,RG.FLOOR+4,30),2); }
     });
@@ -1335,7 +1373,7 @@ function rigBox(pat){
 }
 let ANIMS=[], ANIM_T=0.5; const ANIM0=performance.now();
 const REDUCED=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-function animFrame(pat,t,hiSeg,view){ return rigFrame(pat,lerpPose(pat.a,pat.b,t),hiSeg,view); }
+function animFrame(pat,t,hiSeg,view){ return rigFrame(pat,poseAt(pat,t),hiSeg,view); }
 /* one shared clock drives every rig on the page, so a card's side and front views always show the same instant (ANIM_T) */
 function mountAnims(){
   ANIMS.forEach(a=>{ a.stop=true; if(a.io) a.io.disconnect(); }); ANIMS=[];
@@ -2583,7 +2621,7 @@ if(S.active) wakeOn();
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=26, BOOT_AT=Date.now();
+const APP_VERSION=27, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
   /* K5: Macros setup or You has typed numbers that aren't saved yet */
