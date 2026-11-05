@@ -1902,6 +1902,100 @@ function runV27Pass() {
   } finally { dom.window.close(); }
 }
 
+/* ------------------------------------------------- v28: more on push and pull days · moderately more rotation */
+function runV28Pass() {
+  console.log("v28: push day +1–2, pull day +1, coprime rotation strides, one-time patch of an older program");
+  const LIVE = JSON.parse(read("tests/fixtures/chalk-v1-live.json")), OLD = JSON.parse(read("tests/fixtures/chalk-v1-live-v27.json"));
+  t("a fresh Weights program: push day has nine moves (the last every other session), pull day eight; HIIT and Functional days are as they were", () => {
+    const { dom, w } = boot({ real: true, store: {} });
+    try {
+      const P = JSON.parse(w.eval("JSON.stringify(buildProgram('weights',{ball:1,balance:0,box:1},0,3,'hotel'))"));
+      assert.strictEqual(P.ver, 6);
+      assert.strictEqual(P.workouts.PUSH.items.length, 9); assert.strictEqual(P.workouts.PULL.items.length, 8); assert.strictEqual(P.workouts.LEGS.items.length, 7);
+      const px = P.workouts.PUSH.items.slice(-2), pl = P.workouts.PULL.items.slice(-1)[0];
+      assert.deepStrictEqual(px[0].pool, JSON.parse(w.eval("JSON.stringify(POOLS.chestIso)"))); assert.ok(!px[0].alt);
+      assert.deepStrictEqual(px[1].pool, JSON.parse(w.eval("JSON.stringify(POOLS.pushX)"))); assert.strictEqual(px[1].alt, 2);
+      assert.deepStrictEqual(pl.pool, JSON.parse(w.eval("JSON.stringify(POOLS.lat2)"))); assert.ok(!pl.alt);
+      [px[0], px[1], pl].forEach(it => { assert.ok(it.rot && it.sets === 3 && it.lo >= 8 && it.hi >= 12, JSON.stringify(it)); assert.ok(it.pool.includes(it.ex)); });
+      const ids = P.workouts.PUSH.items.map(it => it.ex); assert.strictEqual(new Set(ids).size, ids.length, "no move twice on push day: " + ids.join(","));
+      const H = JSON.parse(w.eval("JSON.stringify(buildProgram('hiit',{ball:1,balance:0,box:1},0,3,'hotel'))"));
+      assert.strictEqual(H.workouts.PUSH.items.filter(it => it.t === "lift").length, 3); assert.strictEqual(H.workouts.PULL.items.filter(it => it.t === "lift").length, 3);
+      const F = JSON.parse(w.eval("JSON.stringify(buildProgram('functional',{ball:3,balance:3,box:2},0,4,'hotel'))"));
+      assert.deepStrictEqual(F.order, ["LOWER", "UPPER", "FULL", "ATHL"]); assert.strictEqual(F.workouts.UPPER.items.length, 5);
+      assert.ok(!F.workouts.ATHL.items.some(it => it.alt || it.x28), "the Athletic day is untouched");
+    } finally { dom.window.close(); }
+  });
+  t("Nick's pre-v28 save: boot adds the three moves at the end of his push and pull days (and to the day already planned), bumps the program once, and changes nothing else; Katerina's save is untouched", () => {
+    const S0 = JSON.parse(OLD.nick), K0 = OLD.kat;
+    const { dom, w, errors } = boot({ real: true, store: { "chalk.v1": OLD.nick, "chalk.bak.d": "2000-01-01" } });
+    try {
+      const S1 = JSON.parse(w.localStorage.getItem("chalk.v1"));
+      assert.strictEqual(S1.program.ver, 6); assert.strictEqual(S1.program.rev, S0.program.rev + 1);
+      assert.strictEqual(S1.program.workouts.PUSH.items.length, S0.program.workouts.PUSH.items.length + 2);
+      assert.strictEqual(S1.program.workouts.PULL.items.length, S0.program.workouts.PULL.items.length + 1);
+      const added = ["PUSH", "PULL"].map(k => S1.program.workouts[k].items.filter(it => it.x28));
+      assert.deepStrictEqual(added.map(a => a.length), [2, 1]);
+      assert.ok(added[0][1].alt === 2 && !added[0][0].alt && !added[1][0].alt);
+      added.flat().forEach(it => assert.ok(it.id && it.rot && it.pool.includes(it.ex), JSON.stringify(it)));
+      /* strip what v28 added and the two numbers it bumped: the rest of the program is byte for byte the old one */
+      const strip = P => { const c = JSON.parse(JSON.stringify(P)); ["PUSH", "PULL"].forEach(k => { c.workouts[k].items = c.workouts[k].items.filter(it => !it.x28); }); delete c.ver; delete c.rev; return c; };
+      const old = JSON.parse(JSON.stringify(S0.program)); delete old.ver; delete old.rev;
+      assert.deepStrictEqual(strip(S1.program), old);
+      /* today's plan kept its items and gained the new pull move before the abs */
+      assert.strictEqual(S1.plan.wid, S0.plan.wid); assert.strictEqual(S1.plan.rev, S1.program.rev);
+      const oldIds = S0.plan.items.map(it => it.id), newIds = S1.plan.items.map(it => it.id);
+      assert.deepStrictEqual(newIds.filter(id => oldIds.includes(id)), oldIds, "every planned item is still there, in order");
+      const extra = S1.plan.items.filter(it => !oldIds.includes(it.id)); assert.strictEqual(extra.length, S1.plan.wid === "PUSH" ? 2 : 1);
+      const absAt = S1.plan.items.findIndex(it => it.abs); if (absAt >= 0) extra.forEach(it => assert.ok(S1.plan.items.indexOf(it) < absAt, "before the abs"));
+      /* nothing else moved */
+      const a = JSON.parse(JSON.stringify(S0)), b = JSON.parse(JSON.stringify(S1)); [a, b].forEach(x => { delete x.program; delete x.plan; delete x.updatedAt; });
+      assert.deepStrictEqual(b, a);
+      assert.deepStrictEqual(errors.map(String), []);
+      /* the save on the phone now (the migrated fixture) has the same shape as what this boot produced (ids differ: uid), and a second boot leaves it alone */
+      const L1 = JSON.parse(LIVE.nick); const shape = S => JSON.stringify(["PUSH", "PULL"].map(k => S.program.workouts[k].items.map(it => [it.ex, it.pool, it.alt || 0, it.x28 || 0]))) + S.program.ver + S.program.rev + S.plan.rev;
+      assert.strictEqual(shape(L1), shape(S1));
+    } finally { dom.window.close(); }
+    const { dom: d2, w: w2 } = boot({ real: true, store: { "chalk.v1": K0, "chalk.bak.d": "2000-01-01" } });
+    try { assert.strictEqual(w2.localStorage.getItem("chalk.v1"), K0, "Katerina's functional program is not a weights program: untouched"); assert.strictEqual(JSON.parse(K0).program.ver, 5); }
+    finally { d2.window.close(); }
+  });
+  t("the every-other-session push move: on the plan one session, off the next; the Settings editor labels it", () => {
+    const S0 = JSON.parse(LIVE.nick); S0.active = null; S0.plan = null;
+    const { dom, w, d } = boot({ real: true, store: { "chalk.v1": JSON.stringify(S0), "chalk.bak.d": "2000-01-01" } });
+    try {
+      const lifts = c => { w.eval("S.cyc.PUSH=" + c + "; S.plan=null"); return JSON.parse(w.eval("JSON.stringify(planFor('PUSH').items.filter(it=>!it.abs).map(it=>it.ex))")); };
+      const on = lifts(0), off = lifts(1), on2 = lifts(2);
+      assert.strictEqual(on.length, 9); assert.strictEqual(off.length, 8); assert.strictEqual(on2.length, 9);
+      assert.strictEqual(new Set(on).size, 9, "no move twice: " + on.join(","));
+      w.eval("S.cyc.PUSH=1; S.plan=null;");
+      click(w, q(d, '#tabs [data-tab="settings"]'));
+      const txt = d.getElementById("app").textContent;
+      assert.ok(/every other session/.test(txt), "the editor says which move is every other session");
+      assert.strictEqual((txt.match(/every other session/g) || []).length, 1);
+    } finally { dom.window.close(); }
+  });
+  t("rotation: every pool still comes fully round, but with a coprime stride so neighbours change partners; small pools step one at a time", () => {
+    const { dom, w } = boot({ real: true, store: {} });
+    try {
+      const gcd = (a, b) => b ? gcd(b, a % b) : a;
+      for (let n = 2; n <= 20; n++) { const st = w.eval("stride(" + n + ")"); assert.ok(st >= 1 && st < Math.max(2, n) && gcd(st, n) === 1, "stride(" + n + ")=" + st); if (n < 5) assert.strictEqual(st, 1); else assert.ok(st > 1, "stride(" + n + ") moves more than one"); }
+      assert.strictEqual(w.eval("stride(10)"), 7); assert.strictEqual(w.eval("stride(6)"), 5); assert.strictEqual(w.eval("stride(8)"), 5);
+      /* the two biceps slots on a fresh pull day, 10 sessions: all ten curls appear, never the same curl twice in a day, and the two are not just pool neighbours */
+      w.eval("S.profile='nick'; S.program=buildProgram('weights',{ball:1,balance:0,box:1},0,3,'hotel'); S.cyc={}; rotateAll();");
+      const bi = JSON.parse(w.eval("JSON.stringify(POOLS.bi)"));
+      const seen = new Set(); let adjacent = 0;
+      for (let c = 0; c < bi.length; c++) { w.eval("S.cyc.PULL=" + c + "; rotateDay('PULL')"); const ex = JSON.parse(w.eval("JSON.stringify(S.program.workouts.PULL.items.filter(it=>it.pool&&it.pool.length===" + bi.length + "&&it.pool[0]==='db_curl').map(it=>it.ex))"));
+        assert.strictEqual(ex.length, 2); assert.notStrictEqual(ex[0], ex[1]); ex.forEach(e => seen.add(e)); if (Math.abs(bi.indexOf(ex[0]) - bi.indexOf(ex[1])) === 1) adjacent++; }
+      assert.strictEqual(seen.size, bi.length, "all " + bi.length + " curls came round");
+      assert.ok(adjacent <= 3, "pool neighbours paired together in only " + adjacent + " of " + bi.length + " sessions");
+      /* a pool of three (traps) still goes 0,1,2 */
+      const tr = []; for (let c = 0; c < 3; c++) { w.eval("S.cyc.PULL=" + c + "; rotateDay('PULL')"); tr.push(w.eval("S.program.workouts.PULL.items.find(it=>it.pool&&it.pool[0]==='shrug').ex")); }
+      assert.deepStrictEqual(tr, JSON.parse(w.eval("JSON.stringify(POOLS.traps)")));
+    } finally { dom.window.close(); }
+  });
+  t("sw.js: version 28 everywhere", () => { assert.ok(APPV >= 28 && SWV >= 28, APPV + " / " + SWV); });
+}
+
 runPass("pass 1: stub M.ui (integration wiring)", false);
 const realFiles = ["m-ui.js", "m-trends.js"].filter(exists);
 if (realFiles.length) runPass("pass 2: real " + realFiles.join(" + ") + (realFiles.length < 2 ? " (stub fills the rest)" : ""), true);
@@ -1914,6 +2008,7 @@ runFourDayPass();
 runBodyweightPass();
 runV24Pass();
 runV27Pass();
+runV28Pass();
 runV26Pass();
 
 (async () => {

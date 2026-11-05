@@ -14,8 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=27">
-<link rel="stylesheet" href="m-trends.css?v=27">
+<link rel="stylesheet" href="m.css?v=28">
+<link rel="stylesheet" href="m-trends.css?v=28">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
@@ -385,12 +385,12 @@ body.upd-on #app.wrap{padding-bottom:calc(var(--upd-h,46px) + 36px)}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=27"></script>
-<script src="m-data.js?v=27"></script>
-<script src="m-food.js?v=27"></script>
-<script src="m-ui.js?v=27"></script>
-<script src="m-trends.js?v=27"></script>
-<script src="m-sync.js?v=27"></script>
+<script src="m-core.js?v=28"></script>
+<script src="m-data.js?v=28"></script>
+<script src="m-food.js?v=28"></script>
+<script src="m-ui.js?v=28"></script>
+<script src="m-trends.js?v=28"></script>
+<script src="m-sync.js?v=28"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -638,7 +638,12 @@ const POOLS={
   athHinge:["db_rdl","db_swing","kb_swing","sl_rdl","glute_bridge","sl_bridge"],
   athCoreBW:["plank","dead_bug","bird_dog","side_plank","hollow_hold","bicycle","mtn_climber","crunch_floor","leg_raise","rev_crunch","situp"],
   /* v24: battle ropes join the HIIT sweat blocks (never the hotel-gym circuits) */
-  ropes:["battle_rope"]
+  ropes:["battle_rope"],
+  /* v28: the extra slots on a Weights push / pull day — a chest fly or pullover, an every-other-session delt / triceps move,
+     and a second lat move */
+  chestIso:["cable_fly","pec_deck","db_fly","db_pullover","inc_db_press","dips"],
+  pushX:["front_raise","mc_lat_raise","rope_pushdown","arnold","db_kickback","upright_row","push_press"],
+  lat2:["sa_pulldown","cg_pulldown","db_pullover","lat_pulldown","assist_pullup","chinup"]
 };
 const ATH_GEAR={bw:{t:["bw"],name:"No equipment",desc:"bodyweight only — a hotel room or the living room"},hotel:{t:["bw","db","kb","mb","bal","band"],name:"Hotel gym",desc:"bodyweight + light dumbbells, kettlebell, med ball, box, dip / pull-up bar"}};
 const gearOf=()=>(S.d4==="bw"?"bw":"hotel");
@@ -703,7 +708,7 @@ function setGear(g){
 }
 function buildProgram(mode,mix,blk,days,gear){
   mode=MODE_LABEL[mode]?mode:"weights"; blk=blk||0; const F=mode==="functional"; const style=mode; const four=days===4;
-  const P={ver:5,gen:true,goal:mode,mode,rev:0,order:["PULL","PUSH","LEGS"],absEvery:mode==="weights"?2:0,abs:"ABS",workouts:{}};
+  const P={ver:6,gen:true,goal:mode,mode,rev:0,order:["PULL","PUSH","LEGS"],absEvery:mode==="weights"?2:0,abs:"ABS",workouts:{}};
   const main=pool=>slot(pool,F?5:4,F?4:6,F?6:10,{main:true,ex:pick(pool,blk)});
   const acc=(pool,off,sets,lo,hi)=>slot(pool,sets||3,lo||(F?6:8),hi||(F?10:12),{off:off||0});
   const iso=(pool,off)=>slot(pool,3,F?8:10,F?12:15,{off:off||0});
@@ -732,6 +737,7 @@ function buildProgram(mode,mix,blk,days,gear){
     legs=[main(POOLS.legMain),acc(POOLS.ham),acc(POOLS.quad2,0,3,10,15),acc(POOLS.glute),acc(POOLS.ham,1,3,10,15),slot(POOLS.calf,4,10,15)];
   if(style==="weights"){
     pull.push(acc(POOLS.backH,2)); push.push(acc(POOLS.chest2,2)); legs.push(acc(POOLS.unilateral,1,3,8,12));
+    pull.push(...extraSlots("PULL")); push.push(...extraSlots("PUSH"));
     if(mix.balance>=2) legs.splice(3,0,acc(POOLS.bal,0,2,8,12));
     if(mix.ball>=2) push.push(slot(["mb_slam","mb_chest_pass","mb_rot_throw"],3,8,12));
   } else {
@@ -740,6 +746,7 @@ function buildProgram(mode,mix,blk,days,gear){
     push.push(B("Sweat",40,20,4,"sweat"),B(balOrCore[0],30,15,4,balOrCore[1]));
     legs.push(B("Power",40,20,4,"power"),B("Sweat",30,15,4,"sweat"));
   }
+  [pull,push,legs].forEach(dedupeDay);
   P.workouts.PULL={name:"Pull day",sub:"Back · Biceps"+tail,focus:["Back","Rear Delts","Traps","Biceps"],items:pull};
   P.workouts.PUSH={name:"Push day",sub:"Chest · Shoulders · Triceps"+tail,focus:["Chest","Shoulders","Triceps"],items:push};
   P.workouts.LEGS={name:"Leg day",sub:"Quads · Hamstrings · Glutes · Calves"+tail,focus:["Quads","Hamstrings","Glutes","Calves"],items:legs};
@@ -749,7 +756,28 @@ function buildProgram(mode,mix,blk,days,gear){
   if(four) addAthletic(P,mix,gear);
   return withIds(P);
 }
-/* Rotation: after each finished day, every rotating slot moves to the next exercise in its pool (never doubling up within the day). */
+/* v28: a Weights push day carries one or two more moves (a chest fly / pullover every session, a delt or triceps move every other
+   session — alt:2), a pull day one more (a second lat move). extraSlots builds them; patchProgram adds them once to a program built
+   before v28, at the end of the day, without touching anything else in it. */
+/* a freshly built day never lists one move twice: a later slot whose first pick is already taken steps on through its pool */
+function dedupeDay(items){ const used=new Set(); items.forEach(it=>{ if(!it||it.t!=="lift") return; if(used.has(it.ex)&&it.pool&&it.pool.length>1){ let k=(it.off||0), tries=0; while(used.has(it.ex)&&tries<it.pool.length){ k++; it.ex=pick(it.pool,k); tries++; } } used.add(it.ex); }); }
+function extraSlots(wid){ const iso=(pool,off)=>slot(pool,3,10,15,{off:off||0});
+  if(wid==="PUSH") return [iso(POOLS.chestIso,0),Object.assign(iso(POOLS.pushX,2),{alt:2})];
+  if(wid==="PULL") return [slot(POOLS.lat2,3,8,12,{off:1})];
+  return []; }
+function patchProgram(P){ if(!plainObj(P)||!P.gen||P.mode!=="weights"||(P.ver||0)>=6) return false; let changed=false;
+  ["PULL","PUSH"].forEach(wid=>{ const W=P.workouts&&P.workouts[wid]; if(!W||!Array.isArray(W.items)) return; const x=extraSlots(wid); if(W.items.some(it=>it&&it.x28)) return; const used=new Set(W.items.map(it=>it&&it.ex)); x.forEach(it=>{ let k=it.off||0, tries=0; while(used.has(it.ex)&&tries<it.pool.length){ k++; it.ex=pick(it.pool,k); tries++; } used.add(it.ex); it.id=uid(); it.x28=true; W.items.push(it); }); changed=true; });
+  P.ver=6; if(changed) P.rev=(P.rev||0)+1; return changed; }
+/* the day already planned when the patch lands keeps its edits and just gains the new moves at its end (before the abs) */
+function patchPlan(S){ const pl=S.plan, P=S.program; if(!plainObj(pl)||!Array.isArray(pl.items)||!P||!P.workouts) return; const W=P.workouts[pl.wid]; if(!W||!Array.isArray(W.items)) return;
+  const cyc=(S.cyc&&S.cyc[pl.wid])||0; const have=new Set(pl.items.map(it=>it&&it.id));
+  W.items.forEach(it=>{ if(!it||!it.x28||have.has(it.id)) return; if(it.alt&&cyc%it.alt!==0) return; const c=cp(it); applyRange(c); insertBeforeAbs(pl.items,c); });
+  pl.rev=P.rev||0; }
+/* v28: a slot steps through its pool with a stride that is coprime to the pool's length (about six-tenths of the way round),
+   so the same neighbours stop showing up together and the mix changes more from one session to the next while every move
+   still comes round. Small pools (under five) step one at a time, as before. */
+function stride(n){ if(n<5) return 1; const gcd=(a,b)=>b?gcd(b,a%b):a; const g=Math.round(n*0.618); for(const st of [g,g+1,g-1,g+2,g-2]) if(st>1&&st<n&&gcd(st,n)===1) return st; return 1; }
+/* Rotation: after each finished day, every rotating slot moves on through its pool (never doubling up within the day). */
 /* v24: new moves join the rotation of a program built before them. A slot keeps its own copy of its pool (and a save is never
    rewritten just for that), so when a slot rotates, its copy is matched to the pool it came from — the copy is the first part
    of that pool, new moves are only ever added at the end — and the current pool is the one picked from. A copy that matches
@@ -761,10 +789,10 @@ function rotateDay(wid){
   const used=new Set(W.items.filter(it=>!it.rot).flatMap(it=>it.t==="block"?(it.moves||[]).map(m=>m.ex):[it.ex]));
   W.items.forEach(it=>{ if(!it.rot) return;
     if(it.t==="block"){ it.moves=pickMoves(it,c,used); }
-    else if(it.pool&&it.pool.length){ const pool=livePool(it.pool); let k=c+(it.off||0), ex=pick(pool,k), tries=0; while(used.has(ex)&&tries<pool.length){ k++; ex=pick(pool,k); tries++; } it.ex=ex; used.add(ex); } });
+    else if(it.pool&&it.pool.length){ const pool=livePool(it.pool); let k=(c+(it.off||0))*stride(pool.length), ex=pick(pool,k), tries=0; while(used.has(ex)&&tries<pool.length){ k++; ex=pick(pool,k); tries++; } it.ex=ex; used.add(ex); } });
 }
 function pickMoves(b,c,used){
-  if(b.pools) return b.pools.map(pl=>{ pl=livePool(pl); let k=c+(b.off||0), ex=pick(pl,k), tries=0; while(used.has(ex)&&tries<pl.length){ k++; ex=pick(pl,k); tries++; } used.add(ex); return {ex}; });
+  if(b.pools) return b.pools.map(pl=>{ pl=livePool(pl); let k=(c+(b.off||0))*stride(pl.length), ex=pick(pl,k), tries=0; while(used.has(ex)&&tries<pl.length){ k++; ex=pick(pl,k); tries++; } used.add(ex); return {ex}; });
   if(!b.pool||!b.pool.length) return b.moves||[]; const pool=livePool(b.pool); const n=Math.min(b.n||4,pool.length), o=(c*2)%pool.length; const out=[]; for(let k=0;k<pool.length&&out.length<n;k++){ const ex=pick(pool,o+k); if(used.has(ex)) continue; used.add(ex); out.push({ex}); } return out.length?out:pool.slice(0,n).map(ex=>({ex})); }
 function rotateAll(){ Object.keys(S.program.workouts).forEach(rotateDay); }
 const daysOf=()=>(S.days===4?4:3);
@@ -794,6 +822,7 @@ function restorePlan(pid){ const pr=ownV(PRESETS,pid), st=pr?ownV(peopleGet(),pi
   if(S.lastSummary!=null&&!(plainObj(S.lastSummary)&&plainObj(S.lastSummary.rec))) S.lastSummary=null;
   if(S.pick!=null&&typeof S.pick!=="string") S.pick=null;
   if(!S.program.order.includes(S.next)) S.next=S.program.order[0];
+  if(patchProgram(S.program)) patchPlan(S);
   return true; }
 function goalDaysLeft(){ if(!S.goal||!S.goal.setAt) return 0; return Math.min(45,45-Math.floor((Date.now()-S.goal.setAt)/86400000)); }
 function checkinDue(){ return !S.goal||!S.goal.setAt||goalDaysLeft()<=0; }
@@ -870,6 +899,7 @@ function upgrade(S){
   if(S.goal && S.goal.mode==="muscle") S.goal.mode="weights";
   if(S.profile && S.program && (S.program.ver||0)<5){ regen(); S.flash="Three ways to train, one toggle: Weights, Functional (Katerina's style — supersets, carries, deep core) or HIIT. It's on Today and in the 45-day check-in. Weights and history carried over."; }
   if(S.absNext==null) S.absNext=true;
+  if(S.program && patchProgram(S.program)) patchPlan(S);
   if(![45,60,90].includes(S.settings.restC)) S.settings.restC=S.settings.restC>90?90:60;
   if(![30,45,60].includes(S.settings.restA)) S.settings.restA=S.settings.restA>60?60:45;
 }
@@ -1495,7 +1525,7 @@ function bumpDay(wid){ bumpProg(); if(S.plan&&S.plan.wid!==wid&&wid!==absId()) k
 function planFor(wid){
   const W=S.program.workouts[wid]; const rev=S.program.rev||0;
   if(!S.plan||S.plan.wid!==wid||S.plan.rev!==rev||!S.plan.items){
-    const items=cp(W.items), abs=wid!==absId()&&!W.noAbs&&absDue();
+    const cyc=(S.cyc&&S.cyc[wid])||0; const items=cp(W.items).filter(it=>!it.alt||cyc%it.alt===0), abs=wid!==absId()&&!W.noAbs&&absDue();
     if(abs) cp(S.program.workouts[absId()].items).forEach(it=>{ it.abs=true; items.push(it); });
     items.forEach(applyRange);
     S.plan={wid,rev,items,abs};
@@ -2277,7 +2307,7 @@ function viewSettings(){
       if(it.t==="block"){ const b=it; return `<div class="prog-slot blk"><div><div class="n">${esc(b.name)} <span class="tag">${b.mode==="timer"?`${b.work}/${b.rest}s × ${b.rounds}`:`${b.rounds} rounds`}</span></div><div class="t">${b.moves.map(m=>esc(getEx(m.ex).n)).join(" · ")}</div></div>${arrows}<button data-a="prog-rm" data-wid="${esc(wid)}" data-i="${i}">Remove</button></div>
         ${b.moves.map((m,mi)=>{ const L=getEx(m.ex); return `<div class="prog-slot sub"><div><div class="n">${esc(L.n)}</div><div class="t">${esc(L.m)}${NOLOAD(L.t)?"":` · ${fmtW(moveW(m.ex,m))} lb`}${b.mode==="reps"?` · ${moveR(m.ex,m)} ${L.u==="s"?"sec":"reps"}`:""}</div></div><button data-a="prog-swap" data-wid="${esc(wid)}" data-i="${i}" data-mi="${mi}">Swap</button><button data-a="prog-rm" data-wid="${esc(wid)}" data-i="${i}" data-mi="${mi}">Remove</button></div>`; }).join("")}
         <div class="prog-slot sub"><button data-a="prog-add" data-wid="${esc(wid)}" data-i="${i}" style="color:var(--acc)">+ Add move to ${esc(b.name)}</button><span></span><span></span></div>`; }
-      const L=getEx(it.ex); return `<div class="prog-slot"><div><div class="n">${esc(L.n)}</div><div class="t">${esc(it.sets)} × ${esc(it.lo)}–${esc(it.hi)} · ${esc(L.m)}</div></div>${arrows}<button data-a="prog-sets" data-wid="${esc(wid)}" data-i="${i}">Sets</button><button data-a="prog-swap" data-wid="${esc(wid)}" data-i="${i}">Swap</button><button data-a="prog-rm" data-wid="${esc(wid)}" data-i="${i}">Remove</button></div>`; }).join("")}</div>
+      const L=getEx(it.ex); return `<div class="prog-slot"><div><div class="n">${esc(L.n)}${it.alt?` <span class="tag">every other session</span>`:""}</div><div class="t">${esc(it.sets)} × ${esc(it.lo)}–${esc(it.hi)} · ${esc(L.m)}</div></div>${arrows}<button data-a="prog-sets" data-wid="${esc(wid)}" data-i="${i}">Sets</button><button data-a="prog-swap" data-wid="${esc(wid)}" data-i="${i}">Swap</button><button data-a="prog-rm" data-wid="${esc(wid)}" data-i="${i}">Remove</button></div>`; }).join("")}</div>
       <div class="bd entry"><button class="btn block ghost" data-a="prog-add" data-wid="${esc(wid)}">+ Exercise</button><button class="btn block ghost" data-a="prog-add-block" data-wid="${esc(wid)}">+ HIIT block</button></div></div>`; });
   h+=`<h2 class="sec">Your data</h2><div class="card">
     <div class="srow"><div><div class="l">Back up</div><div class="s">Saves a copy of everything. Keep it in Files or Notes.</div></div><button class="btn" data-a="export">Save</button></div>
@@ -2621,7 +2651,7 @@ if(S.active) wakeOn();
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=27, BOOT_AT=Date.now();
+const APP_VERSION=28, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
   /* K5: Macros setup or You has typed numbers that aren't saved yet */
