@@ -14,8 +14,8 @@
 <title>Chalk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" crossorigin media="print" onload="this.media='all'">
-<link rel="stylesheet" href="m.css?v=28">
-<link rel="stylesheet" href="m-trends.css?v=28">
+<link rel="stylesheet" href="m.css?v=29">
+<link rel="stylesheet" href="m-trends.css?v=29">
 <style>
 :root{
   --bg:#F3F1EC; --sur:#FFFFFF; --sur2:#ECE9E1; --ink:#1A1D21; --mut:#5C6169; --line:#DBD7CD;
@@ -385,12 +385,12 @@ body.upd-on #app.wrap{padding-bottom:calc(var(--upd-h,46px) + 36px)}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <button class="upd" id="upd" data-a="upd-reload" hidden>New version ready. Tap to update.</button>
 
-<script src="m-core.js?v=28"></script>
-<script src="m-data.js?v=28"></script>
-<script src="m-food.js?v=28"></script>
-<script src="m-ui.js?v=28"></script>
-<script src="m-trends.js?v=28"></script>
-<script src="m-sync.js?v=28"></script>
+<script src="m-core.js?v=29"></script>
+<script src="m-data.js?v=29"></script>
+<script src="m-food.js?v=29"></script>
+<script src="m-ui.js?v=29"></script>
+<script src="m-trends.js?v=29"></script>
+<script src="m-sync.js?v=29"></script>
 <script>
 /* ================= EXERCISE LIBRARY =================
    t: bb = barbell (total), db = dumbbell (each hand), mc = machine stack, cb = cable stack, bw = bodyweight (+added), mb = med ball, bal = balance
@@ -403,7 +403,7 @@ const LIB = {
   leg_press:{n:"Leg Press",m:"Quads",t:"mc",inc:5,rest:120,guess:180,k:1.5,s:["Glutes","Hamstrings"],p:"legpress"},
   smith_squat:{n:"Smith Machine Squat",m:"Quads",t:"bb",inc:5,rest:120,guess:95,k:0.9,s:["Glutes","Hamstrings"],p:"squat"},
   goblet_squat:{n:"Goblet Squat",m:"Quads",t:"db",inc:5,rest:90,guess:40,k:0.3,s:["Glutes","Core"],p:"goblet"},
-  split_squat:{n:"Bulgarian Split Squat",m:"Quads",t:"db",inc:5,rest:90,guess:25,k:0.2,s:["Glutes","Hamstrings"],p:"lunge"},
+  split_squat:{n:"Bulgarian Split Squat",m:"Quads",t:"db",inc:5,rest:90,guess:25,k:0.2,s:["Glutes","Hamstrings"],p:"bulgarian"},
   leg_ext:{n:"Leg Extension",m:"Quads",t:"mc",inc:5,rest:75,guess:70,k:0.5,s:[],p:"legext"},
   deadlift:{n:"Deadlift",m:"Hamstrings",t:"bb",inc:5,rest:180,guess:185,k:1.0,s:["Glutes","Back","Core"],p:"dl"},
   trap_dl:{n:"Trap Bar Deadlift",m:"Hamstrings",t:"bb",inc:5,rest:150,guess:185,k:1.0,s:["Quads","Glutes","Back"],p:"dl"},
@@ -483,7 +483,7 @@ const LIB = {
   db_floor_press:{n:"Dumbbell Floor Press",m:"Chest",t:"db",inc:5,rest:60,guess:25,s:["Triceps"],r:12,p:"floorpress"},
   db_pushpress:{n:"Dumbbell Push Press",m:"Shoulders",t:"db",inc:5,rest:60,guess:20,s:["Quads","Triceps"],r:10,p:"thruster"},
   db_lunge_walk:{n:"Walking Lunge",m:"Quads",t:"db",inc:5,rest:60,guess:20,s:["Glutes","Hamstrings"],r:10,ea:true,p:"lunge"},
-  step_up:{n:"Step-Up",m:"Quads",t:"db",inc:5,rest:60,guess:15,s:["Glutes","Hamstrings"],r:10,ea:true,p:"lunge"},
+  step_up:{n:"Step-Up",m:"Quads",t:"db",inc:5,rest:60,guess:15,s:["Glutes","Hamstrings"],r:10,ea:true,p:"stepup"},
   curtsy:{n:"Curtsy Lunge",m:"Quads",t:"db",inc:5,rest:60,guess:15,s:["Glutes","Hamstrings"],r:10,ea:true,p:"skater"},
   lat_lunge:{n:"Lateral Lunge",m:"Quads",t:"db",inc:5,rest:60,guess:15,s:["Glutes","Hamstrings"],r:10,ea:true,p:"skater"},
   mb_twist:{n:"Med-Ball Russian Twist",m:"Core",t:"mb",inc:2,rest:45,guess:10,s:[],r:20,p:"twist"},
@@ -523,7 +523,7 @@ const LIB = {
   bw_squat:{n:"Air Squat",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes"],r:20,p:"bwsquat"},
   bw_lunge:{n:"Reverse Lunge",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes","Hamstrings"],r:12,ea:true,p:"bwrevlunge"},
   bw_lunge_walk:{n:"Walking Lunge (bodyweight)",m:"Quads",t:"bw",inc:5,rest:45,guess:0,k:0,s:["Glutes","Hamstrings"],r:12,ea:true,p:"bwlunge"},
-  bw_split_squat:{n:"Split Squat (bodyweight)",m:"Quads",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Glutes","Hamstrings"],r:12,ea:true,p:"bwlunge"},
+  bw_split_squat:{n:"Split Squat (bodyweight)",m:"Quads",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Glutes","Hamstrings"],r:12,ea:true,p:"splitsq"},
   chinup:{n:"Chin-Up",m:"Back",t:"bw",inc:5,rest:120,guess:0,k:0,s:["Biceps"],p:"pullup"},
   diamond_pushup:{n:"Diamond Push-Up",m:"Triceps",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Chest"],r:12,p:"pushup"},
   pike_pushup:{n:"Pike Push-Up",m:"Shoulders",t:"bw",inc:5,rest:60,guess:0,k:0,s:["Triceps"],r:10,p:"pushup"},
@@ -1095,6 +1095,12 @@ const PAT={
   hipthrust:PP({t:-70,th:100,s:-40,u:-20,f:-10,hx:130,hy:224},{t:-95,th:80,s:-40,u:-20,f:-10,hx:130,hy:200},{lie:1,bench:"short",grip:"hip"}),
   lunge:PP({},{t:5,th:70,s:-25,th2:-40,s2:-50},{grip:"db"}),
   bwlunge:PP({},{t:5,th:70,s:-25,th2:-40,s2:-50}),
+  /* v29: the three "lunge-shaped" moves that are not lunges each get their own figure. Bulgarian split squat: the rear foot
+     rests on a bench behind, both feet stay put and the hips drop straight down. Step-up: one foot on the box in front, drive
+     up to stand on it with the other knee raised. Split squat: a fixed split stance, straight down and up, no step. */
+  bulgarian:PP({t:6,th:22,s:-15,th2:-18,s2:-89},{t:14,th:62,s:-29,th2:-12,s2:-127},{grip:"db",bench:"rear"}),
+  stepup:PP({t:16,th:63,s:7,th2:-8,s2:-8,rise:34},{t:3,th:0,s:0,th2:87,s2:-19,rise:34},{grip:"db",box:1,ax:188}),
+  splitsq:PP({t:4,th:39,s:-20,th2:-22,s2:-58,u:60,f:60},{t:8,th:68,s:-26,th2:-2,s2:-92,u:70,f:70}),
   /* v26: the reverse lunge steps the near leg back (the far leg bends in front); the barbell lunge steps forward under a bar on the back */
   revlunge:PP({},{t:5,th:-40,s:-50,th2:70,s2:-25},{grip:"db"}),
   bblunge:PP({t:8,u:-40,f:-170},{t:10,th:70,s:-25,th2:-40,s2:-50,u:-40,f:-170},{grip:"back"}),
@@ -1279,7 +1285,10 @@ function rigFrame(pat,p,hiSeg,view){
   const legSVG=(L,farc,k1,k2)=>{ const A=P(L[0]),B=P(L[1]),C=P(L[2]); const f=farc?" b2":""; return capsule(A,B,RW.thigh[0],RW.thigh[1],f+hi(k1))+capsule(B,C,RW.shin[0],RW.shin[1],f+hi(k2))+foot(L,farc,k2); };
   /* foot: a wedge from heel to toe with width across z. Flat on the floor when the ankle is near it, else it hangs square to the shin. */
   const foot=(L,farc,k)=>{ const an=L[2], kn=L[1]; const onFloor=pat.lie||pat.anchor||pat.box?false:(J.hy-an[1])>=RG.FLOOR-10; let fd;
-    if(onFloor||(!pat.lie&&!pat.anchor)) fd=[1,0,0]; else { const sv=[an[0]-kn[0],an[1]-kn[1]], sl=Math.hypot(sv[0],sv[1])||1; fd=[-sv[1]/sl,sv[0]/sl,0]; if(fd[0]<0) fd=[-fd[0],-fd[1],0]; }
+    /* v29: lying or hanging, the toes point to the front of the shin — the shin direction turned a quarter turn the way the knee
+       never bends — so a leg raised toward the ceiling has its toes toward the head, not the floor. (The old rule always pointed
+       the toes forward on screen, which put them on the wrong side whenever the shin pointed up.) */
+    if(onFloor||(!pat.lie&&!pat.anchor)) fd=[1,0,0]; else { const sv=[an[0]-kn[0],an[1]-kn[1]], sl=Math.hypot(sv[0],sv[1])||1; fd=[-sv[1]/sl,sv[0]/sl,0]; }
     const dn=[fd[1],-fd[0],0];
     const toeDown=pat.toes&&rise>0?rise:0;   /* calf raise: the heel comes up with the ankle, the toes stay on the floor */
     const q=[add(add(an,fd,-7),dn,1.5),add(add(add(an,fd,15),dn,2),up,-toeDown*0.85),add(add(add(an,fd,18),dn,6.5),up,-toeDown),add(add(an,fd,-8),dn,6.5)];
@@ -1300,6 +1309,7 @@ function rigFrame(pat,p,hiSeg,view){
   if(pat.bench==="incline"){ s+=thick(Pw(hxw-4,hyw+10,0),Pw(HDw[0]-6,HDw[1]+12,0))+box(hxw-20,hyw+8,44,9,-16,16,3)+box(hxw-2,hyw+17,7,RG.FLOOR-hyw-17,-3.5,3.5); }
   if(pat.bench==="decline"){ s+=thick(Pw(hxw+4,hyw+9,0),Pw(HDw[0]+4,HDw[1]+9,0))+box(hxw-20,hyw+8,44,9,-16,16,3)+box(hxw-2,hyw+17,7,RG.FLOOR-hyw-17,-3.5,3.5)+box(HDw[0]-4,HDw[1]+14,7,RG.FLOOR-HDw[1]-14,-3.5,3.5); }
   if(pat.bench==="short"){ s+=box(SHw[0]-34,SHw[1]+8,60,9,-16,16,3)+box(SHw[0]-8,SHw[1]+17,7,RG.FLOOR-SHw[1]-17,-3.5,3.5); }
+  if(pat.bench==="rear"){ s+=box(32,RG.FLOOR-50,56,9,-16,16,3)+box(38,RG.FLOOR-41,7,45,-3.5,3.5)+box(75,RG.FLOOR-41,7,45,-3.5,3.5); }
   /* a 45° back-extension bench: a pad under the hips and thighs, a post, foot rollers come from pat.pad */
   if(pat.hyper){ const a=Pw(hxw+8,hyw+6,0), b=Pw(hxw-26,hyw+44,0); s+=box(hxw-24,hyw+40,14,RG.FLOOR-hyw-40,-7,7)+thick(a,b)+thick(Pw(hxw+8,hyw+6,-14),Pw(hxw-26,hyw+44,-14))+thick(Pw(hxw+8,hyw+6,14),Pw(hxw-26,hyw+44,14)); }
   /* chest-supported row: an incline pad under the chest (along the torso, on its front), on a post */
@@ -1390,6 +1400,7 @@ function rigBox(pat){
       if(pat.bench==="incline"||pat.bench==="decline"||pat.seat){ take(J.Pw(J.hx-24,J.hy+8,-20),2); take(J.Pw(J.hx+24,J.hy+8,20),2); }
       if(pat.bench==="decline"){ const HDw=[J.hx+J.head[0],J.hy-J.head[1]]; take(J.Pw(HDw[0]+4,HDw[1]+14,-4),4); take(J.Pw(HDw[0]+4,HDw[1]+14,4),4); }
       if(pat.bench==="short"){ const SHw=[J.hx+J.shC[0],J.hy-J.shC[1]]; take(J.Pw(SHw[0]-34,SHw[1]+8,-16),2); take(J.Pw(SHw[0]+26,SHw[1]+8,16),2); }
+      if(pat.bench==="rear"){ take(J.Pw(32,RG.FLOOR-50,-16),2); take(J.Pw(88,RG.FLOOR+4,16),2); }
       if(pat.hyper){ take(J.Pw(J.hx-26,J.hy+44,-14),6); take(J.Pw(J.hx+8,J.hy+6,14),6); }
       if(pat.brace){ const h=J.arm2[2]; take(J.Pw(J.hx+h[0]-26,J.hy-h[1]+4,-30),3); take(J.Pw(J.hx+h[0]+26,J.hy-h[1]+12,-14),3); }
       if(pat.kneepad){ const kn=J.leg[1]; take(J.Pw(J.hx+kn[0]-30,J.hy-kn[1]+8,-18),3); take(J.Pw(J.hx+kn[0]+16,J.hy-kn[1]+18,18),3); }
@@ -2651,7 +2662,7 @@ if(S.active) wakeOn();
    sw.js keeps this version on the phone. When a new one has downloaded it says so: the app reloads right away at
    launch, or when it goes to the background at a quiet moment (no workout, no sheet, not typing); otherwise a button
    says "New version ready. Tap to update." APP_VERSION matches VERSION in sw.js and the ?v= on the files above. */
-const APP_VERSION=28, BOOT_AT=Date.now();
+const APP_VERSION=29, BOOT_AT=Date.now();
 var updReady=false, updCheckAt=0;   /* var: render() at launch (above) already asks placeUpd() */
 function quietNow(){ if(S.active||T||CT||sheetOn()) return false; const a=document.activeElement; if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false; try{ if(window.M&&M.ui&&M.ui.pendingRender&&M.ui.pendingRender()) return false; }catch(e){}
   /* K5: Macros setup or You has typed numbers that aren't saved yet */

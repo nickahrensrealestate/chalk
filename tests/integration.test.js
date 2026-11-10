@@ -1996,6 +1996,72 @@ function runV28Pass() {
   t("sw.js: version 28 everywhere", () => { assert.ok(APPV >= 28 && SWV >= 28, APPV + " / " + SWV); });
 }
 
+/* ------------------------------------------------- v29: Bulgarian split squat, step-up and split squat get their own figures; lying toes point the right way */
+function runV29Pass() {
+  console.log("v29: own figures for the Bulgarian split squat / step-up / split squat, toes fixed on lying and hanging moves");
+  const { dom, w, errors } = boot({ real: true, store: {} });
+  const pat = id => w.eval("getEx(" + JSON.stringify(id) + ").p");
+  const P = k => JSON.parse(w.eval("JSON.stringify(PAT[" + JSON.stringify(k) + "])"));
+  /* figure-space joints of both legs at time t: [[hip,knee,ankle] near, [...] far] */
+  const legs = (k, t) => JSON.parse(w.eval("(()=>{const p=poseAt(PAT[" + JSON.stringify(k) + "]," + t + ");const J=rigJoints(PAT[" + JSON.stringify(k) + "],p,'side');return JSON.stringify([J.leg,J.leg2,J.hx,J.hy]);})()"));
+  const fr = (k, t, v) => w.eval("animFrame(PAT[" + JSON.stringify(k) + "]," + t + ",'thigh'," + JSON.stringify(v || "side") + ")");
+  const drawsOk = (k, v) => [0, 0.5, 1].forEach(t => { const s = fr(k, t, v); assert.ok(/^<svg class="rig/.test(s) && !/NaN/.test(s) && (P(k).floor === false || /class="shd"/.test(s)), k + " " + v + " t=" + t + " draws"); });
+  try {
+    t("the three moves no longer share the lunge figure: each has its own, and the lunges keep theirs", () => {
+      assert.strictEqual(pat("split_squat"), "bulgarian"); assert.strictEqual(pat("step_up"), "stepup"); assert.strictEqual(pat("bw_split_squat"), "splitsq");
+      assert.strictEqual(pat("db_lunge"), "lunge"); assert.strictEqual(pat("db_lunge_walk"), "lunge"); assert.strictEqual(pat("bw_lunge_walk"), "bwlunge");
+      const ps = ["bulgarian", "stepup", "splitsq", "lunge"].map(k => JSON.stringify([P(k).a, P(k).b]));
+      assert.strictEqual(new Set(ps).size, 4, "four different figures");
+      ["bulgarian", "stepup", "splitsq"].forEach(k => { drawsOk(k, "side"); drawsOk(k, "front"); });
+    });
+    t("Bulgarian split squat: a bench behind, the rear foot stays on it (50 above the floor) while the hips drop, the front foot never moves, dumbbells in hand", () => {
+      const B = P("bulgarian"); assert.strictEqual(B.bench, "rear"); assert.strictEqual(B.grip, "db");
+      const feet = [0, 0.5, 1].map(t => { const [L, L2, hx, hy] = legs("bulgarian", t); return { near: [hx + L[2][0], hy - L[2][1]], far: [hx + L2[2][0], hy - L2[2][1]], hip: hy, knee2: hy - L2[1][1] }; });
+      feet.forEach(f => { assert.ok(Math.abs(f.near[0] - 140) < 0.5 && Math.abs(f.near[1] - 262) < 0.5, "front foot on the floor at the mark: " + f.near); });
+      feet.forEach(f => { assert.ok(Math.abs(f.far[0] - 60) < 6 && Math.abs(f.far[1] - 212) < 6, "rear foot on the bench top (a few px of drift mid-rep is the arc blend): " + f.far); });
+      assert.ok(feet[0].hip < feet[1].hip && feet[1].hip < feet[2].hip && feet[2].hip - feet[0].hip > 25, "hips drop: " + feet.map(f => f.hip.toFixed(0)));
+      assert.ok(feet[2].knee2 > feet[0].knee2 + 20 && feet[2].knee2 < 262, "the rear knee comes down toward the floor but not through it: " + feet.map(f => f.knee2.toFixed(0)));
+      assert.ok(/class="fur"/.test(fr("bulgarian", 0)), "the bench is drawn");
+      const rings = s => (s.match(/class="eq"/g) || []).length; assert.strictEqual(rings(fr("bulgarian", 1)), 4, "two dumbbells");
+      const VB = JSON.parse(w.eval("JSON.stringify(rigBox(PAT.bulgarian))")); assert.ok(VB.side.x < 32 - 8 && VB.side.x + VB.side.s > 140 + 30, "the frame holds the bench and the figure: " + JSON.stringify(VB.side));
+    });
+    t("step-up: one foot on the box in front, the other on the floor behind; it ends standing tall on the box with the free knee driven up", () => {
+      const S = P("stepup"); assert.strictEqual(S.box, 1); assert.strictEqual(S.grip, "db"); assert.strictEqual(S.a.rise, 34); assert.strictEqual(S.b.rise, 34);
+      const a = legs("stepup", 0), b = legs("stepup", 1);
+      const near = L => [L[2] + L[0][2][0], L[3] - L[0][2][1]], far = L => [L[2] + L[1][2][0], L[3] - L[1][2][1]];
+      [a, b].forEach(L => { const n = near(L); assert.ok(n[0] > 156 + 10 && n[0] < 220 - 10 && Math.abs(n[1] - (262 - 34)) < 0.5, "near foot on top of the box: " + n); });
+      assert.ok(Math.abs(far(a)[1] - 262) < 5 && far(a)[0] < 156, "start: the other foot on the floor behind the box: " + far(a));
+      assert.ok(a[3] - b[3] > 28, "the hips rise onto the box (screen y falls): " + a[3].toFixed(0) + " -> " + b[3].toFixed(0));
+      assert.ok(Math.abs(b[0][1][0]) < 2 && Math.abs(b[0][2][0]) < 2, "finish: the standing leg is straight under the hip");
+      assert.ok(b[1][1][1] > -12 && b[1][2][1] > b[0][2][1] + 40, "finish: the free knee is up near hip height, its foot well above the box");
+      assert.ok(/class="fur"/.test(fr("stepup", 0)), "the box is drawn");
+    });
+    t("split squat (bodyweight): a fixed split stance — both feet keep their spot while the hips go down and up, nothing in the hands", () => {
+      const S = P("splitsq"); assert.ok(!S.grip && !S.box && !S.bench);
+      const feet = [0, 0.5, 1].map(t => { const [L, L2, hx, hy] = legs("splitsq", t); return { near: hx + L[2][0], far: hx + L2[2][0], farY: hy - L2[2][1], hip: hy }; });
+      feet.forEach(f => { assert.ok(Math.abs(f.near - 140) < 0.5 && Math.abs(f.far - feet[0].far) < 7 && f.far < 140 - 60, "feet planted, rear foot well behind: " + JSON.stringify(feet)); assert.ok(f.farY > 262 - 20 && f.farY <= 262 + 1, "rear foot on its toes near the floor: " + f.farY.toFixed(1)); });
+      assert.ok(feet[2].hip - feet[0].hip > 20, "hips drop: " + feet.map(f => f.hip.toFixed(0)));
+      const rings = s => (s.match(/class="eq"/g) || []).length; assert.strictEqual(rings(fr("splitsq", 1)), 0, "no equipment");
+    });
+    t("lying leg raise: the toes point to the front of the shin — up at the start, toward the head at the top — never down into the floor; same rule on every lying and hanging figure", () => {
+      /* the foot polygon is drawn from the ankle along fd; read it back by comparing the foot's far corner with the ankle */
+      const toe = (k, t, which) => JSON.parse(w.eval("(()=>{const p=poseAt(PAT[" + JSON.stringify(k) + "]," + t + ");const J=rigJoints(PAT[" + JSON.stringify(k) + "],p,'side');const L=J." + (which === "far" ? "leg2" : "leg") + ";const sv=[L[2][0]-L[1][0],L[2][1]-L[1][1]],sl=Math.hypot(sv[0],sv[1]);return JSON.stringify([-sv[1]/sl,sv[0]/sl]);})()"));
+      const lr0 = toe("legraise", 0), lr1 = toe("legraise", 1);
+      assert.ok(lr0[1] > 0.9, "legs flat: toes up, " + lr0); assert.ok(lr1[0] < -0.9, "legs vertical: toes toward the head, " + lr1);
+      const rc = toe("revcrunch", 1); assert.ok(rc[1] > 0.9, "reverse crunch top: toes up, " + rc);
+      const lp = toe("legpress", 1); assert.ok(lp[1] > 0.5 && lp[0] < 0, "leg press: toes up the platform toward the head, " + lp);
+      const mc = toe("mclimber", 1, "far"); assert.ok(mc[1] < -0.9, "mountain climber tucked leg: toes down on the floor, " + mc);
+      /* and the drawn foot follows: on the leg raise at the top the toe corner sits toward the head (smaller screen x) */
+      const svg = fr("legraise", 1); const feet = svg.match(/<polygon class="lm ft" points="([^"]+)"/g) || []; assert.strictEqual(feet.length, 1, "the near foot drawn once");
+      const ank = JSON.parse(w.eval("(()=>{const p=poseAt(PAT.legraise,1);const J=rigJoints(PAT.legraise,p,'side');return JSON.stringify(J.P(J.leg[2]));})()"));
+      const xs = feet[0].match(/[-\d.]+(?=,)/g).map(Number); assert.ok(Math.min.apply(null, xs) < ank[0] - 10 && Math.max.apply(null, xs) < ank[0] + 12, "toes drawn toward the head: foot x " + Math.min.apply(null, xs).toFixed(0) + ".." + Math.max.apply(null, xs).toFixed(0) + ", ankle " + ank[0].toFixed(0));
+      ["legraise", "revcrunch", "deadbug", "hollow", "vup", "legpress", "lpcalf", "mclimber", "crunchfloor", "situp", "floorpress", "pullup", "kneeraise", "backext"].forEach(k => drawsOk(k, "side"));
+    });
+    t("sw.js: version 29 everywhere", () => { assert.ok(APPV >= 29 && SWV >= 29, APPV + " / " + SWV); });
+    t("no errors during the v29 pass", () => assert.deepStrictEqual(errors.map(String), [], errors.map(String).join(" | ")));
+  } finally { dom.window.close(); }
+}
+
 runPass("pass 1: stub M.ui (integration wiring)", false);
 const realFiles = ["m-ui.js", "m-trends.js"].filter(exists);
 if (realFiles.length) runPass("pass 2: real " + realFiles.join(" + ") + (realFiles.length < 2 ? " (stub fills the rest)" : ""), true);
@@ -2010,6 +2076,7 @@ runV24Pass();
 runV27Pass();
 runV28Pass();
 runV26Pass();
+runV29Pass();
 
 (async () => {
   await runSwPass();
